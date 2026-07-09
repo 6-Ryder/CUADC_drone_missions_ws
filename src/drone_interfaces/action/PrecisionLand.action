@@ -1,0 +1,14 @@
+# 精准降落 Action
+# Goal: 启动精准降落
+# Result: 降落完成
+# Feedback: 实时偏移量
+
+float64 target_x    # 降落目标 World x (H点=10.0)
+float64 target_y    # 降落目标 World y (H点=4.0)
+---
+bool landed         # 是否成功着陆
+float64 final_error # 最终水平误差 (m)
+---
+float64 offset_x    # 当前水平偏移 x (m)
+float64 offset_y    # 当前水平偏移 y (m)
+float64 altitude    # 当前高度 (m)

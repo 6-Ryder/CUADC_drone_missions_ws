@@ -1,0 +1,78 @@
+# 无人机视觉检测参数 — YOLO + OpenCV 混合方案
+/vision_pipeline:
+  ros__parameters:
+    # ============================================================
+    # 相机内参 (需标定 — 当前为 SITL 仿真默认值)
+    # ============================================================
+    camera_width: 1280
+    camera_height: 960
+    camera_fps: 30.0
+    fx: 539.9                     # hfov=1.74rad: 640/tan(0.87)
+    fy: 539.9                     # 方形像素
+    cx: 640.0                     # 1280/2
+    cy: 480.0                     # 960/2
+    sim_mode: true                # true=SITL ros_gz_bridge, false=GStreamer
+
+    # ============================================================
+    # YOLO 模型参数
+    # ============================================================
+    model_path: ""                # ONNX 模型路径 (空=使用默认)
+    drop_marker_model_path: ""    # 投放区蓝色 1m 标识模型路径 (可选)
+    model_width: 640              # 模型输入宽
+    model_height: 640             # 模型输入高
+    conf_threshold: 0.35          # YOLO 置信度阈值 (匹配 cv_trainer 推理脚本)
+    nms_iou_threshold: 0.45      # NMS IoU 阈值
+    device: "cuda"                # cuda / cpu / tensorrt
+    # 类别映射: ID → 名称
+    class_names:
+      - "cylinder"                # 0: 圆筒
+      - "flammable"               # 1: 易燃标识 (橙色)
+      - "health_hazard"           # 2: 健康危害标识 (蓝色)
+      - "danger"                  # 3: 危险标识 (红色)
+      - "landing_H"               # 4: H 降落标识
+      - "empty_cylinder"          # 5: 空圆筒 (无危险品)
+
+    # ============================================================
+    # 圆筒检测精确后处理 (OpenCV)
+    # ============================================================
+    cylinder_refine_enable: true        # 启用 YOLO 框内 OpenCV 精修
+    cylinder_edge_blur: 3               # 边缘检测前高斯模糊核大小 (降噪)
+    cylinder_canny_low: 30              # Canny 低阈值 (降低以检测更多边缘)
+    cylinder_canny_high: 120            # Canny 高阈值
+    cylinder_min_radius_ratio: 0.15     # 椭圆最小半径 / bbox 半宽 (放宽)
+    cylinder_max_radius_ratio: 1.5      # 椭圆最大半径 / bbox 半宽
+    cylinder_white_brightness: 100      # 白色验证: V 通道最低值 (放宽)
+    cylinder_tracking_max_age: 10       # 多帧追踪: 最大消失帧数
+    cylinder_tracking_iou_thresh: 0.3   # 多帧追踪: IoU 匹配阈值
+
+    # ============================================================
+    # 危险品分类参数
+    # ============================================================
+    hazard_enable_color_fallback: true  # YOLO 低置信度时回退颜色验证
+    hazard_color_confirm_ratio: 0.3     # 颜色验证: 目标像素占比阈值
+
+    # ============================================================
+    # H 降落标识精确后处理 (OpenCV)
+    # ============================================================
+    landing_refine_enable: true         # 启用 YOLO 框内 OpenCV 精修
+    landing_adaptive_thresh_block: 11   # 自适应阈值块大小
+    landing_circle_min_area: 300        # 最小圆形面积 (px²)
+    landing_H_orientation_enable: true  # 估计 H 的偏航方向
+
+    # ============================================================
+    # 视觉伺服 (IBVS 精准降落) 参数
+    # ============================================================
+    servo_kp: 0.5                       # 比例增益 (m/s per m error)
+    servo_ki: 0.02                      # 积分增益
+    servo_kd: 0.1                       # 微分增益
+    servo_max_horizontal_vel: 1.0       # 最大水平修正速度 (m/s)
+    servo_descent_speed: 0.3            # 下降速度 (m/s)
+    servo_integral_max: 0.5             # 积分项限幅
+    servo_target_deadzone: 0.03         # 目标死区 (m), 进入后停止水平修正
+
+    # ============================================================
+    # 覆盖监控参数
+    # ============================================================
+    coverage_grid_resolution: 0.5       # 网格分辨率 (m)
+    coverage_fov_half_angle: 35.0       # 相机 FOV 半角 (度)
+    coverage_complete_ratio: 0.95       # 全覆盖判定阈值

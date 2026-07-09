@@ -1,0 +1,6 @@
+# 启用/禁用视觉检测模块
+uint8 mode      # 0=cylinder, 1=hazard, 2=landing, 3=all
+bool enable     # true=启用, false=禁用
+---
+bool success
+string message

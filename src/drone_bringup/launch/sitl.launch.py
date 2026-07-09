@@ -1,0 +1,138 @@
+"""
+SITL 全系统启动 — 一键启动仿真环境中所有节点
+
+启动节点:
+  1. px4_bridge       — PX4 DDS 通信桥接 (订阅/发布 /fmu/* 话题)
+  2. vision_pipeline  — 统一视觉管线 (YOLO + OpenCV + 伺服)
+  3. servo_controller — 舵机投放控制 (SITL Mock)
+  4. mission_fsm      — 任务状态机 (FSM 编排)
+
+使用方法:
+  ros2 launch drone_bringup sitl.launch.py
+  ros2 launch drone_bringup sitl.launch.py model_path:=/path/to/model.onnx
+
+依赖:
+  - MicroXRCEAgent 已在运行 (udp4 -p 8888)
+  - PX4 SITL + Gazebo 已在运行
+  - ros_gz_image bridge 已在运行
+"""
+
+import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    """生成 SITL 全系统启动配置."""
+
+    # ---- 包路径 ----
+    pkg_control = get_package_share_directory("px4_control")
+    pkg_vision = get_package_share_directory("drone_vision")
+    pkg_servo = get_package_share_directory("drone_servo")
+    pkg_mission = get_package_share_directory("drone_mission")
+
+    # ---- 参数文件路径 ----
+    px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
+    vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
+    servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
+    mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
+
+    # ---- 启动参数 ----
+    model_path_arg = DeclareLaunchArgument(
+        "model_path",
+        default_value="",
+        description="YOLO ONNX 模型路径 (空=使用默认/回退 OpenCV)",
+    )
+    drop_marker_model_path_arg = DeclareLaunchArgument(
+        "drop_marker_model_path",
+        default_value="",
+        description="投放区蓝色标识 YOLO 模型路径 (可选)",
+    )
+
+    # ---- 节点 ----
+
+    # 1. PX4 通信桥接 — 必须先启动
+    px4_bridge_node = Node(
+        package="px4_control",
+        executable="px4_bridge",
+        name="px4_bridge",
+        output="screen",
+        emulate_tty=True,
+        parameters=[px4_param_file],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
+    # 2. 统一视觉管线
+    vision_node = Node(
+        package="drone_vision",
+        executable="vision_pipeline",
+        name="vision_pipeline",
+        output="screen",
+        parameters=[
+            vision_param_file,
+            {
+                "model_path": LaunchConfiguration("model_path"),
+                "drop_marker_model_path": LaunchConfiguration("drop_marker_model_path"),
+            },
+        ],
+        arguments=[
+            "--ros-args",
+            "--log-level", "info",
+        ],
+    )
+
+    # 3. 舵机投放控制器 (SITL Mock)
+    servo_node = Node(
+        package="drone_servo",
+        executable="servo_controller",
+        name="servo_controller",
+        output="screen",
+        parameters=[servo_param_file],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
+    # 4. 任务状态机 — 最后启动 (依赖以上所有)
+    mission_node = Node(
+        package="drone_mission",
+        executable="mission_fsm",
+        name="mission_state_machine",
+        output="screen",
+        emulate_tty=True,
+        parameters=[mission_param_file],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
+    # ---- 启动顺序 (延迟确保依赖就绪) ----
+    # PX4 bridge 立即启动
+    # Vision + Servo 延迟 1s
+    # Mission FSM 延迟 3s
+    vision_delayed = TimerAction(
+        period=1.0,
+        actions=[vision_node],
+    )
+    servo_delayed = TimerAction(
+        period=1.0,
+        actions=[servo_node],
+    )
+    mission_delayed = TimerAction(
+        period=3.0,
+        actions=[mission_node],
+    )
+
+    return LaunchDescription([
+        model_path_arg,
+        drop_marker_model_path_arg,
+        LogInfo(msg="=== 无人机 SITL 全系统启动 ==="),
+        LogInfo(msg="  1. PX4 Bridge (DDS → ROS2)"),
+        LogInfo(msg="  2. Vision Pipeline (YOLO + OpenCV)"),
+        LogInfo(msg="  3. Servo Controller (SITL Mock)"),
+        LogInfo(msg="  4. Mission FSM (任务状态机)"),
+        px4_bridge_node,
+        vision_delayed,
+        servo_delayed,
+        mission_delayed,
+    ])

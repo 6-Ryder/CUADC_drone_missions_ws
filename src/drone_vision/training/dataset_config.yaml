@@ -1,0 +1,52 @@
+# YOLO 训练数据集配置
+# 路径相对于此文件所在目录
+
+# 数据集路径 (由 generate_labels.py 生成)
+path: ./dataset
+
+# 训练/验证集
+train: images/train
+val: images/val
+
+# 类别数
+nc: 6
+
+# 类别名 (顺序必须与 YOLO 输出一致)
+names:
+  0: cylinder
+  1: flammable
+  2: health_hazard
+  3: danger
+  4: landing_H
+  5: empty_cylinder
+
+# 训练超参数 (覆盖 train.py 中的默认值)
+training:
+  model: yolov8n.pt          # 基础模型 (n/s/m/l/x)
+  epochs: 200
+  batch: 16
+  imgsz: 640
+  optimizer: AdamW
+  lr0: 0.001                 # 初始学习率
+  lrf: 0.01                  # 最终学习率 = lr0 * lrf
+  # 数据增强
+  augment:
+    hsv_h: 0.015             # 色调增强 (仿真图不需要太强)
+    hsv_s: 0.3               # 饱和度增强
+    hsv_v: 0.2               # 亮度增强
+    degrees: 5.0             # 旋转 (±5°)
+    translate: 0.1           # 平移
+    scale: 0.3               # 缩放 (模拟不同高度)
+    shear: 0.0               # 剪切
+    flipud: 0.0              # 不上下翻转 (无人机不倒飞)
+    fliplr: 0.5              # 左右翻转
+    mosaic: 0.5              # mosaic 增强概率
+    mixup: 0.1               # mixup 增强概率
+
+# 导出配置
+export:
+  format: onnx               # onnx / engine / tflite
+  imgsz: 640
+  half: true                 # FP16 (Jetson 推理更快)
+  simplify: true             # ONNX 图简化
+  opset: 12                  # ONNX opset 版本

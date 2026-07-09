@@ -1,0 +1,19 @@
+# PX4 飞行控制参数
+# 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
+# 原点: 起飞点 H (world: 10, 4, 0)
+/px4_bridge:
+  ros__parameters:
+    # --- 基础飞行参数 ---
+    takeoff_height: 5.0           # 巡航飞行高度 (m, NED z 负值)
+    waypoint_tolerance: 0.5       # 航点到达容差 (m)
+    takeoff_tolerance: 0.3        # 起飞到达容差 (m)
+    control_frequency: 20.0       # 控制循环频率 (Hz), 必须 >2Hz
+    max_error_count: 5            # 最大错误次数, 超过则中止任务
+    waypoint_timeout: 120.0       # 单航点超时 (s)
+    land_altitude: 0.15           # 着陆确认高度 (m, NED z > -0.15 认为已着陆)
+
+    # --- 速度与加速度参数 ---
+    sweep_speed: 0.8              # 区域内部遍历速度 (m/s)
+    transit_speed: 2.0            # 区域之间中转速度 (m/s)
+    return_speed: 3.0             # 返航速度 (m/s)
+    max_acceleration: 2.0         # setpoint 斜坡速率 (m/s), 需 >= transit_speed

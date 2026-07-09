@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>drone_vision</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="ryder@todo.todo">ryder</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>drone_interfaces</depend>
+  <depend>drone_utils</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>cv_bridge</depend>
+  <!--
+    pip 依赖 (不在 package.xml 中声明, 由 setup.py extras_require 管理):
+      - opencv-python (推理 + 后处理)
+      - onnxruntime-gpu / onnxruntime (YOLO 推理)
+      - ultralytics + torch (训练, 仅在 PC 上需要)
+  -->
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

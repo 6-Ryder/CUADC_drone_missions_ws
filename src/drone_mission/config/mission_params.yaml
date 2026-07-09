@@ -1,0 +1,68 @@
+# 无人机自主任务飞行 — 任务参数
+# 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
+# 原点: 起飞点 H (world: 10, 4, 0)
+/mission_state_machine:
+  ros__parameters:
+    # --- 任务全局参数 ---
+    takeoff_height: 5.0           # 巡航飞行高度 (m, NED z 负值)
+    waypoint_tolerance: 0.5       # 航点到达容差 (m)
+    takeoff_tolerance: 0.3        # 起飞到达容差 (m)
+    control_frequency: 20.0       # 控制循环频率 (Hz)
+    max_error_count: 5            # 最大错误次数, 超过则中止任务
+    waypoint_timeout: 120.0       # 单航点超时 (s)
+    land_altitude: 0.15           # 着陆确认高度 (m)
+
+    # --- 速度参数 ---
+    sweep_speed: 0.8              # 区域内部遍历速度 (m/s)
+    transit_speed: 2.0            # 区域之间中转速度 (m/s)
+    return_speed: 3.0             # 返航速度 (m/s)
+    max_acceleration: 2.0         # setpoint 斜坡速率 (m/步 @20Hz), 0.2→0.2m/s, 2.0→2m/s
+
+    # --- Area 1: 投放区 ---
+    # Gazebo x:40~45, y:0~8 → NED: north=[-4,4], east=[30,35]
+    area1_north_min: -4.0
+    area1_north_max: 4.0
+    area1_east_min: 30.0
+    area1_east_max: 35.0
+    area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
+    area1_search_altitude: 5.0    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
+
+    # --- Area 2: 侦察区 ---
+    # Gazebo x:65~70, y:0~8 → NED: north=[-4,4], east=[55,60]
+    area2_north_min: -4.0
+    area2_north_max: 4.0
+    area2_east_min: 55.0
+    area2_east_max: 60.0
+    area2_altitude: 2.5           # 侦察区低空扫描高度 (m, NED z 负值)
+
+    # --- 弓字形覆盖参数 ---
+    grid_spacing: 1.0             # 网格间距 (m)
+    sweep_passes: 2               # 每区域折返次数
+    sweep_margin_north: 1.0       # 长边界 (north) 内缩 (m)
+    sweep_margin_east: 0.5        # 段边界 (east) 内缩 (m)
+    recon_require_full_path: true # 侦察区必须走完整弓字形路径, 覆盖率仅作监控
+
+    # --- 投放策略参数 ---
+    min_radius_first: true        # 第一轮选最小半径筒
+    min_drop_targets_required: 2  # 搜索阶段至少累计到的投放目标数
+    cylinder_memory_merge_distance: 0.75  # 同一圆筒世界坐标合并距离 (m)
+    cylinder_memory_min_observations: 1   # 目标进入候选库所需观测次数
+    drop_descend_height: 2.0      # 投放降高高度 (m)
+    drop_confirmation_timeout: 3.0  # 投放确认超时 (s)
+    drop_align_pixel_tolerance: 35.0 # 投放前圆筒中心允许像素误差
+    camera_fx: 539.9
+    camera_fy: 539.9
+    camera_cx: 640.0
+    camera_cy: 480.0
+
+    # --- 精准降落参数 ---
+    landing_search_altitude: 5.0  # 搜索H标识高度 (m)
+    landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
+    landing_blind_altitude: 0.5   # 盲降切换高度 (m)
+    landing_precision_target: 0.1 # 目标水平精度 (m)
+
+    # --- 异常处理参数 ---
+    battery_warning: 0.25         # 低电量警告阈值 (比例)
+    battery_critical: 0.15        # 严重低电量阈值 (比例)
+    vision_loss_timeout: 3.0      # 视觉连续丢失超时 (s)
+    state_max_duration: 180.0     # 单状态最大持续时间 (s)

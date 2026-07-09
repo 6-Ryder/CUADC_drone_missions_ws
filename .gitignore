@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+install/
+
+# Logs
+log/
+logs/
+
+# VS Code IntelliSense database
+.vscode/browse.vc.db
+.vscode/browse.vc.db-shm
+.vscode/browse.vc.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Compiled extensions
+*.o
+*.so
+*.a
+
+# IDE
+.idea/

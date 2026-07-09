@@ -1,0 +1,11 @@
+# 舵机投放参数
+/servo_controller:
+  ros__parameters:
+    platform: "sitl"              # sitl | jetson
+    pwm_pin: 33                   # 舵机PWM引脚号 (Jetson GPIO)
+    pwm_frequency: 50             # PWM 频率 (Hz, 舵机标准 50Hz)
+    open_pulse_us: 1500           # 打开位PWM脉宽 (μs)
+    close_pulse_us: 500           # 关闭位PWM脉宽 (μs)
+    drop_delay_ms: 1000           # 开→关延时 (ms, 机械动作完成时间)
+    drop_timeout_s: 3.0           # 投放超时 (s)
+    max_drops: 2                  # 最大投放次数

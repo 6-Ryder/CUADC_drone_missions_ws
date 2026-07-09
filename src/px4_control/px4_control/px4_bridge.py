@@ -1,0 +1,657 @@
+"""
+PX4 DDS 通信桥接 — PX4 ↔ ROS2 核心层.
+
+核心职责:
+  1. 通过 micro-XRCE-DDS 与 PX4 飞控通信
+  2. 订阅 /fmu/out/* 话题 (VehicleOdometry, VehicleStatus, VehicleAttitude, VehicleLandDetected)
+  3. 发布 /fmu/in/* 话题 (OffboardControlMode, TrajectorySetpoint, VehicleCommand)
+  4. 转换 NED → World 坐标, 发布 /drone/pose (供 vision_pipeline 使用)
+  5. 4 步外部组件注册握手
+  6. 10Hz Offboard 心跳 + 20Hz 控制循环
+  7. 斜坡 Setpoint 平滑 (ramped setpoint)
+
+参考: Task_flight_ws/src/px4_control_dds/px4_control_dds/mission_control_node_v2.py
+"""
+
+import math
+import time
+import threading
+from typing import Optional, Tuple
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
+from geometry_msgs.msg import Point, PoseStamped, TwistStamped
+from std_msgs.msg import Header
+
+from px4_msgs.msg import (
+    OffboardControlMode,
+    TrajectorySetpoint,
+    VehicleCommand,
+    VehicleOdometry,
+    VehicleStatus,
+    VehicleAttitude,
+    VehicleLandDetected,
+)
+
+from px4_control.telemetry import (
+    Position, Attitude, Velocity, DroneStatus, Telemetry,
+    world_to_ned, ned_to_world_pose,
+)
+from drone_utils.logger import TaskLogger
+from drone_utils.watchdog import Watchdog
+
+
+# ============================================================
+# QoS 配置
+# ============================================================
+
+def px4_qos() -> QoSProfile:
+    """PX4 micro-XRCE-DDS 通信所需的 QoS profile."""
+    return QoSProfile(
+        reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        history=QoSHistoryPolicy.KEEP_LAST,
+        depth=10,
+    )
+
+
+# ============================================================
+# PX4Bridge 节点
+# ============================================================
+
+class PX4Bridge(Node):
+    """
+    PX4 DDS ↔ ROS2 通信桥接节点.
+
+    订阅 (from PX4):
+      /fmu/out/vehicle_odometry       → 位置/速度 (50Hz, NED)
+      /fmu/out/vehicle_status         → 解锁/导航状态 (5Hz)
+      /fmu/out/vehicle_attitude       → 姿态四元数 (50Hz)
+      /fmu/out/vehicle_land_detected  → 着陆检测 (5Hz)
+
+    发布 (to PX4):
+      /fmu/in/offboard_control_mode   → Offboard 模式声明 (10Hz)
+      /fmu/in/trajectory_setpoint     → 位置/速度指令 (10-20Hz)
+      /fmu/in/vehicle_command         → 模式切换/解锁/Land 指令
+
+    发布 (to ROS2):
+      /drone/pose                     → World 位姿 (50Hz, PoseStamped)
+      /drone/telemetry                → 综合遥测 (10Hz)
+    """
+
+    # PX4 Navigation State 常量
+    NAV_STATE_MANUAL = 0
+    NAV_STATE_ALTCTL = 1
+    NAV_STATE_POSCTL = 2
+    NAV_STATE_AUTO_MISSION = 3
+    NAV_STATE_AUTO_LOITER = 4
+    NAV_STATE_AUTO_RTL = 5
+    NAV_STATE_OFFBOARD = 14
+    NAV_STATE_LAND = 16
+
+    # VehicleCommand 常量
+    VEHICLE_CMD_DO_SET_MODE = 176
+    VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
+    VEHICLE_CMD_REQUEST_MESSAGE = 512
+    VEHICLE_CMD_DO_LAND_START = 189
+    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 93
+
+    def __init__(self):
+        super().__init__("px4_bridge")
+
+        # ---- 参数 ----
+        self._declare_params()
+
+        # ---- QoS ----
+        qos = px4_qos()
+
+        # ---- 订阅 PX4 → ROS2 ----
+        self._odom_sub = self.create_subscription(
+            VehicleOdometry, "/fmu/out/vehicle_odometry", self._odom_cb, qos,
+        )
+        self._status_sub = self.create_subscription(
+            VehicleStatus, "/fmu/out/vehicle_status_v4", self._status_cb, qos,
+        )
+        self._att_sub = self.create_subscription(
+            VehicleAttitude, "/fmu/out/vehicle_attitude", self._attitude_cb, qos,
+        )
+        self._land_sub = self.create_subscription(
+            VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, qos,
+        )
+
+        # ---- 发布 ROS2 → PX4 ----
+        self._offboard_mode_pub = self.create_publisher(
+            OffboardControlMode, "/fmu/in/offboard_control_mode", qos,
+        )
+        self._trajectory_pub = self.create_publisher(
+            TrajectorySetpoint, "/fmu/in/trajectory_setpoint", qos,
+        )
+        self._cmd_pub = self.create_publisher(
+            VehicleCommand, "/fmu/in/vehicle_command", qos,
+        )
+
+        # ---- 发布 PX4 → ROS2 (处理后) ----
+        # 使用 VOLATILE QoS 避免 DURABILITY 不兼容
+        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
+        ros_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10,
+        )
+        self._pose_pub = self.create_publisher(
+            PoseStamped, "/drone/pose", ros_qos,
+        )
+        self._vel_pub = self.create_publisher(
+            TwistStamped, "/drone/servo/velocity_cmd", ros_qos,
+        )
+
+        # ---- 内部状态 ----
+        self._odom: Optional[VehicleOdometry] = None
+        self._status: Optional[VehicleStatus] = None
+        self._attitude: Optional[VehicleAttitude] = None
+        self._land_detected: Optional[VehicleLandDetected] = None
+
+        self._current_telemetry = Telemetry()
+
+        # Setpoint 平滑
+        self._target_setpoint = Position(0.0, 0.0, -5.0)  # NED
+        self._current_setpoint = Position(0.0, 0.0, -5.0)
+        self._target_yaw: float = 0.0
+        self._current_yaw: float = 0.0
+        self._setpoint_lock = threading.Lock()
+
+        # 组件ID (注册用)
+        self._component_id: int = 1
+
+        # 控制标志
+        self._armed: bool = False
+        self._offboard_active: bool = False
+        self._velocity_mode: bool = False  # True=速度控制, False=位置控制
+        self._last_velocity_cmd = (0.0, 0.0, 0.0)  # 缓存速度指令, 避免心跳覆写
+
+        # ---- 订阅 Mission FSM 的 setpoint 指令 (NED) ----
+        self._cmd_sp_sub = self.create_subscription(
+            Point, "/drone/cmd_setpoint_ned", self._cmd_setpoint_cb, 10,
+        )
+        # 订阅 Mission FSM 的速度指令 (NED velocity)
+        from geometry_msgs.msg import Twist
+        self._cmd_vel_sub = self.create_subscription(
+            Twist, "/drone/cmd_velocity_ned", self._cmd_velocity_cb, 10,
+        )
+        # 订阅 VehicleCommand 中继 — FSM 等节点通过此话题发送命令,
+        # px4_bridge 转发到 /fmu/in/vehicle_command (已验证的 DDS 路径)
+        self._cmd_relay_sub = self.create_subscription(
+            VehicleCommand, "/drone/cmd/vehicle_command_relay",
+            self._cmd_relay_cb, 10,
+        )
+
+        # ---- 定时器 ----
+        self._offboard_timer = self.create_timer(0.1, self._offboard_heartbeat)   # 10Hz
+        self._control_timer = self.create_timer(0.05, self._control_loop)         # 20Hz
+        self._registration_timer = self.create_timer(1.0, self._registration_step) # 1Hz 注册
+
+        # ---- 注册状态机 ----
+        self._reg_step = 0
+        self._reg_done = False
+
+        # ---- 工具 ----
+        self._task_logger = TaskLogger(node_name="px4_bridge")
+        self._watchdog = Watchdog()
+        self._watchdog.register("px4_odom", timeout=3.0,
+                                on_timeout=lambda n: self.get_logger().warn(f"{n} 超时"))
+
+        self.get_logger().info("PX4 Bridge 已启动 (等待 DDS 连接...)")
+
+    def _declare_params(self):
+        self.declare_parameter("takeoff_height", 5.0)
+        self.declare_parameter("waypoint_tolerance", 0.5)
+        self.declare_parameter("takeoff_tolerance", 0.3)
+        self.declare_parameter("control_frequency", 20.0)
+        self.declare_parameter("max_error_count", 5)
+        self.declare_parameter("waypoint_timeout", 120.0)
+        self.declare_parameter("land_altitude", 0.15)
+        self.declare_parameter("sweep_speed", 0.8)
+        self.declare_parameter("transit_speed", 2.0)
+        self.declare_parameter("return_speed", 3.0)
+        self.declare_parameter("max_acceleration", 0.2)
+
+    # ================================================================
+    # 订阅回调
+    # ================================================================
+
+    def _odom_cb(self, msg: VehicleOdometry):
+        self._odom = msg
+        self._watchdog.feed("px4_odom")
+
+        # 更新遥测
+        self._current_telemetry.timestamp = time.time()
+        self._current_telemetry.position = Position(
+            north=float(msg.position[0]),
+            east=float(msg.position[1]),
+            down=float(msg.position[2]),
+        )
+        self._current_telemetry.velocity = Velocity(
+            vn=float(msg.velocity[0]),
+            ve=float(msg.velocity[1]),
+            vd=float(msg.velocity[2]),
+        )
+
+        # 发布 /drone/pose (World 坐标系, 供 vision_pipeline 使用)
+        self._publish_drone_pose()
+
+    def _status_cb(self, msg: VehicleStatus):
+        self._status = msg
+        self._watchdog.feed("px4_status")
+
+        self._current_telemetry.status.armed = (msg.arming_state == 2)
+        self._current_telemetry.status.offboard_mode = (msg.nav_state == self.NAV_STATE_OFFBOARD)
+        self._current_telemetry.status.navigation_state = msg.nav_state
+        # battery_remaining/gps no longer in VehicleStatus (use dedicated topics)
+        self._current_telemetry.status.battery_remaining = 1.0
+        self._current_telemetry.status.gps_fix_type = 0
+        self._current_telemetry.status.gps_satellites = 0
+
+        # 更新着陆状态
+        self._current_telemetry.status.landed = (
+            msg.nav_state == self.NAV_STATE_LAND and not self._current_telemetry.status.armed
+        )
+
+        self._armed = (msg.arming_state == 2)
+
+    def _attitude_cb(self, msg: VehicleAttitude):
+        self._attitude = msg
+        q = msg.q  # [w, x, y, z] Hamilton convention
+        if len(q) >= 4:
+            self._current_telemetry.attitude = Attitude(
+                q_w=float(q[0]), q_x=float(q[1]), q_y=float(q[2]), q_z=float(q[3]),
+            )
+            # 从四元数计算 yaw (VehicleAttitude 消息没有单独的 yaw 字段)
+            w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+            self._current_yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+    def _land_cb(self, msg: VehicleLandDetected):
+        self._land_detected = msg
+        self._current_telemetry.status.landed = msg.landed
+
+    def _cmd_relay_cb(self, msg: VehicleCommand):
+        """中继 VehicleCommand — 从 /drone/cmd/vehicle_command_relay 转发到 PX4."""
+        self._cmd_pub.publish(msg)
+        self.get_logger().debug(
+            f"VehicleCommand relay: cmd={msg.command} "
+            f"p1={msg.param1} p2={msg.param2}"
+        )
+
+    def _cmd_setpoint_cb(self, msg: Point):
+        """接收 Mission FSM 的 setpoint 指令并更新目标."""
+        with self._setpoint_lock:
+            self._velocity_mode = False
+            self._target_setpoint = Position(
+                north=float(msg.x),
+                east=float(msg.y),
+                down=float(msg.z),
+            )
+        self._target_yaw = 0.0
+
+    def _cmd_velocity_cb(self, msg):
+        """接收 Mission FSM 的速度指令 (NED velocity)."""
+        from geometry_msgs.msg import Twist
+        with self._setpoint_lock:
+            self._velocity_mode = True
+        self.publish_velocity_cmd(
+            float(msg.linear.x),   # vn
+            float(msg.linear.y),   # ve
+            float(msg.linear.z),   # vd
+            float(msg.angular.z),  # yaw_rate
+        )
+
+    # ================================================================
+    # 发布方法
+    # ================================================================
+
+    def _publish_drone_pose(self):
+        """发布 World 坐标系下的无人机位姿."""
+        if self._odom is None:
+            return
+        pos = self._odom.position
+        att = self._attitude
+        q = att.q if att and len(att.q) >= 4 else [1.0, 0.0, 0.0, 0.0]
+
+        world_x, world_y, world_z, qx, qy, qz, qw = ned_to_world_pose(
+            float(pos[0]), float(pos[1]), float(pos[2]),
+            float(q[0]) if att else 0.0,
+            float(q[1]) if att else 0.0,
+            float(q[2]) if att else 0.0,
+            float(q[3]) if att else 1.0,
+        )
+
+        pose = PoseStamped()
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.header.frame_id = "world"
+        pose.pose.position.x = world_x
+        pose.pose.position.y = world_y
+        pose.pose.position.z = world_z
+        pose.pose.orientation.x = qx
+        pose.pose.orientation.y = qy
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
+        self._pose_pub.publish(pose)
+
+    def publish_velocity_cmd(self, vn: float, ve: float, vd: float, yaw_rate: float = 0.0):
+        """
+        发布速度指令 — 同时发布到 ROS2 话题和 PX4 TrajectorySetpoint.
+
+        PX4 velocity setpoint: vx=north, vy=east, vz=down (NED).
+
+        缓存速度指令以防止 _offboard_heartbeat 覆写为 NAN.
+        """
+        # 缓存速度指令, 供心跳持续发布
+        self._last_velocity_cmd = (float(vn), float(ve), float(vd))
+
+        # 发布到 ROS2 话题 (供监控/日志)
+        vel = TwistStamped()
+        vel.header.stamp = self.get_clock().now().to_msg()
+        vel.header.frame_id = "base_link"
+        vel.twist.linear.x = vn
+        vel.twist.linear.y = ve
+        vel.twist.linear.z = vd
+        vel.twist.angular.z = yaw_rate
+        self._vel_pub.publish(vel)
+
+        # 直接作为 TrajectorySetpoint 的 velocity 域发布到 PX4
+        setpoint = TrajectorySetpoint()
+        setpoint.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        setpoint.position = [float('nan'), float('nan'), float('nan')]
+        setpoint.yaw = float('nan')
+        setpoint.velocity = [float(vn), float(ve), float(vd)]
+        setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+        self._trajectory_pub.publish(setpoint)
+
+    # ================================================================
+    # 注册握手
+    # ================================================================
+
+    def _registration_step(self):
+        """
+        4 步外部组件注册握手.
+
+        Step 0: 请求 VehicleStatus 消息
+        Step 1: 请求 VehicleOdometry 消息
+        Step 2: 设置组件 ID
+        Step 3: 完成
+        """
+        if self._reg_done:
+            self._registration_timer.cancel()
+            return
+
+        if self._reg_step == 0:
+            self.get_logger().info("注册 Step 0: 请求 VehicleStatus...")
+            self._send_request_message(0)  # VehicleStatus
+            self._reg_step = 1
+
+        elif self._reg_step == 1:
+            self.get_logger().info("注册 Step 1: 请求 VehicleOdometry...")
+            self._send_request_message(1)  # VehicleOdometry
+            self._reg_step = 2
+
+        elif self._reg_step == 2:
+            self.get_logger().info("注册 Step 2: 设置组件 ID...")
+            self._set_component_id()
+            self._reg_step = 3
+
+        elif self._reg_step == 3:
+            self.get_logger().info("注册 Step 3: 完成!")
+            self._reg_done = True
+            self._registration_timer.cancel()
+
+    def _send_request_message(self, msg_id: int):
+        """请求 PX4 发布指定类型的 uORB 消息."""
+        cmd = VehicleCommand()
+        cmd.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        cmd.param1 = float(msg_id)
+        cmd.param2 = 50.0   # 请求频率 Hz
+        cmd.command = self.VEHICLE_CMD_REQUEST_MESSAGE
+        cmd.target_system = 1
+        cmd.target_component = 1
+        cmd.source_system = 1
+        cmd.source_component = self._component_id
+        cmd.from_external = True
+        self._cmd_pub.publish(cmd)
+
+    def _set_component_id(self):
+        """设置外部组件的 component ID."""
+        # 在某些 PX4 版本中, 通过 VehicleCommand 设置
+        pass
+
+    # ================================================================
+    # 心跳 + 控制循环
+    # ================================================================
+
+    def _offboard_heartbeat(self):
+        """
+        10Hz Offboard 心跳.
+
+        必须持续发布 OffboardControlMode + TrajectorySetpoint,
+        否则 PX4 会自动退出 Offboard 模式 (>0.5s 无信号).
+        """
+        # OffboardControlMode: 声明控制类型
+        offboard_mode = OffboardControlMode()
+        offboard_mode.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        offboard_mode.position = not self._velocity_mode
+        offboard_mode.velocity = self._velocity_mode
+        offboard_mode.acceleration = False
+        offboard_mode.attitude = False
+        offboard_mode.body_rate = False
+        self._offboard_mode_pub.publish(offboard_mode)
+
+        # TrajectorySetpoint: 位置/速度指令
+        setpoint = TrajectorySetpoint()
+        setpoint.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+
+        with self._setpoint_lock:
+            sp = self._current_setpoint
+            yaw = self._current_yaw
+            is_vel_mode = self._velocity_mode
+
+        if is_vel_mode:
+            # 速度模式: 位置=NAN, 速度=缓存的上次指令 (避免覆写为 NAN)
+            setpoint.position = [float('nan'), float('nan'), float('nan')]
+            setpoint.yaw = float('nan')
+            vn, ve, vd = self._last_velocity_cmd
+            setpoint.velocity = [float(vn), float(ve), float(vd)]
+            setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+        else:
+            setpoint.position = [float(sp.north), float(sp.east), float(sp.down)]
+            setpoint.yaw = float(yaw)
+            # NAN 表示"不控制此轴"
+            setpoint.velocity = [float('nan'), float('nan'), float('nan')]
+            setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+
+        self._trajectory_pub.publish(setpoint)
+
+    def _control_loop(self):
+        """
+        20Hz 控制循环 — 斜坡平滑 Setpoint.
+
+        逐步将 _current_setpoint 向 _target_setpoint 移动,
+        实现平滑的位置过渡, 避免突然跳变.
+        """
+        with self._setpoint_lock:
+            target = self._target_setpoint
+            current = self._current_setpoint
+            target_yaw = self._target_yaw
+
+        max_step = self.get_parameter("max_acceleration").value * 0.05  # per 20Hz tick
+
+        # 平滑位置
+        dx = target.north - current.north
+        dy = target.east - current.east
+        dz = target.down - current.down
+        dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+        if dist > 0.001:
+            step = min(max_step, dist)
+            ratio = step / dist
+            new_north = current.north + dx * ratio
+            new_east = current.east + dy * ratio
+            new_down = current.down + dz * ratio
+        else:
+            new_north = target.north
+            new_east = target.east
+            new_down = target.down
+
+        # 平滑偏航
+        dyaw = target_yaw - self._current_yaw
+        dyaw = math.atan2(math.sin(dyaw), math.cos(dyaw))  # normalize
+        new_yaw = self._current_yaw + dyaw * 0.3  # low-pass
+
+        with self._setpoint_lock:
+            self._current_setpoint = Position(new_north, new_east, new_down)
+            self._current_yaw = new_yaw
+
+    # ================================================================
+    # 公开接口 (供 FlightController 和 Mission 层调用)
+    # ================================================================
+
+    def set_position_target(self, north: float, east: float, down: float, yaw: float = 0.0):
+        """
+        设置位置控制目标 (NED 坐标系).
+
+        Parameters
+        ----------
+        north, east, down : float
+            NED 位置 (m). down 为正值=下降, 负值=上升.
+        yaw : float
+            目标偏航角 (rad).
+        """
+        with self._setpoint_lock:
+            self._velocity_mode = False
+            self._target_setpoint = Position(north, east, down)
+            self._target_yaw = yaw
+
+    def set_velocity_target(self, vn: float, ve: float, vd: float, yaw_rate: float = 0.0):
+        """
+        设置速度控制目标 (NED 坐标系).
+
+        Parameters
+        ----------
+        vn, ve, vd : float
+            NED 速度 (m/s). vd 正值=下降.
+        yaw_rate : float
+            偏航速率 (rad/s).
+        """
+        with self._setpoint_lock:
+            self._velocity_mode = True
+        # 速度模式: 直接发布 TrajectorySetpoint 的 velocity 域
+        self.publish_velocity_cmd(vn, ve, vd, yaw_rate)
+
+    def get_current_position(self) -> Position:
+        """获取当前无人机位置 (NED)."""
+        return self._current_telemetry.position
+
+    def get_current_attitude(self) -> Attitude:
+        """获取当前姿态."""
+        return self._current_telemetry.attitude
+
+    def get_telemetry(self) -> Telemetry:
+        """获取完整遥测快照."""
+        return self._current_telemetry
+
+    def is_armed(self) -> bool:
+        return self._armed
+
+    def is_offboard(self) -> bool:
+        return self._current_telemetry.status.offboard_mode
+
+    def is_landed(self) -> bool:
+        return self._current_telemetry.status.landed
+
+    # ================================================================
+    # 指令发送 (VehicleCommand)
+    # ================================================================
+
+    def send_command(self, command: int, param1: float = 0.0, param2: float = 0.0,
+                     param3: float = 0.0, param4: float = 0.0,
+                     param5: float = 0.0, param6: float = 0.0, param7: float = 0.0):
+        """发送通用 VehicleCommand."""
+        cmd = VehicleCommand()
+        cmd.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        cmd.param1 = param1
+        cmd.param2 = param2
+        cmd.param3 = param3
+        cmd.param4 = param4
+        cmd.param5 = param5
+        cmd.param6 = param6
+        cmd.param7 = param7
+        cmd.command = command
+        cmd.target_system = 1
+        cmd.target_component = 1
+        cmd.source_system = 1
+        cmd.source_component = self._component_id
+        cmd.from_external = True
+        self._cmd_pub.publish(cmd)
+
+    def set_offboard_mode(self):
+        """切换到 Offboard 模式."""
+        self.get_logger().info("请求切换到 Offboard 模式...")
+        self.send_command(
+            self.VEHICLE_CMD_DO_SET_MODE,
+            param1=1.0,  # custom mode
+            param2=6.0,  # offboard
+        )
+
+    def arm(self):
+        """解锁无人机."""
+        self.get_logger().info("发送解锁指令...")
+        self.send_command(
+            self.VEHICLE_CMD_COMPONENT_ARM_DISARM,
+            param1=1.0,  # arm
+        )
+
+    def disarm(self):
+        """上锁无人机."""
+        self.get_logger().info("发送上锁指令...")
+        self.send_command(
+            self.VEHICLE_CMD_COMPONENT_ARM_DISARM,
+            param1=0.0,  # disarm
+        )
+
+    def force_disarm(self):
+        """强制上锁 (紧急)."""
+        self.get_logger().warn("强制上锁!")
+        self.send_command(
+            self.VEHICLE_CMD_COMPONENT_ARM_DISARM,
+            param1=0.0,
+            param2=21196.0,  # force
+        )
+
+    def land_at_current(self):
+        """原地降落."""
+        self.get_logger().info("请求着陆...")
+        self.send_command(self.VEHICLE_CMD_DO_LAND_START)
+
+    def return_to_launch(self):
+        """RTL 返航."""
+        self.get_logger().info("请求 RTL 返航...")
+        self.send_command(self.VEHICLE_CMD_NAV_RETURN_TO_LAUNCH)
+
+
+# ============================================================
+# 入口
+# ============================================================
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = PX4Bridge()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
