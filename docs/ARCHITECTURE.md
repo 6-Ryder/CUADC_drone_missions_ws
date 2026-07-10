@@ -380,7 +380,7 @@ YOLOv8n (640×640, 6类)
 │              vision_pipeline.py              │
 │                                              │
 │  cylinder dets  → CylinderRefiner (椭圆拟合) │
-│                  → CylinderTracker (多帧ID)  │
+│                  → CylinderTracker (多帧ID+min_hits过滤) │
 │                  → 姿态补偿 World 坐标        │
 │                  → /drone/vision/cylinders   │
 │                                              │
@@ -432,7 +432,7 @@ CylinderRefiner.refine(image, bbox):
     ↓
 像素半径 → 真实半径: r_real = r_px * altitude / focal_length
     ↓
-CylinderTracker: IoU 多帧匹配 → 稳定 ID
+CylinderTracker: IoU 多帧匹配 → min_hits 过滤闪烁 → 稳定 ID
 ```
 
 #### 6.2.4 危险品分类 (`hazard_classifier.py`) — ⚠️ 已废弃

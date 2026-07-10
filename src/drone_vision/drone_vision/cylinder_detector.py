@@ -158,12 +158,17 @@ class CylinderRefiner:
 # ============================================================
 
 class CylinderTracker:
-    """基于 IoU 的简单多目标追踪器."""
+    """基于 IoU 的简单多目标追踪器.
 
-    def __init__(self, max_age: int = 10, iou_thresh: float = 0.3):
+    通过 min_hits 过滤闪烁假目标: 新 track 需连续命中 min_hits 帧后才输出.
+    """
+
+    def __init__(self, max_age: int = 10, iou_thresh: float = 0.3,
+                 min_hits: int = 3):
         self.max_age = max_age
         self.iou_thresh = iou_thresh
-        self.tracks: List[dict] = []  # {id, cx, cy, radius, last_seen, age}
+        self.min_hits = min_hits
+        self.tracks: List[dict] = []  # {id, cx, cy, radius, hits, last_seen, age}
         self._next_id = 0
 
     def update(self, detections: List[Tuple[float, float, float, float, tuple]]):
@@ -202,6 +207,7 @@ class CylinderTracker:
                     self.tracks[best_track]["cy"] = dcy
                     self.tracks[best_track]["radius"] = dr
                     self.tracks[best_track]["confidence"] = dconf
+                    self.tracks[best_track]["hits"] = self.tracks[best_track].get("hits", 0) + 1
                     if bbox:
                         self.tracks[best_track]["bbox"] = bbox
                     self.tracks[best_track]["last_seen"] = time.time()
@@ -220,6 +226,7 @@ class CylinderTracker:
                     "cy": dcy,
                     "radius": dr,
                     "confidence": dconf,
+                    "hits": 0,
                     "last_seen": time.time(),
                     "age": 0,
                 }
@@ -233,8 +240,14 @@ class CylinderTracker:
         self.tracks = [t for t in self.tracks if t["age"] < self.max_age]
 
     def get_active(self) -> List[dict]:
-        """返回活跃的 track (age=0, 即当前帧有匹配)."""
-        return [t for t in self.tracks if t["age"] == 0]
+        """返回已确认的活跃 track (当前帧命中 + 连续命中 >= min_hits)."""
+        return [t for t in self.tracks
+                if t["age"] == 0 and t.get("hits", 0) >= self.min_hits]
+
+    def get_pending(self) -> List[dict]:
+        """返回待确认的 track (活跃但未达 min_hits, 用于调试)."""
+        return [t for t in self.tracks
+                if t["age"] == 0 and t.get("hits", 0) < self.min_hits]
 
 
 # ============================================================
@@ -296,6 +309,7 @@ class CylinderDetectorNode(Node):
         self.declare_parameter("cylinder_white_brightness", 120)
         self.declare_parameter("cylinder_tracking_max_age", 10)
         self.declare_parameter("cylinder_tracking_iou_thresh", 0.3)
+        self.declare_parameter("cylinder_tracking_min_hits", 3)
 
         self.declare_parameter("fx", 400.0)
         self.declare_parameter("fy", 400.0)
@@ -369,6 +383,7 @@ class CylinderDetectorNode(Node):
         self._tracker = CylinderTracker(
             max_age=self.get_parameter("cylinder_tracking_max_age").value,
             iou_thresh=self.get_parameter("cylinder_tracking_iou_thresh").value,
+            min_hits=self.get_parameter("cylinder_tracking_min_hits").value,
         )
 
     def _caminfo_cb(self, msg: CameraInfo):

@@ -165,6 +165,7 @@ class VisionPipelineNode(Node):
         self.declare_parameter("cylinder_white_brightness", 120)
         self.declare_parameter("cylinder_tracking_max_age", 10)
         self.declare_parameter("cylinder_tracking_iou_thresh", 0.3)
+        self.declare_parameter("cylinder_tracking_min_hits", 3)
         # 危险品
         self.declare_parameter("hazard_enable_color_fallback", True)
         self.declare_parameter("hazard_color_confirm_ratio", 0.3)
@@ -219,6 +220,7 @@ class VisionPipelineNode(Node):
         self._cyl_tracker = CylinderTracker(
             max_age=self.get_parameter("cylinder_tracking_max_age").value,
             iou_thresh=self.get_parameter("cylinder_tracking_iou_thresh").value,
+            min_hits=self.get_parameter("cylinder_tracking_min_hits").value,
         )
         self._color_verifier = ColorVerifier(
             confirm_ratio=self.get_parameter("hazard_color_confirm_ratio").value,

@@ -44,6 +44,7 @@
     cylinder_white_brightness: 100      # 白色验证: V 通道最低值 (放宽)
     cylinder_tracking_max_age: 10       # 多帧追踪: 最大消失帧数
     cylinder_tracking_iou_thresh: 0.3   # 多帧追踪: IoU 匹配阈值
+    cylinder_tracking_min_hits: 3       # 多帧追踪: 连续命中N帧后才输出 (过滤闪烁假目标)
 
     # ============================================================
     # 危险品分类参数

@@ -49,3 +49,10 @@
 - landing_H 无模型: 精准降落靠 OpenCV 回退
 - .pt 格式: Jetson 实飞前应导出 ONNX/TensorRT
 - 延迟修复: camera grab/retrieve + viewer qos=1 消除帧缓冲延迟
+
+## 时域过滤 — 消除背景杂物误检
+
+- `CylinderTracker` 新增 `min_hits` 参数 (默认 3): 新目标需连续命中 N 帧后才确认输出
+- 背景杂物闪烁 (单帧误检) 达不到 min_hits, 自动过滤
+- 真正目标额外延迟 ~67ms (3帧@30FPS), 对控制回路无影响
+- 配置: `vision_params.yaml` → `cylinder_tracking_min_hits`

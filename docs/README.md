@@ -396,7 +396,7 @@ drone_tasks_ws/
 |------|------|------|---------|
 | 4.1 | `src/drone_vision/drone_vision/models/yolo_engine.py` | ~450 | YOLO ONNX/TensorRT/PyTorch 推理引擎；letterbox→推理→`_rescale_bbox()` 回原图（**关键修复点**）；`Detection` 数据类；自动按后缀选后端 |
 | 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~860 | **全系统第二关键的单文件**。`_lazy_init` 加载双模型(V2圆筒+V1投放区标识)；`_image_cb` 主回调（帧率自适应→YOLO推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`/drone/vision/markers` 投放区标识发布 |
-| 4.3 | `src/drone_vision/drone_vision/cylinder_detector.py` | ~530 | `CylinderRefiner.refine()`: YOLO bbox→ROI→Canny→椭圆拟合→白度评分；`CylinderTracker`: IoU 多帧匹配→稳定ID (支持 bbox) |
+| 4.3 | `src/drone_vision/drone_vision/cylinder_detector.py` | ~530 | `CylinderRefiner.refine()`: YOLO bbox→ROI→Canny→椭圆拟合→白度评分；`CylinderTracker`: IoU 多帧匹配→min_hits过滤闪烁→稳定ID (支持 bbox) |
 | 4.4 | `src/drone_vision/drone_vision/landing_detector.py` | ~250 | `LandingPadRefiner.refine()`: 自适应阈值→圆形检测→PCA 方向估计 |
 | 4.5 | `src/drone_vision/drone_vision/coverage_monitor.py` | ~180 | 网格离散化 + FOV 投影覆盖标记 + 覆盖率计算 |
 | 4.6 | `src/drone_vision/drone_vision/visual_servoing.py` | ~280 | `VisualServoController` 降落模式 PID；`CylinderApproachController` 圆筒逼近 PID |
