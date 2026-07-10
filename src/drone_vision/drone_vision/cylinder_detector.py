@@ -166,13 +166,14 @@ class CylinderTracker:
         self.tracks: List[dict] = []  # {id, cx, cy, radius, last_seen, age}
         self._next_id = 0
 
-    def update(self, detections: List[Tuple[float, float, float, float]]):
+    def update(self, detections: List[Tuple[float, float, float, float, tuple]]):
         """
         用新检测更新追踪.
 
         Parameters
         ----------
-        detections : [(cx, cy, radius, confidence), ...]
+        detections : [(cx, cy, radius, confidence, bbox), ...]
+            bbox : (x1, y1, x2, y2) 或 None
         """
         # 所有 track 年龄 +1
         for t in self.tracks:
@@ -182,8 +183,9 @@ class CylinderTracker:
         matched_det_indices: set = set()
 
         if self.tracks and detections:
-            # 构建 IoU 矩阵 (用中心距离近似, 阈值 2×radius)
-            for det_idx, (dcx, dcy, dr, dconf) in enumerate(detections):
+            for det_idx, item in enumerate(detections):
+                dcx, dcy, dr, dconf = item[0], item[1], item[2], item[3]
+                bbox = item[4] if len(item) > 4 else None
                 best_track = None
                 best_dist = float("inf")
                 for ti, t in enumerate(self.tracks):
@@ -199,15 +201,20 @@ class CylinderTracker:
                     self.tracks[best_track]["cx"] = dcx
                     self.tracks[best_track]["cy"] = dcy
                     self.tracks[best_track]["radius"] = dr
+                    self.tracks[best_track]["confidence"] = dconf
+                    if bbox:
+                        self.tracks[best_track]["bbox"] = bbox
                     self.tracks[best_track]["last_seen"] = time.time()
                     self.tracks[best_track]["age"] = 0
                     matched_track_indices.add(best_track)
                     matched_det_indices.add(det_idx)
 
         # 未匹配的检测 → 新建 track
-        for det_idx, (dcx, dcy, dr, dconf) in enumerate(detections):
+        for det_idx, item in enumerate(detections):
             if det_idx not in matched_det_indices:
-                self.tracks.append({
+                dcx, dcy, dr, dconf = item[0], item[1], item[2], item[3]
+                bbox = item[4] if len(item) > 4 else None
+                track = {
                     "id": self._next_id,
                     "cx": dcx,
                     "cy": dcy,
@@ -215,7 +222,10 @@ class CylinderTracker:
                     "confidence": dconf,
                     "last_seen": time.time(),
                     "age": 0,
-                })
+                }
+                if bbox:
+                    track["bbox"] = bbox
+                self.tracks.append(track)
                 self._next_id += 1
 
     def prune(self):
@@ -275,10 +285,7 @@ class CylinderDetectorNode(Node):
         self.declare_parameter("model_width", 640)
         self.declare_parameter("model_height", 640)
         self.declare_parameter("device", "cuda")
-        self.declare_parameter("class_names", [
-            "cylinder", "flammable", "health_hazard",
-            "danger", "landing_H", "empty_cylinder",
-        ])
+        self.declare_parameter("class_names", ["cylinder"])
 
         self.declare_parameter("cylinder_refine_enable", True)
         self.declare_parameter("cylinder_edge_blur", 5)
@@ -305,7 +312,7 @@ class CylinderDetectorNode(Node):
             # 尝试默认路径
             import os
             default = os.path.join(
-                os.path.dirname(__file__), "..", "models", "drone_yolo.onnx",
+                os.path.dirname(__file__), "models", "cylinder_yolo.pt",
             )
             if os.path.exists(default):
                 model_path = default
@@ -318,6 +325,12 @@ class CylinderDetectorNode(Node):
                 self._initialized = True
                 self._init_timer.cancel()
                 return
+        elif not os.path.isabs(model_path):
+            resolved = os.path.join(
+                os.path.dirname(__file__), "models", model_path,
+            )
+            if os.path.exists(resolved):
+                model_path = resolved
 
         try:
             from drone_vision.models.yolo_engine import create_engine
@@ -383,25 +396,28 @@ class CylinderDetectorNode(Node):
             raw_detections = self._fallback_detect(image)
 
         # ---- OpenCV 精确拟合 ----
-        refined: List[Tuple[float, float, float, float]] = []
+        refined: List[tuple] = []
         enable_refine = self.get_parameter("cylinder_refine_enable").value
 
         for det in raw_detections:
+            bbox_px = (
+                int(det.bbox[0]), int(det.bbox[1]),
+                int(det.bbox[2]), int(det.bbox[3]),
+            )
             if enable_refine and self._refiner:
                 result = self._refiner.refine(image, det.bbox)
                 if result:
-                    refined.append(result)
+                    refined.append((*result, bbox_px))
                 elif det.confidence > 0.7:
-                    # 精修失败但 YOLO 置信度高 → 用 bbox 中心近似
                     refined.append((det.cx, det.cy, min(
                         det.bbox[2] - det.bbox[0],
                         det.bbox[3] - det.bbox[1],
-                    ) / 4, det.confidence * 0.7))
+                    ) / 4, det.confidence * 0.7, bbox_px))
             else:
                 refined.append((det.cx, det.cy, min(
                     det.bbox[2] - det.bbox[0],
                     det.bbox[3] - det.bbox[1],
-                ) / 4, det.confidence))
+                ) / 4, det.confidence, bbox_px))
 
         if not refined:
             # 发布空数组
@@ -435,6 +451,11 @@ class CylinderDetectorNode(Node):
             det_msg.confidence = float(t["confidence"])
             det_msg.center_u = float(t["cx"])
             det_msg.center_v = float(t["cy"])
+            # YOLO bbox
+            bbox = t.get("bbox")
+            if bbox and len(bbox) == 4:
+                det_msg.bbox_x1, det_msg.bbox_y1 = bbox[0], bbox[1]
+                det_msg.bbox_x2, det_msg.bbox_y2 = bbox[2], bbox[3]
 
             # 像素 → World:
             # dx_world = (cx_px - cx) * altitude / fx   (相机向下, x对应right=east)

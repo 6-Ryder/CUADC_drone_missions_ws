@@ -36,6 +36,8 @@ setup(
             'vision_pipeline = drone_vision.vision_pipeline:main',
             # 视觉伺服节点 (可选, 独立运行时订阅 LandingTarget 发布 velocity_cmd)
             'visual_servo = drone_vision.visual_servoing:servo_main',
+            # 实时画面查看器 (调试用)
+            'vision_viewer = drone_vision.scripts.vision_viewer:main',
         ],
     },
 )

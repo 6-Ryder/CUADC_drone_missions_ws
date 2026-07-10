@@ -58,6 +58,7 @@ class CameraDriverNode(Node):
 
     def _declare_params(self):
         self.declare_parameter("sim_mode", True)
+        self.declare_parameter("camera_device", "/dev/video0")  # 摄像头设备路径
         self.declare_parameter("camera_width", 640)
         self.declare_parameter("camera_height", 480)
         self.declare_parameter("camera_fps", 30.0)
@@ -105,23 +106,28 @@ class CameraDriverNode(Node):
             self.get_logger().error(f"相机初始化失败: {e}")
 
     def _open_camera(self):
-        """打开 GStreamer 相机."""
+        """打开相机 — GStreamer 优先, 设备 ID 回退."""
+        device = self.get_parameter("camera_device").value
+        w = self.get_parameter("camera_width").value
+        h = self.get_parameter("camera_height").value
+        fps = self.get_parameter("camera_fps").value
+
         # 尝试多个 pipeline:
         #   - nvarguscamerasrc (Jetson MIPI CSI)
-        #   - v4l2src (USB camera)
+        #   - v4l2src (USB camera, 用参数指定的设备)
         pipelines = [
             # Jetson MIPI CSI (Raspberry Pi Camera v2)
             (
                 "nvarguscamerasrc sensor-id=0 ! "
-                "video/x-raw(memory:NVMM),width=640,height=480,framerate=30/1 ! "
+                f"video/x-raw(memory:NVMM),width={w},height={h},framerate={fps}/1 ! "
                 "nvvidconv flip-method=2 ! "
                 "video/x-raw,format=BGRx ! "
                 "videoconvert ! video/x-raw,format=BGR ! appsink"
             ),
-            # USB camera
+            # USB camera (v4l2, 设备路径可配置)
             (
-                "v4l2src device=/dev/video0 ! "
-                "video/x-raw,width=640,height=480,framerate=30/1 ! "
+                f"v4l2src device={device} ! "
+                f"video/x-raw,width={w},height={h},framerate={fps}/1 ! "
                 "videoconvert ! video/x-raw,format=BGR ! appsink"
             ),
         ]
@@ -134,18 +140,24 @@ class CameraDriverNode(Node):
                 self.get_logger().info(f"相机已打开 (pipeline {i})")
                 return
 
-        # 回退: 尝试简单设备ID
-        for dev_id in [0, 1]:
-            cap = cv2.VideoCapture(dev_id)
+        # 回退: 尝试简单设备ID (从设备路径提取数字, 如 /dev/video0 → 0)
+        try:
+            dev_id = int(device.replace("/dev/video", ""))
+        except (ValueError, AttributeError):
+            dev_id = 0
+
+        for offset in range(3):  # 尝试 dev_id, dev_id+1, dev_id+2
+            try_id = dev_id + offset
+            cap = cv2.VideoCapture(try_id)
             if cap.isOpened():
                 self._cap = cap
-                self.get_logger().info(f"相机已打开 (device /dev/video{dev_id})")
+                self.get_logger().info(f"相机已打开 (device /dev/video{try_id})")
                 return
 
-        raise RuntimeError("无法打开任何相机设备")
+        raise RuntimeError(f"无法打开相机设备: {device}")
 
     def _capture_loop(self):
-        """实飞采集循环."""
+        """实飞采集循环 — 丢弃积压帧, 始终取最新."""
         fps = self.get_parameter("camera_fps").value
         period = 1.0 / max(fps, 1.0)
 
@@ -155,16 +167,26 @@ class CameraDriverNode(Node):
                 time.sleep(0.1)
                 continue
 
-            ret, frame = self._cap.read()
+            # 清空 OpenCV 内部缓冲区, 只保留最新帧
+            for _ in range(5):
+                self._cap.grab()
+
+            ret, frame = self._cap.retrieve()
             if not ret:
                 self.get_logger().warn("相机读取失败, 重试...")
                 time.sleep(0.5)
                 continue
 
-            # 发布
-            msg = self._bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+            # 发布 (手动构造 Image, 解决 cv_bridge KeyError:16 兼容性问题)
+            msg = Image()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "camera_optical_frame"
+            msg.height = frame.shape[0]
+            msg.width = frame.shape[1]
+            msg.encoding = "bgr8"
+            msg.is_bigendian = 0
+            msg.step = frame.shape[1] * 3
+            msg.data = frame.tobytes()
             self._img_pub.publish(msg)
 
             elapsed = time.time() - t0

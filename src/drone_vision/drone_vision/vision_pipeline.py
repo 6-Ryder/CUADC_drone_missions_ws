@@ -119,6 +119,10 @@ class VisionPipelineNode(Node):
         self._cov_pub = self.create_publisher(
             CoverageStatus, "/drone/vision/coverage", 10,
         )
+        # 投放区标识检测 (V1 蓝色标识模型)
+        self._marker_pub = self.create_publisher(
+            CylinderArray, "/drone/vision/markers", 10,
+        )
         # 视觉伺服速度指令 (供 px4_bridge 或外部节点消费, 转发至 PX4)
         self._servo_vel_pub = self.create_publisher(
             TwistStamped, "/drone/vision/servo_cmd", 10,
@@ -143,6 +147,9 @@ class VisionPipelineNode(Node):
         self.declare_parameter("model_width", 640)
         self.declare_parameter("model_height", 640)
         self.declare_parameter("device", "cuda")
+        # 类别名 (YAML 配置, 必须与模型输出类别数一致)
+        self.declare_parameter("class_names", ["cylinder"])
+        self.declare_parameter("drop_marker_class_names", ["drop_zone_marker"])
         # 相机
         self.declare_parameter("fx", 400.0)
         self.declare_parameter("fy", 400.0)
@@ -246,17 +253,22 @@ class VisionPipelineNode(Node):
         model_path = self.get_parameter("model_path").value
         if not model_path:
             default = os.path.join(
-                os.path.dirname(__file__), "..", "models", "drone_yolo.onnx",
+                os.path.dirname(__file__), "models", "cylinder_yolo.pt",
             )
             if os.path.exists(default):
                 model_path = default
+        elif not os.path.isabs(model_path):
+            # 相对路径 → 解析到 models/ 目录
+            resolved = os.path.join(
+                os.path.dirname(__file__), "models", model_path,
+            )
+            if os.path.exists(resolved):
+                model_path = resolved
+
+        class_names = self.get_parameter("class_names").value
 
         if model_path and os.path.exists(model_path):
             try:
-                class_names = [
-                    "cylinder", "flammable", "health_hazard",
-                    "danger", "landing_H", "empty_cylinder",
-                ]
                 self._engine = create_engine(
                     model_path=model_path,
                     conf_threshold=self.get_parameter("conf_threshold").value,
@@ -265,12 +277,13 @@ class VisionPipelineNode(Node):
                         self.get_parameter("model_width").value,
                         self.get_parameter("model_height").value,
                     ),
-                    class_names=class_names,
+                    class_names=list(class_names),
                     device=self.get_parameter("device").value,
                 )
                 ok = self._engine.load()
                 if ok:
                     self.get_logger().info(f"YOLO 模型已加载: {model_path}")
+                    self.get_logger().info(f"  类别: {class_names}")
                 else:
                     self.get_logger().warn("YOLO 加载失败, 将使用纯 OpenCV 回退")
             except Exception as e:
@@ -280,6 +293,15 @@ class VisionPipelineNode(Node):
 
         # --- 加载投放区蓝色标识模型 (可选) ---
         marker_model_path = self.get_parameter("drop_marker_model_path").value
+        if marker_model_path and not os.path.isabs(marker_model_path):
+            resolved = os.path.join(
+                os.path.dirname(__file__), "models", marker_model_path,
+            )
+            if os.path.exists(resolved):
+                marker_model_path = resolved
+
+        marker_class_names = self.get_parameter("drop_marker_class_names").value
+
         if marker_model_path and os.path.exists(marker_model_path):
             try:
                 self._drop_marker_engine = create_engine(
@@ -290,12 +312,15 @@ class VisionPipelineNode(Node):
                         self.get_parameter("model_width").value,
                         self.get_parameter("model_height").value,
                     ),
-                    class_names=["drop_zone_marker"],
+                    class_names=list(marker_class_names),
                     device=self.get_parameter("device").value,
                 )
                 ok = self._drop_marker_engine.load()
                 if ok:
-                    self.get_logger().info(f"投放区蓝色标识模型已加载: {marker_model_path}")
+                    self.get_logger().info(
+                        f"投放区蓝色标识模型已加载: {marker_model_path}"
+                    )
+                    self.get_logger().info(f"  类别: {marker_class_names}")
                 else:
                     self.get_logger().warn("投放区蓝色标识模型加载失败")
                     self._drop_marker_engine = None
@@ -419,12 +444,28 @@ class VisionPipelineNode(Node):
 
         if self._drop_marker_engine and self._drop_marker_engine.is_loaded:
             marker_dets = self._drop_marker_engine.infer(image)
+            # 发布投放区标识检测
+            marker_array = CylinderArray()
+            marker_array.header.stamp = self.get_clock().now().to_msg()
+            marker_array.header.frame_id = "world"
+            for i, md in enumerate(marker_dets):
+                det = CylinderDetection()
+                det.id = i
+                det.confidence = float(md.confidence)
+                det.center_u = float(md.cx)
+                det.center_v = float(md.cy)
+                det.radius = 0.5  # 蓝色标识固定 1m 直径, 半径 0.5m
+                det.bbox_x1 = int(md.bbox[0])
+                det.bbox_y1 = int(md.bbox[1])
+                det.bbox_x2 = int(md.bbox[2])
+                det.bbox_y2 = int(md.bbox[3])
+                marker_array.cylinders.append(det)
+            self._marker_pub.publish(marker_array)
             if marker_dets and self._frame_count % 30 == 0:
-                best_marker = marker_dets[0]
                 self.get_logger().info(
                     "DROP_MARKER: detected "
-                    f"conf={best_marker.confidence:.2f} "
-                    f"bbox={best_marker.bbox}"
+                    f"n={len(marker_dets)} "
+                    f"conf={marker_dets[0].confidence:.2f}"
                 )
             all_dets.extend(marker_dets)
 
@@ -470,7 +511,7 @@ class VisionPipelineNode(Node):
     # ================================================================
 
     def _process_cylinders_v2(self, image: np.ndarray, dets: List[Detection]):
-        refined: List[Tuple[float, float, float, float]] = []
+        refined: List[tuple] = []
         enable_refine = self.get_parameter("cylinder_refine_enable").value
 
         # 高度自适应半径范围
@@ -480,18 +521,22 @@ class VisionPipelineNode(Node):
             cyl_params = {"min_radius_px": 5, "max_radius_px": 100}
 
         for d in dets:
+            bbox_px = (
+                int(d.bbox[0]), int(d.bbox[1]),
+                int(d.bbox[2]), int(d.bbox[3]),
+            )
             if enable_refine and self._cyl_refiner:
                 result = self._cyl_refiner.refine(image, d.bbox)
                 if result:
-                    refined.append(result)
+                    refined.append((*result, bbox_px))
                 elif d.confidence > 0.7:
                     refined.append((d.cx, d.cy,
                                     min(d.bbox[2] - d.bbox[0], d.bbox[3] - d.bbox[1]) / 4,
-                                    d.confidence * 0.7))
+                                    d.confidence * 0.7, bbox_px))
             else:
                 refined.append((d.cx, d.cy,
                                 min(d.bbox[2] - d.bbox[0], d.bbox[3] - d.bbox[1]) / 4,
-                                d.confidence))
+                                d.confidence, bbox_px))
 
         if not refined:
             self._cyl_pub.publish(CylinderArray())
@@ -517,6 +562,10 @@ class VisionPipelineNode(Node):
             det.confidence = float(t["confidence"])
             det.center_u = float(t["cx"])
             det.center_v = float(t["cy"])
+            # YOLO bbox (用于调试可视化)
+            bbox = t.get("bbox")
+            if bbox and len(bbox) == 4:
+                det.bbox_x1, det.bbox_y1, det.bbox_x2, det.bbox_y2 = bbox
 
             simple_xy = CoordinateTransformer.pixel_to_world_simple(
                 t["cx"], t["cy"], alt, fx, fy, cx, cy,

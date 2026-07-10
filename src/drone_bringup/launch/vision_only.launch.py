@@ -1,13 +1,12 @@
 """
 仅视觉模块启动 — 调试用.
 
-启动:
-  - vision_pipeline (统一视觉管线)
-  - camera_node (可选)
+模型路径由 drone_vision/config/vision_params.yaml 配置.
+命令行可覆盖 camera 参数.
 
 使用方法:
-  ros2 launch drone_bringup vision_only.launch.py
-  ros2 bag play recorded_field.bag   # 回放录制数据
+  ros2 launch drone_bringup vision_only.launch.py                 # 仅视觉管线 (需单独启动相机)
+  ros2 launch drone_bringup vision_only.launch.py start_camera:=true  # + 摄像头
 """
 
 import os
@@ -16,6 +15,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 
 
@@ -23,15 +23,12 @@ def generate_launch_description():
     pkg_vision = get_package_share_directory("drone_vision")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
 
-    model_path_arg = DeclareLaunchArgument(
-        "model_path", default_value="",
-        description="YOLO ONNX 模型路径",
-    )
-    drop_marker_model_path_arg = DeclareLaunchArgument(
-        "drop_marker_model_path", default_value="",
-        description="投放区蓝色标识 YOLO 模型路径 (可选)",
+    start_camera_arg = DeclareLaunchArgument(
+        "start_camera", default_value="false",
+        description="是否同时启动摄像头 (true/false)",
     )
 
+    # 调试用摄像头为 640x480; 覆盖 YAML 中 SITL 的 1280x960 内参
     vision_node = Node(
         package="drone_vision",
         executable="vision_pipeline",
@@ -41,18 +38,32 @@ def generate_launch_description():
         parameters=[
             vision_param_file,
             {
-                "model_path": LaunchConfiguration("model_path"),
-                "drop_marker_model_path": LaunchConfiguration("drop_marker_model_path"),
+                "camera_width": 640,
+                "camera_height": 480,
+                "cx": 320.0,
+                "cy": 240.0,
             },
-        ],
-        arguments=[
-            "--ros-args",
         ],
     )
 
+    camera_node = Node(
+        package="drone_vision",
+        executable="camera_node",
+        name="camera_driver",
+        output="screen",
+        emulate_tty=True,
+        condition=IfCondition(LaunchConfiguration("start_camera")),
+        parameters=[{
+            "sim_mode": False,
+            "camera_width": 640,
+            "camera_height": 480,
+            "camera_fps": 30.0,
+        }],
+    )
+
     return LaunchDescription([
-        model_path_arg,
-        drop_marker_model_path_arg,
+        start_camera_arg,
         LogInfo(msg="=== 视觉模块独立调试模式 ==="),
         vision_node,
+        camera_node,
     ])

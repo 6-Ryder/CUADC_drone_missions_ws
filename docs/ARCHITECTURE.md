@@ -397,14 +397,12 @@ YOLOv8n (640×640, 6类)
 
 > **注意**: 当前侦察任务仅使用 cylinder(0) 和 landing_H(4) 两类。危险品类别 (1-3,5) 在主线视觉管线中已禁用，仅在 `hazard_classifier` 独立节点中可选使用。
 
-| ID | 类名 | 含义 | 检测高度范围 | 状态 |
-|----|------|------|-------------|------|
-| 0 | cylinder | 白色圆筒 | 1m-10m | ✅ 使用中 |
-| 1 | flammable | 易燃标识 (橙色) | 1m-3m | ⚠️ 已禁用 |
-| 2 | health_hazard | 健康危害标识 (蓝色) | 1m-3m | ⚠️ 已禁用 |
-| 3 | danger | 危险标识 (红色) | 1m-3m | ⚠️ 已禁用 |
-| 4 | landing_H | H 降落标识 | 0.5m-8m | ✅ 使用中 |
-| 5 | empty_cylinder | 空圆筒 (无危险品) | 1m-3m | ⚠️ 已禁用 |
+| ID | 类名 | 模型来源 | 状态 |
+|----|------|---------|------|
+| 0 | cylinder | cv_trainer V2 (white-cylinder-detection, YOLOv8n, .pt) | ✅ 主模型 |
+| — | drop_zone_marker | cv_trainer V1 (blue-carpet-detection, YOLO11n, .pt) | ✅ 独立引擎 |
+| — | landing_H | 暂无模型 | ⚠️ 待训练 |
+| 1-3,5 | 危险品类 | — | ❌ 已移除 |
 
 #### 6.2.2 高度自适应
 
@@ -633,6 +631,7 @@ class MissionStateMachine:
 | `/drone/camera/image_raw` | Image | Camera→Vision | 30Hz | 原始图像 |
 | `/drone/camera/camera_info` | CameraInfo | Camera→Vision | 静态 | 相机内参 |
 | `/drone/vision/cylinders` | CylinderArray | Vision→Mission | 10Hz | 圆筒检测结果 |
+| `/drone/vision/markers` | CylinderArray | Vision→Mission | 按需 | 投放区蓝色标识检测 |
 | `/drone/vision/hazards` | HazardArray | Vision→Mission | (已禁用) | 危险品检测结果 (主线已停用) |
 | `/drone/vision/landing_target` | LandingTarget | Vision→Mission | 20Hz | 降落目标定位 |
 | `/drone/vision/coverage` | CoverageStatus | Vision→Mission | 2Hz | 侦察区覆盖进度 |
@@ -952,17 +951,19 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 | `px4_control/flight_controller.py` | 桩代码 | ~20 | 飞行控制接口 |
 | `px4_control/telemetry.py` | 桩代码 | ~10 | 遥测数据模型 |
 | `drone_vision/models/yolo_engine.py` | ✅ 已实现 | ~320 | ONNX/TensorRT YOLO推理引擎 |
-| `drone_vision/vision_pipeline.py` | ✅ 已实现 | ~480 | 统一视觉管线 (单模型多任务) |
-| `drone_vision/cylinder_detector.py` | ✅ 已实现 | ~320 | 圆筒检测: YOLO→椭圆拟合→追踪 |
+| `drone_vision/vision_pipeline.py` | ✅ 已实现 | ~550 | 统一视觉管线 (单模型多任务) |
+| `drone_vision/cylinder_detector.py` | ✅ 已实现 | ~530 | 圆筒检测: YOLO→椭圆拟合→追踪 |
 | `drone_vision/hazard_classifier.py` | ⚠️ 已废弃 | ~220 | 危险品分类 (已从主线禁用, 可独立使用) |
 | `drone_vision/landing_detector.py` | ✅ 已实现 | ~250 | H降落: YOLO→圆形底板→PCA方向 |
 | `drone_vision/visual_servoing.py` | ✅ 已实现 | ~280 | IBVS: 降落 + 圆筒逼近双模式 |
 | `drone_vision/coverage_monitor.py` | ✅ 已实现 | ~180 | 覆盖监控 |
 | `drone_vision/coordinate_transforms.py` | ✅ 已实现 | ~250 | 姿态补偿坐标变换 + 高度自适应 |
-| `drone_vision/camera.py` | ✅ 已实现 | ~180 | 相机驱动 (SITL/GStreamer) |
+| `drone_vision/camera.py` | ✅ 已实现 | ~200 | 相机驱动 (SITL/GStreamer) |
 | `drone_vision/training/generate_labels.py` | ✅ 已实现 | ~200 | SDF→YOLO标签自动生成 |
 | `drone_vision/training/train.py` | ✅ 已实现 | ~80 | YOLOv8 训练 |
 | `drone_vision/training/export.py` | ✅ 已实现 | ~50 | ONNX/TensorRT 导出 |
+| `drone_vision/scripts/vision_viewer.py` | ✅ 已实现 | ~200 | 实时画面查看器 |
+| `scripts/debug_vision.sh` | ✅ 已实现 | ~70 | 一键视觉调试 |
 | `drone_servo/servo_controller.py` | 桩代码 | ~30 | 舵机控制 |
 | `drone_servo/servo_mock.py` | 桩代码 | ~10 | SITL模拟 |
 | `drone_servo/drop_manager.py` | 桩代码 | ~10 | 投放管理 |
@@ -971,11 +972,29 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 | `drone_mission/path_planner.py` | 桩代码 | ~15 | 路径规划 |
 | `drone_mission/cylinder_selector.py` | 桩代码 | ~10 | 选筒策略 |
 | `drone_utils/*.py` | 桩代码 | ~40 | 日志/看门狗/配置/紧急 |
-| **总计** | | **~3000** |
+| **总计** | | **~3500** |
 
 ---
 
-## 十五、验证方案
+## 十五、视觉调试工具
+
+### 实时查看器 (`drone_vision/scripts/vision_viewer.py`)
+- 绿色矩形框 → YOLO bbox 粗定位
+- 红点 + 黄色圆 → OpenCV 椭圆精修结果
+- 橙色矩形框 → 蓝色投放区标识 (V1 模型)
+- 底部 HUD: FPS / CYL:n / MKR:n / 覆盖率
+- 按键: q=退出, s=截图保存到 log/vision_screenshots/
+
+### 一键调试 (`scripts/debug_vision.sh`)
+```bash
+./scripts/debug_vision.sh              # 默认 /dev/video0
+./scripts/debug_vision.sh /dev/video1  # 切换摄像头
+```
+自动完成: 清理旧进程 → 启动摄像头 → 加载双模型 → 显示标注画面
+
+---
+
+## 十六、验证方案
 
 ### SITL 验证步骤
 
@@ -997,7 +1016,7 @@ ros2 topic echo /drone/vision/hazards
 
 ---
 
-## 十六、实现顺序 (v2 更新)
+## 十七、实现顺序 (v2 更新)
 
 遵循依赖链的严格构建顺序：
 
@@ -1016,7 +1035,7 @@ ros2 topic echo /drone/vision/hazards
 
 ---
 
-## 十七、关键设计决策速览 (v2)
+## 十八、关键设计决策速览 (v2)
 
 | 决策 | 理由 |
 |------|------|
@@ -1036,11 +1055,14 @@ ros2 topic echo /drone/vision/hazards
 | 覆盖率驱动返航 | 覆盖率≥95%触发返航, 不等候全部航点, 比固定超时更智能 |
 | 侦察区纯路径覆盖 | 不执行危险品识别, 聚焦全覆盖巡视的路径算法 |
 | 单模型6类 → 实际使用2类 | 训练6类保持模型通用性, 主线仅用 cylinder+landing_H |
+| 双单类模型分离推理 | V1(蓝色标识)+V2(白色圆筒) 独立引擎, 避免类别数不匹配 |
+| class_names YAML 驱动 | 模型类别数变更只需改配置, 无需改代码 |
+| camera_device 可配置 | 切换摄像头 -p camera_device:=/dev/video1 无需改代码 |
 | PID视觉伺服(双模式) | 积分项修正漂移；降落/圆筒逼近不同参数 |
 
 ---
 
-## 十八、关键参考文件
+## 十九、关键参考文件
 
 本方案设计参考了以下文件中的已有模式和接口：
 

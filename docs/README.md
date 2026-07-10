@@ -322,7 +322,9 @@ drone_tasks_ws/
 │   └── drone_field.sdf      # Gazebo 场地描述文件
 ├── PX4-Autopilot -> /home/ryder/PX4-Autopilot
 ├── scripts/
-│   └── start_full_simulation.sh # 一键启动脚本
+│   ├── start_full_simulation.sh # 一键 SITL 启动
+│   └── debug_vision.sh         # 一键视觉调试 (摄像头+管线+viewer)
+├── cv_trainer -> /home/ryder/cv_trainer  # 模型训练来源
 ```
 
 ---
@@ -348,7 +350,8 @@ drone_tasks_ws/
 | 1.1 | `docs/README.md`（本文件） | 场地布局、任务流程、启动方式、参数体系 |
 | 1.2 | `docs/ARCHITECTURE.md` | 四层架构、ROS2 包结构、状态转换图、数据流话题表、坐标变换链 |
 | 1.3 | `docs/DEBUG_2026-07-09.md` | 已知控制链分析和已知坑点 |
-| 1.4 | `scripts/start_full_simulation.sh` | 启动顺序（Agent→PX4→Bridge→ROS2节点），环境变量 |
+| 1.4 | `docs/CHANGELOG_2026-07-10.md` | 最新变更：模型融合、bbox 消息、launch 修复、视觉调试工具 |
+| 1.5 | `scripts/start_full_simulation.sh` | 启动顺序（Agent→PX4→Bridge→ROS2节点），环境变量 |
 
 **读完应能回答**：系统有几个包？每个包干什么？数据在话题间怎么流？无人机要完成什么任务？
 
@@ -391,13 +394,15 @@ drone_tasks_ws/
 
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
-| 4.1 | `src/drone_vision/drone_vision/models/yolo_engine.py` | ~320 | YOLO ONNX/TensorRT 推理引擎；letterbox→推理→`_rescale_bbox()` 回原图（**关键修复点**）；`Detection` 数据类 |
-| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~840 | **全系统第二关键的单文件**。`_lazy_init` 加载引擎+创建后处理器；`_image_cb` 主回调（帧率自适应→YOLO推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`_process_coverage` 覆盖网格更新；伺服模式切换 |
-| 4.3 | `src/drone_vision/drone_vision/cylinder_detector.py` | ~320 | `CylinderRefiner.refine()`: YOLO bbox→ROI→Canny→椭圆拟合→白度评分；`CylinderTracker`: IoU 多帧匹配→稳定ID |
+| 4.1 | `src/drone_vision/drone_vision/models/yolo_engine.py` | ~450 | YOLO ONNX/TensorRT/PyTorch 推理引擎；letterbox→推理→`_rescale_bbox()` 回原图（**关键修复点**）；`Detection` 数据类；自动按后缀选后端 |
+| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~860 | **全系统第二关键的单文件**。`_lazy_init` 加载双模型(V2圆筒+V1投放区标识)；`_image_cb` 主回调（帧率自适应→YOLO推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`/drone/vision/markers` 投放区标识发布 |
+| 4.3 | `src/drone_vision/drone_vision/cylinder_detector.py` | ~530 | `CylinderRefiner.refine()`: YOLO bbox→ROI→Canny→椭圆拟合→白度评分；`CylinderTracker`: IoU 多帧匹配→稳定ID (支持 bbox) |
 | 4.4 | `src/drone_vision/drone_vision/landing_detector.py` | ~250 | `LandingPadRefiner.refine()`: 自适应阈值→圆形检测→PCA 方向估计 |
 | 4.5 | `src/drone_vision/drone_vision/coverage_monitor.py` | ~180 | 网格离散化 + FOV 投影覆盖标记 + 覆盖率计算 |
 | 4.6 | `src/drone_vision/drone_vision/visual_servoing.py` | ~280 | `VisualServoController` 降落模式 PID；`CylinderApproachController` 圆筒逼近 PID |
-| 4.7 | `src/drone_vision/drone_vision/camera.py` | ~180 | SITL/GStreamer 双模式相机驱动 |
+| 4.7 | `src/drone_vision/drone_vision/camera.py` | ~200 | SITL/GStreamer 双模式；`camera_device` 可切换；grab/retrieve 消除帧缓冲延迟 |
+| 4.8 | `src/drone_vision/scripts/vision_viewer.py` | ~200 | 实时标注画面：绿色YOLO框+红点精修圆心+橙色投放区标识；按 q 退出 / s 截图 |
+| 4.9 | `scripts/debug_vision.sh` | ~70 | 一键视觉调试：摄像头 + 双模型 + 标注画面 |
 
 **读完应能回答**：一个 1280×960 图像中的圆筒经过了哪些处理才变成 `CylinderDetection(center_x, center_y, confidence)`？姿态补偿和简化投影的区别在哪里？YOLO 模型不可用时系统如何回退？
 
@@ -461,10 +466,10 @@ drone_tasks_ws/
 | 1. 大局观 | 30 min | 30 min |
 | 2. 基础设施 | 45 min | 1h 15min |
 | 3. 通信层 | 60 min | 2h 15min |
-| 4. 视觉管线 | 90 min | 3h 45min |
-| 5. 状态机 | 90 min | 5h 15min |
-| 6. 执行与接口 | 30 min | 5h 45min |
-| 7. 参数配置 | 15 min | 6h |
+| 4. 视觉管线 | 100 min | 3h 55min |
+| 5. 状态机 | 90 min | 5h 25min |
+| 6. 执行与接口 | 30 min | 5h 55min |
+| 7. 参数配置 | 15 min | 6h 10min |
 
 ---
 
@@ -503,3 +508,6 @@ Gazebo 相机 (分辨率取决于 PX4 模型)
 - 两套独立的世界坐标计算（`DEBUG_2026-07-09.md` 根因 3）
 - YOLO bbox 必须 rescale 回原图（`DEBUG_2026-07-09.md` 提及）
 - coverage monitor 必须每帧 update（`DEBUG_2026-07-09.md` 提及）
+- OpenCV VideoCapture 内部缓冲导致显示延迟 → grab/retrieve 替代 read（`CHANGELOG_2026-07-10.md`）
+- launch 文件空字符串覆盖 YAML 参数 → 移除 model_path 覆盖（`CHANGELOG_2026-07-10.md`）
+- class_names 必须与模型 nc 一致，否则后处理列偏移错误 → YAML 驱动

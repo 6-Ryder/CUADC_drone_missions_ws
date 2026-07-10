@@ -16,21 +16,21 @@
     # ============================================================
     # YOLO 模型参数
     # ============================================================
-    model_path: ""                # ONNX 模型路径 (空=使用默认)
-    drop_marker_model_path: ""    # 投放区蓝色 1m 标识模型路径 (可选)
-    model_width: 640              # 模型输入宽
-    model_height: 640             # 模型输入高
-    conf_threshold: 0.35          # YOLO 置信度阈值 (匹配 cv_trainer 推理脚本)
-    nms_iou_threshold: 0.45      # NMS IoU 阈值
-    device: "cuda"                # cuda / cpu / tensorrt
-    # 类别映射: ID → 名称
+    # ---- YOLO 主模型 (白色圆筒检测, 单类) ----
+    model_path: "cylinder_yolo.pt"         # .pt 或 .onnx; 相对 models/ 或绝对路径
+    model_width: 640                       # 模型输入宽
+    model_height: 640                      # 模型输入高
+    conf_threshold: 0.35                   # YOLO 置信度阈值 (匹配 cv_trainer 推理脚本)
+    nms_iou_threshold: 0.45               # NMS IoU 阈值
+    device: "cuda"                         # cuda / cpu / tensorrt
+    # 主模型类别映射: ID → 名称 (必须与模型输出类别数一致)
     class_names:
-      - "cylinder"                # 0: 圆筒
-      - "flammable"               # 1: 易燃标识 (橙色)
-      - "health_hazard"           # 2: 健康危害标识 (蓝色)
-      - "danger"                  # 3: 危险标识 (红色)
-      - "landing_H"               # 4: H 降落标识
-      - "empty_cylinder"          # 5: 空圆筒 (无危险品)
+      - "cylinder"                         # 0: 白色圆筒
+
+    # ---- 投放区蓝色标识模型 (单类, 可选) ----
+    drop_marker_model_path: "drop_marker_yolo.pt"
+    drop_marker_class_names:
+      - "drop_zone_marker"                 # 0: 蓝色投放区标识
 
     # ============================================================
     # 圆筒检测精确后处理 (OpenCV)

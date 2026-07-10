@@ -41,17 +41,7 @@ def generate_launch_description():
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
     mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
 
-    # ---- 启动参数 ----
-    model_path_arg = DeclareLaunchArgument(
-        "model_path",
-        default_value="",
-        description="YOLO ONNX 模型路径 (空=使用默认/回退 OpenCV)",
-    )
-    drop_marker_model_path_arg = DeclareLaunchArgument(
-        "drop_marker_model_path",
-        default_value="",
-        description="投放区蓝色标识 YOLO 模型路径 (可选)",
-    )
+    # ---- 启动参数 (模型路径由 vision_params.yaml 配置) ----
 
     # ---- 节点 ----
 
@@ -66,19 +56,13 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-    # 2. 统一视觉管线
+    # 2. 统一视觉管线 (模型路径由 YAML 配置)
     vision_node = Node(
         package="drone_vision",
         executable="vision_pipeline",
         name="vision_pipeline",
         output="screen",
-        parameters=[
-            vision_param_file,
-            {
-                "model_path": LaunchConfiguration("model_path"),
-                "drop_marker_model_path": LaunchConfiguration("drop_marker_model_path"),
-            },
-        ],
+        parameters=[vision_param_file],
         arguments=[
             "--ros-args",
             "--log-level", "info",
@@ -124,8 +108,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        model_path_arg,
-        drop_marker_model_path_arg,
         LogInfo(msg="=== 无人机 SITL 全系统启动 ==="),
         LogInfo(msg="  1. PX4 Bridge (DDS → ROS2)"),
         LogInfo(msg="  2. Vision Pipeline (YOLO + OpenCV)"),

@@ -30,15 +30,6 @@ def generate_launch_description():
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
     mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
 
-    model_path_arg = DeclareLaunchArgument(
-        "model_path", default_value="",
-        description="YOLO ONNX 模型路径",
-    )
-    drop_marker_model_path_arg = DeclareLaunchArgument(
-        "drop_marker_model_path", default_value="",
-        description="投放区蓝色标识 YOLO 模型路径 (可选)",
-    )
-
     # PX4 桥接
     px4_bridge_node = Node(
         package="px4_control",
@@ -49,7 +40,7 @@ def generate_launch_description():
         parameters=[px4_param_file],
     )
 
-    # 视觉 — 使用实飞配置
+    # 视觉 — 实飞模式 (model 路径由 YAML 配置, 命令行可用 --ros-args 覆盖)
     vision_node = Node(
         package="drone_vision",
         executable="vision_pipeline",
@@ -58,14 +49,9 @@ def generate_launch_description():
         parameters=[
             vision_param_file,
             {
-                "model_path": LaunchConfiguration("model_path"),
-                "drop_marker_model_path": LaunchConfiguration("drop_marker_model_path"),
                 "sim_mode": False,
                 "device": "tensorrt",
             },
-        ],
-        arguments=[
-            "--ros-args",
         ],
     )
 
@@ -98,8 +84,6 @@ def generate_launch_description():
     mission_delayed = TimerAction(period=3.0, actions=[mission_node])
 
     return LaunchDescription([
-        model_path_arg,
-        drop_marker_model_path_arg,
         LogInfo(msg="=== 无人机实飞全系统启动 (Jetson) ==="),
         px4_bridge_node,
         vision_delayed,
