@@ -11,6 +11,7 @@ DROP 状态 — 降高至投放高度 + 触发舵机投放 + 确认.
   - 投放次数 = 2: TRANSIT_TO_RECON_ZONE
 """
 
+import math
 import time
 from typing import Optional
 
@@ -36,6 +37,8 @@ class DropState:
         self._sub_state: str = "DESCEND_TO_DROP"
         self._last_descend_log_time: float = 0.0
         self._visual_aligner = DropVisualAligner(fsm)
+        self._descend_retry_count: int = 0
+        self._descend_best_pixel_error: float = float("inf")
 
     # ---- 子状态切换 ----
 
@@ -55,6 +58,8 @@ class DropState:
         self._drop_executed = False
         self._drop_success = False
         self._last_descend_log_time = 0.0
+        self._descend_retry_count = 0
+        self._descend_best_pixel_error = float("inf")
         self._visual_aligner.reset()
 
         if self._sub_state == "DESCEND_TO_DROP":
@@ -111,6 +116,11 @@ class DropState:
         pos = self._fsm.bridge.get_current_position()
         elapsed = time.time() - self._start_time
 
+        # 跟踪梯度下降进展
+        status = self._visual_aligner.last_status
+        if status.pixel_error < self._descend_best_pixel_error:
+            self._descend_best_pixel_error = status.pixel_error
+
         if abs(pos.down + drop_h) < 0.3:
             if self._drop_target_is_centered():
                 self._fsm.get_logger().info("DESCEND: 到达投放高度且目标居中")
@@ -118,10 +128,25 @@ class DropState:
 
             align_timeout = float(self._fsm.get_param("drop_visual_align_timeout", 18.0))
             if elapsed > align_timeout:
-                status = self._visual_aligner.last_status
+                # 梯度下降有进展 → 原地重置重试, 不回升
+                if (self._descend_retry_count < 1
+                        and math.isfinite(self._descend_best_pixel_error)
+                        and self._descend_best_pixel_error < 250):
+                    best_so_far = self._descend_best_pixel_error
+                    self._descend_retry_count += 1
+                    self._visual_aligner.reset()
+                    self._start_time = time.time()
+                    self._descend_best_pixel_error = float("inf")
+                    self._fsm.get_logger().info(
+                        f"DESCEND: 超时但 best_err={best_so_far:.0f}px, "
+                        f"原地重置梯度下降 (retry={self._descend_retry_count})"
+                    )
+                    return None
+
                 self._fsm.get_logger().warn(
-                    "DESCEND: 低空视觉校准超时, 放弃当前目标并重试 "
-                    f"source={status.source} pixel_error={status.pixel_error:.1f}px"
+                    "DESCEND: 低空视觉校准超时, 放弃当前目标并回升 "
+                    f"source={status.source} pixel_error={status.pixel_error:.1f}px "
+                    f"retries={self._descend_retry_count}"
                 )
                 if hasattr(self._fsm, "release_current_drop_target"):
                     self._fsm.release_current_drop_target()
