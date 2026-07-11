@@ -59,10 +59,11 @@ class DropVisualAligner:
 
         # 探测状态 — 端点比较法, 不回锚点
         self._phase: ServoPhase = ServoPhase.PROBE_X_PLUS
-        self._working_axis_x: bool = True     # 当前在探 X 还是 Y 轴
+        self._working_axis_x: bool = True
         self._baseline_n: float = 0.0
         self._baseline_e: float = 0.0
         self._baseline_pixel_error: float = float("inf")
+        self._baseline_source: str = "none"   # 锁定目标身份, 防止探测中途切换
         self._probe_start_time: float = 0.0
         self._endpoint_plus_error: float = float("inf")
         self._endpoint_minus_error: float = float("inf")
@@ -83,6 +84,7 @@ class DropVisualAligner:
         self._baseline_n = 0.0
         self._baseline_e = 0.0
         self._baseline_pixel_error = float("inf")
+        self._baseline_source = "none"
         self._probe_start_time = 0.0
         self._endpoint_plus_error = float("inf")
         self._endpoint_minus_error = float("inf")
@@ -259,12 +261,15 @@ class DropVisualAligner:
 
         return self._probing(status, drop_height)
 
+    def _target_identity(self, status: VisualAlignStatus) -> str:
+        """返回目标身份标识, 用于探测周期内锁定."""
+        return f"{status.source}"
+
     def _probing(self, status: VisualAlignStatus, drop_h: float) -> bool:
-        """端点比较法: 每个轴分别采样 +step 和 -step, 取 pixel_error 小的提交."""
+        """端点比较法: 锁定目标身份, 分别采样 ±step, 取 pixel_error 小的提交."""
         now = self._fsm.get_clock().now().nanoseconds / 1e9
         settle = float(self._fsm.get_param("drop_visual_align_probe_settle", 1.0))
         step = self._current_step()
-        brake_threshold = float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0))
         axis_label = "X" if self._working_axis_x else "Y"
 
         # ── 设定基线 ──
@@ -273,6 +278,7 @@ class DropVisualAligner:
             self._baseline_n = pos.north
             self._baseline_e = pos.east
             self._baseline_pixel_error = status.pixel_error
+            self._baseline_source = self._target_identity(status)
             self._update_step_scale(status.pixel_error)
             step = self._current_step()
 
@@ -280,7 +286,8 @@ class DropVisualAligner:
             dn, de = self._axis_delta_ned(self._working_axis_x, +1.0, step)
             self._probe_move(
                 self._baseline_n + dn, self._baseline_e + de, drop_h,
-                f"{axis_label}+ baseline_err={self._baseline_pixel_error:.0f}px"
+                f"{axis_label}+ baseline_err={self._baseline_pixel_error:.0f}px "
+                f"src={self._baseline_source}"
             )
             return True
 
@@ -288,9 +295,13 @@ class DropVisualAligner:
         if now - self._probe_start_time < settle:
             return True
 
-        # ── 采样端点 ──
-        if not self._pixel_valid(status):
-            self._fsm.get_logger().warn(f"DESCEND_PROBE: 采样无效, 回基线")
+        # ── 目标身份校验 ——
+        current_id = self._target_identity(status)
+        if current_id != self._baseline_source or not self._pixel_valid(status):
+            self._fsm.get_logger().warn(
+                f"DESCEND_PROBE: 目标切换/丢失 baseline={self._baseline_source} "
+                f"→ current={current_id} valid={self._pixel_valid(status)}, 回基线重试"
+            )
             self._goto_baseline(drop_h)
             self._probe_start_time = 0.0
             self._phase = ServoPhase.PROBE_X_PLUS
@@ -303,10 +314,9 @@ class DropVisualAligner:
             delta = self._baseline_pixel_error - status.pixel_error
             self._fsm.get_logger().info(
                 f"DESCEND_PROBE: +采样 err={status.pixel_error:.0f}px "
-                f"delta={delta:+.0f}px (正=改善)"
+                f"delta={delta:+.0f}px src={current_id}"
             )
 
-            # 直接跳到 - 端点 (baseline - step), 不回锚点
             self._phase = (ServoPhase.PROBE_X_MINUS if self._working_axis_x else ServoPhase.PROBE_Y_MINUS)
             dn, de = self._axis_delta_ned(self._working_axis_x, -1.0, step)
             self._probe_move(
@@ -321,7 +331,7 @@ class DropVisualAligner:
             delta = self._baseline_pixel_error - status.pixel_error
             self._fsm.get_logger().info(
                 f"DESCEND_PROBE: -采样 err={status.pixel_error:.0f}px "
-                f"delta={delta:+.0f}px (正=改善)"
+                f"delta={delta:+.0f}px src={current_id}"
             )
 
             best = min(
@@ -335,7 +345,7 @@ class DropVisualAligner:
             self._fsm.get_logger().info(
                 f"DESCEND_PROBE: 比较 baseline={self._baseline_pixel_error:.0f} "
                 f"+={self._endpoint_plus_error:.0f} -={self._endpoint_minus_error:.0f} "
-                f"→ 最佳={best_sign:+.0f} err={best_err:.0f}px"
+                f"→ 最佳={best_sign:+.0f} err={best_err:.0f}px src={self._baseline_source}"
             )
 
             if best_sign != 0.0:
