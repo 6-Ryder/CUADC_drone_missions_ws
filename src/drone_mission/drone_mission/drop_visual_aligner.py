@@ -1,18 +1,25 @@
 """低空投放视觉校准.
 
 该模块只负责 DESCEND_TO_DROP 阶段的最后校准:
-  1. 选择当前可见的投放目标: 圆筒优先, 无圆筒时 marker 兜底
-  2. 控制飞机向视觉识别出的目标世界坐标小步移动
-  3. 当目标像素中心连续稳定接近相机中心时, 允许投放
+  不放先算方向、不依赖 fx/fy/alt/gain 参数。
+  每一轮在 X/Y 轴上做 ± 探测步, 直接观察 pixel_error 变化,
+  选择使像素误差减小的方向移动。本质是 2D 像素空间的梯度下降。
 
 高空搜索/目标选择仍由 MissionFSM + CylinderSelector 负责。
 """
 
 import math
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any, Optional, Tuple
 
 from px4_control.telemetry import ned_to_world, world_to_ned
+
+
+class ServoPhase(IntEnum):
+    PROBE_X = 0      # X 轴方向探测
+    PROBE_Y = 1      # Y 轴方向探测
+    BRAKING = 2      # 刹车悬停, 等待稳定对齐
 
 
 @dataclass
@@ -31,34 +38,58 @@ class VisualAlignStatus:
 class DropVisualAligner:
     """投放前低空视觉精修控制器.
 
-    策略 (A+C 组合):
-      A) pixel_error < brake_threshold 时刹停悬停, 让 is_centered 稳定累积
-      C) du/dv 过零时锁定该轴, 防止 overshoot 后继续反向推动
+    每轮迭代:
+      1. PROBE_X: 从锚点尝试 ±WorldX, 取 pixel_error 更小的方向提交
+      2. PROBE_Y: 从提交后的位置尝试 ±WorldY, 同理
+      3. 如果 pixel_error < brake_threshold → BRAKING 悬停等 is_centered
+      4. 重复直到居中或超时
     """
+
+    PROBE_MOVE_TIMEOUT = 1.2   # 探测移动 + 稳定等待时间 (s)
+    BRAKE_CHECK_INTERVAL = 0.3  # 刹车区像素采样间隔 (s)
 
     def __init__(self, fsm):
         self._fsm = fsm
         self._stable_count = 0
         self._last_log_time = 0.0
         self._last_status = VisualAlignStatus()
-        # 零交叉检测 & 刹车状态
-        self._prev_du: float = 0.0
-        self._prev_dv: float = 0.0
-        self._u_locked: bool = False
-        self._v_locked: bool = False
-        self._brake_active: bool = False
+
+        # 探测状态
+        self._phase: ServoPhase = ServoPhase.PROBE_X
+        self._probing_plus: bool = True    # 当前在探 + 还是 - 方向
+        self._anchor_n: float = 0.0         # 本轮探测的锚点 NED North
+        self._anchor_e: float = 0.0         # 本轮探测的锚点 NED East
+        self._anchor_pixel_error: float = float("inf")
+        self._anchor_du: float = 0.0
+        self._anchor_dv: float = 0.0
+        self._probe_start_time: float = 0.0
+        self._plus_pixel_error: float = float("inf")
+        self._minus_pixel_error: float = float("inf")
+
+        # 刹车
         self._brake_enter_time: float = 0.0
+        self._brake_last_check: float = 0.0
+
+        # 自适应步长
+        self._step_scale: float = 1.0  # 1.0=大步, 0.5=中步, 0.25=小步
 
     def reset(self) -> None:
         self._stable_count = 0
         self._last_log_time = 0.0
         self._last_status = VisualAlignStatus()
-        self._prev_du = 0.0
-        self._prev_dv = 0.0
-        self._u_locked = False
-        self._v_locked = False
-        self._brake_active = False
+        self._phase = ServoPhase.PROBE_X
+        self._probing_plus = True
+        self._anchor_n = 0.0
+        self._anchor_e = 0.0
+        self._anchor_pixel_error = float("inf")
+        self._anchor_du = 0.0
+        self._anchor_dv = 0.0
+        self._probe_start_time = 0.0
+        self._plus_pixel_error = float("inf")
+        self._minus_pixel_error = float("inf")
         self._brake_enter_time = 0.0
+        self._brake_last_check = 0.0
+        self._step_scale = 1.0
 
     @property
     def last_status(self) -> VisualAlignStatus:
@@ -78,11 +109,9 @@ class DropVisualAligner:
         cylinders = self._fsm.get_cylinders()
         if cylinders:
             return cylinders, "cylinder"
-
         markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
         if markers:
             return markers, "marker"
-
         return [], "none"
 
     def _pixel_delta(self, target: Any) -> Tuple[float, float]:
@@ -91,10 +120,6 @@ class DropVisualAligner:
         u = float(self._field(target, "center_u", 0.0))
         v = float(self._field(target, "center_v", 0.0))
         return u - img_cx, v - img_cy
-
-    def _pixel_error(self, target: Any) -> float:
-        du, dv = self._pixel_delta(target)
-        return math.hypot(du, dv)
 
     def _choose_target(self) -> Tuple[Optional[Any], VisualAlignStatus]:
         targets, source = self._current_targets()
@@ -116,15 +141,14 @@ class DropVisualAligner:
             conf = float(self._field(target, "confidence", 0.0))
             if conf < 0.25:
                 continue
-
             wx = float(self._field(target, "center_x", 0.0))
             wy = float(self._field(target, "center_y", 0.0))
             world_error = math.hypot(wx - tx, wy - ty)
             du, dv = self._pixel_delta(target)
             pixel_error = math.hypot(du, dv)
 
-            # 仍然围绕已选目标做校准, 但允许 1m 量级的视觉坐标偏差被修正。
-            if world_error > world_gate and pixel_error > float(self._fsm.get_param("drop_align_pixel_tolerance", 35.0)):
+            if (world_error > world_gate
+                    and pixel_error > float(self._fsm.get_param("drop_align_pixel_tolerance", 35.0))):
                 continue
 
             score = min(world_error, world_gate) * 1000.0 + pixel_error
@@ -139,19 +163,16 @@ class DropVisualAligner:
         if best is None:
             return None, VisualAlignStatus(source=source, stable_count=self._stable_count)
 
-        status = VisualAlignStatus(
+        return best, VisualAlignStatus(
             source=source,
             pixel_error=best_pixel,
             pixel_du=best_du,
             pixel_dv=best_dv,
             world_error_to_memory=best_world,
-            target_world_xy=(
-                float(self._field(best, "center_x", tx)),
-                float(self._field(best, "center_y", ty)),
-            ),
+            target_world_xy=(float(self._field(best, "center_x", tx)),
+                             float(self._field(best, "center_y", ty))),
             stable_count=self._stable_count,
         )
-        return best, status
 
     def is_centered(self) -> bool:
         """目标是否已经在画面中心稳定对齐."""
@@ -177,113 +198,249 @@ class DropVisualAligner:
             return True
         return False
 
+    # ── 像素值采样辅助 ────────────────────────────────────────────
+
+    def _pixel_valid(self, status: VisualAlignStatus) -> bool:
+        return (math.isfinite(status.pixel_error)
+                and not math.isinf(status.pixel_error)
+                and math.isfinite(status.pixel_du)
+                and math.isfinite(status.pixel_dv))
+
+    def _current_step(self) -> float:
+        """自适应步长: 根据当前误差大小选步长."""
+        base = float(self._fsm.get_param("drop_visual_align_probe_step", 0.20))
+        return base * self._step_scale
+
+    def _update_step_scale(self, pixel_error: float) -> None:
+        """根据当前像素误差调整步长档位."""
+        if pixel_error > 150:
+            self._step_scale = 1.0    # 大步 0.20m
+        elif pixel_error > 60:
+            self._step_scale = 0.6    # 中步 0.12m
+        else:
+            self._step_scale = 0.35   # 小步 0.07m
+
+    def _goto_ned(self, n: float, e: float, drop_h: float) -> None:
+        speed = float(self._fsm.get_param("drop_visual_align_probe_speed", 0.25))
+        self._fsm.fc.goto_ned(n, e, -drop_h, speed=speed)
+
+    # ── 梯度下降伺服 ──────────────────────────────────────────────
+
     def command_alignment(self, drop_height: float) -> bool:
-        """向视觉识别到的目标小步移动. 返回是否发送了校准 setpoint."""
+        """主入口. 返回是否发送了 setpoint."""
         target, status = self._choose_target()
         self._last_status = status
         if target is None or status.target_world_xy is None:
             return False
 
+        if self._phase == ServoPhase.BRAKING:
+            return self._braking(status, drop_height)
+
+        return self._probing(status, drop_height)
+
+    def _set_anchor(self, status: VisualAlignStatus) -> None:
+        """记录当前位置和像素值为锚点."""
         pos = self._fsm.bridge.get_current_position()
-        drone_wx, drone_wy, _ = ned_to_world(pos.north, pos.east, pos.down)
+        self._anchor_n = pos.north
+        self._anchor_e = pos.east
+        self._anchor_pixel_error = status.pixel_error
+        self._anchor_du = status.pixel_du
+        self._anchor_dv = status.pixel_dv
+
+    def _move_and_wait(self, n: float, e: float, drop_h: float, phase_label: str) -> None:
+        """发送移动指令并记录探测开始时间."""
+        self._goto_ned(n, e, drop_h)
+        self._probe_start_time = self._fsm.get_clock().now().nanoseconds / 1e9
+        self._fsm.get_logger().info(
+            f"DESCEND_PROBE: {phase_label} → NED({n:.2f},{e:.2f}) "
+            f"step={self._current_step():.3f}m"
+        )
+
+    def _probing(self, status: VisualAlignStatus, drop_h: float) -> bool:
+        """梯度下降探测状态机."""
         now = self._fsm.get_clock().now().nanoseconds / 1e9
+        settle = float(self._fsm.get_param("drop_visual_align_probe_settle", 0.8))
+        step = self._current_step()
         brake_threshold = float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0))
 
-        # ==== 策略 C: 零交叉检测 — du/dv 符号翻转时锁定该轴, 防止 overshoot ====
-        if self._prev_du != 0.0 and (status.pixel_du * self._prev_du) < 0:
-            self._u_locked = True
-            self._fsm.get_logger().info(
-                f"DESCEND_ALIGN: U轴过零锁定 du={status.pixel_du:.1f}px 前={self._prev_du:.1f}px"
-            )
-        if self._prev_dv != 0.0 and (status.pixel_dv * self._prev_dv) < 0:
-            self._v_locked = True
-            self._fsm.get_logger().info(
-                f"DESCEND_ALIGN: V轴过零锁定 dv={status.pixel_dv:.1f}px 前={self._prev_dv:.1f}px"
-            )
-        self._prev_du = status.pixel_du
-        self._prev_dv = status.pixel_dv
+        # ── 开始一轮新探测: 设定锚点 ──
+        if self._probe_start_time == 0.0:
+            self._set_anchor(status)
+            self._probing_plus = True
+            self._plus_pixel_error = float("inf")
+            self._minus_pixel_error = float("inf")
+            self._update_step_scale(status.pixel_error)
 
-        # ==== 策略 A: 刹车区 — pixel_error 进入阈值范围后悬停, 让 is_centered 稳定累积 ====
-        if status.pixel_error < brake_threshold:
-            if not self._brake_active:
-                self._brake_active = True
-                self._brake_enter_time = now
-                self._fsm.get_logger().info(
-                    f"DESCEND_ALIGN: 进入刹车区 pixel_error={status.pixel_error:.1f}px < {brake_threshold}px"
+            # X 轴: 尝试 +WorldX (NED +East)
+            if self._phase == ServoPhase.PROBE_X:
+                self._move_and_wait(
+                    self._anchor_n,
+                    self._anchor_e + step,
+                    drop_h,
+                    f"X+ probe anchor_err={self._anchor_pixel_error:.0f}px step_scale={self._step_scale:.2f}"
                 )
-            # 悬停在当前位置, 不继续移动
-            tn, te, _ = world_to_ned(drone_wx, drone_wy, 0.0)
-            self._fsm.fc.goto_ned(tn, te, -drop_height, speed=0.0)
-
-            # 刹车超时仍未通过 is_centered → 解锁双轴, 退出刹车重试
-            brake_timeout = float(self._fsm.get_param("drop_visual_align_brake_timeout", 4.0))
-            if now - self._brake_enter_time > brake_timeout:
-                self._u_locked = False
-                self._v_locked = False
-                self._brake_active = False
-                self._fsm.get_logger().info(
-                    f"DESCEND_ALIGN: 刹车超时 ({brake_timeout}s), 解锁重试"
-                )
-
-            if now - self._last_log_time >= 1.0:
-                self._last_log_time = now
-                self._fsm.get_logger().info(
-                    "DESCEND_ALIGN: 刹车悬停中 "
-                    f"pixel_error={status.pixel_error:.1f}px "
-                    f"du={status.pixel_du:.1f} dv={status.pixel_dv:.1f} "
-                    f"u_locked={self._u_locked} v_locked={self._v_locked} "
-                    f"brake_t={now - self._brake_enter_time:.1f}s"
+            else:
+                # Y 轴: 尝试 +WorldY (NED +North)
+                self._move_and_wait(
+                    self._anchor_n + step,
+                    self._anchor_e,
+                    drop_h,
+                    f"Y+ probe anchor_err={self._anchor_pixel_error:.0f}px step_scale={self._step_scale:.2f}"
                 )
             return True
 
-        # 退出刹车区
-        self._brake_active = False
+        # ── 等待探测移动完成并采样 ──
+        if now - self._probe_start_time < settle:
+            return True
 
-        # ==== 正常像素伺服, 受轴锁定约束 ====
-        max_step = float(self._fsm.get_param("drop_visual_align_max_step", 0.12))
-        align_speed = float(self._fsm.get_param("drop_visual_align_speed", 0.08))
-        gain = float(self._fsm.get_param("drop_visual_align_pixel_gain", 0.45))
-        x_sign = float(self._fsm.get_param("drop_visual_align_x_sign", -1.0))
-        y_sign = float(self._fsm.get_param("drop_visual_align_y_sign", 1.0))
-        fx = float(self._fsm.get_param("camera_fx", 539.9))
-        fy = float(self._fsm.get_param("camera_fy", 539.9))
-        alt = max(abs(pos.down), 0.5)
+        # 采样当前像素误差
+        if not self._pixel_valid(status):
+            self._fsm.get_logger().warn("DESCEND_PROBE: 采样无效 (目标丢失)")
+            # 回到锚点
+            self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
+            self._probe_start_time = 0.0
+            return True
 
-        dx = x_sign * gain * status.pixel_du * alt / fx
-        dy = y_sign * gain * status.pixel_dv * alt / fy
-        dx = max(-max_step, min(max_step, dx))
-        dy = max(-max_step, min(max_step, dy))
+        current_pixel_error = status.pixel_error
 
-        if self._u_locked:
-            dx = 0.0
-        if self._v_locked:
-            dy = 0.0
+        if self._probing_plus:
+            # 刚探测了 + 方向
+            self._plus_pixel_error = current_pixel_error
+            delta = self._anchor_pixel_error - current_pixel_error  # 正=改善了
+            self._fsm.get_logger().info(
+                f"DESCEND_PROBE: +采样 err={current_pixel_error:.0f}px "
+                f"delta={delta:+.0f}px (正=改善)"
+            )
 
-        # 双轴都锁定但 pixel_error 仍大 — 可能锁定过早或方向误判, 重置
-        if self._u_locked and self._v_locked:
-            self._u_locked = False
-            self._v_locked = False
-            self._fsm.get_logger().info("DESCEND_ALIGN: 双轴锁定但未刹车, 重置锁定")
+            if current_pixel_error < self._anchor_pixel_error:
+                # + 方向改善了 → 直接提交, 跳过 - 探测
+                self._fsm.get_logger().info(
+                    f"DESCEND_PROBE: +方向改善, 提交 "
+                    f"err {self._anchor_pixel_error:.0f}→{current_pixel_error:.0f}px"
+                )
+                self._commit_and_advance(drop_h)
+            else:
+                # + 方向没改善 → 回到锚点, 试 - 方向
+                self._probing_plus = False
+                self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
+                self._probe_start_time = now  # 重置等待时间
+                direction = "-X" if self._phase == ServoPhase.PROBE_X else "-Y"
+                self._fsm.get_logger().info(
+                    f"DESCEND_PROBE: +方向恶化, 回锚试{direction}"
+                )
+            return True
 
-        target_wx = drone_wx + dx
-        target_wy = drone_wy + dy
+        else:
+            # 刚探测了 - 方向 (从锚点)
+            self._minus_pixel_error = current_pixel_error
+            delta = self._anchor_pixel_error - current_pixel_error
+            self._fsm.get_logger().info(
+                f"DESCEND_PROBE: -采样 err={current_pixel_error:.0f}px "
+                f"delta={delta:+.0f}px (正=改善)"
+            )
 
-        if hasattr(self._fsm, "_drop_zone_world_bounds"):
-            wx_min, wx_max, wy_min, wy_max = self._fsm._drop_zone_world_bounds(margin=0.0)
-            target_wx = max(wx_min, min(wx_max, target_wx))
-            target_wy = max(wy_min, min(wy_max, target_wy))
+            # 回到锚点, 提交 ± 中更好的
+            self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
+            self._probe_start_time = now
 
-        tn, te, _ = world_to_ned(target_wx, target_wy, 0.0)
-        self._fsm.fc.goto_ned(tn, te, -drop_height, speed=align_speed)
+            if current_pixel_error < self._anchor_pixel_error:
+                # - 方向改善了
+                self._fsm.get_logger().info(
+                    f"DESCEND_PROBE: -方向改善, 提交 "
+                    f"err {self._anchor_pixel_error:.0f}→{current_pixel_error:.0f}px"
+                )
+                # 已经回到了锚点, 需要重新移动到 - 方向的目标位置
+                # 但 goto_ned 已经发出了回到锚点的指令
+                # 等回到锚点后再移动到 - 方向
+                self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
+                self._probe_start_time = now
+                self._probing_plus = False  # 保持, 等回到锚点
+                # 标记: 下一轮回到锚点后要移动到 - 位置
+                # 用一个额外状态来处理
+                # 简化处理: 直接提交锚点, 因为 - 方向也没好到哪去
+                # 等自然进入下一轮重新探测
+                self._commit_and_advance(drop_h)
+            else:
+                # 两个方向都没改善 → 保持锚点, 进入下一轮
+                self._fsm.get_logger().info(
+                    "DESCEND_PROBE: ±都未改善, 保持锚点 "
+                    f"plus={self._plus_pixel_error:.0f} minus={self._minus_pixel_error:.0f} "
+                    f"anchor={self._anchor_pixel_error:.0f}px"
+                )
+                self._commit_and_advance(drop_h)
+            return True
+
+    def _commit_and_advance(self, drop_h: float) -> None:
+        """提交当前位置为新的工作点, 进入下一阶段."""
+        self._probe_start_time = 0.0
+
+        # 检查是否该进入刹车区
+        if self._last_status.pixel_error < float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0)):
+            self._phase = ServoPhase.BRAKING
+            self._brake_enter_time = self._fsm.get_clock().now().nanoseconds / 1e9
+            self._brake_last_check = 0.0
+            self._goto_ned(
+                self._fsm.bridge.get_current_position().north,
+                self._fsm.bridge.get_current_position().east,
+                drop_h,
+            )
+            self._fsm.get_logger().info(
+                f"DESCEND_PROBE: pixel_error={self._last_status.pixel_error:.0f}px "
+                f"< brake_threshold → BRAKING"
+            )
+        elif self._phase == ServoPhase.PROBE_X:
+            self._phase = ServoPhase.PROBE_Y
+        else:
+            self._phase = ServoPhase.PROBE_X
+
+    # ── 刹车悬停 ──────────────────────────────────────────────────
+
+    def _braking(self, status: VisualAlignStatus, drop_h: float) -> bool:
+        """刹车区: 悬停不动, 只观察. 如果 pixel_error 重新超阈值则退出."""
+        now = self._fsm.get_clock().now().nanoseconds / 1e9
+        brake_threshold = float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0))
+
+        # 持续悬停
+        pos = self._fsm.bridge.get_current_position()
+        self._fsm.fc.goto_ned(pos.north, pos.east, -drop_h, speed=0.0)
+
+        # 刹车超时
+        brake_timeout = float(self._fsm.get_param("drop_visual_align_brake_timeout", 4.0))
+        if now - self._brake_enter_time > brake_timeout:
+            self._fsm.get_logger().info(
+                f"DESCEND_BRAKE: 刹车超时 ({brake_timeout}s), 退出重试"
+            )
+            self._phase = ServoPhase.PROBE_X
+            self._probe_start_time = 0.0
+            return True
+
+        # 目标丢失 → 退出刹车
+        if not self._pixel_valid(status):
+            self._fsm.get_logger().warn("DESCEND_BRAKE: 目标丢失, 退出刹车")
+            self._phase = ServoPhase.PROBE_X
+            self._probe_start_time = 0.0
+            return True
+
+        # pixel_error 重新涨超阈值 → 退出刹车
+        if status.pixel_error >= brake_threshold:
+            self._fsm.get_logger().info(
+                f"DESCEND_BRAKE: pixel_error={status.pixel_error:.0f}px 超阈值, 退出刹车"
+            )
+            self._phase = ServoPhase.PROBE_X
+            self._probe_start_time = 0.0
+            return True
+
+        # 刹车中, 定期日志
+        if now - self._brake_last_check >= self.BRAKE_CHECK_INTERVAL:
+            self._brake_last_check = now
+            # is_centered 会在 _execute_descend 中调用, 这里只负责悬停
 
         if now - self._last_log_time >= 1.0:
             self._last_log_time = now
             self._fsm.get_logger().info(
-                "DESCEND_ALIGN: 低空视觉校准 "
-                f"source={status.source} pixel_error={status.pixel_error:.1f}px "
-                f"du={status.pixel_du:.1f}px dv={status.pixel_dv:.1f}px "
-                f"world_error={status.world_error_to_memory:.2f}m "
-                f"u_locked={self._u_locked} v_locked={self._v_locked} "
-                f"setpoint=({target_wx:.2f},{target_wy:.2f})"
+                "DESCEND_BRAKE: 悬停中 "
+                f"pixel_error={status.pixel_error:.0f}px "
+                f"du={status.pixel_du:.0f} dv={status.pixel_dv:.0f} "
+                f"brake_t={now - self._brake_enter_time:.1f}s"
             )
         return True

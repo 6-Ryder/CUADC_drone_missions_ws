@@ -54,18 +54,15 @@
     drop_descend_height: 2.0      # 投放降高高度 (m)
     drop_confirmation_timeout: 3.0  # 投放确认超时 (s)
     drop_align_pixel_tolerance: 35.0 # 投放前圆筒中心允许像素误差
-    drop_memory_pixel_tolerance: 90.0 # 已到静态目标点时允许的视觉粗对齐误差
-    drop_memory_position_tolerance: 0.30 # 静态目标点水平到达容差 (m)
-    drop_visual_align_speed: 0.08 # 低空视觉校准水平速度 (m/s)
-    drop_visual_align_max_step: 0.12 # 单次低空校准 setpoint 最大水平步长 (m)
-    drop_visual_align_pixel_gain: 0.45 # 像素误差换算为水平移动的比例
-    drop_visual_align_x_sign: -1.0 # 低空像素列误差到 world x 的方向修正
-    drop_visual_align_y_sign: 1.0 # 低空像素行误差到 world y 的方向修正
+    # ── 低空视觉校准: 梯度下降探测 ──
+    drop_visual_align_probe_step: 0.20 # 单次探测步长 (m)
+    drop_visual_align_probe_speed: 0.25 # 探测移动速度 (m/s)
+    drop_visual_align_probe_settle: 0.8 # 探测后稳定等待时间 (s)
     drop_visual_align_world_gate: 1.5 # 当前视觉目标与记忆目标最大匹配距离 (m)
     drop_visual_align_stable_frames: 6 # 连续居中帧数后才允许投放
     drop_visual_align_timeout: 18.0 # 低空视觉校准最长等待时间 (s)
-    drop_visual_align_brake_threshold: 80.0 # pixel_error 进入此阈值后悬停 (px), 给 is_centered 稳定累积机会
-    drop_visual_align_brake_timeout: 4.0 # 刹车悬停最长持续时间 (s), 超时后解锁重试
+    drop_visual_align_brake_threshold: 80.0 # pixel_error 进入此阈值后悬停 (px)
+    drop_visual_align_brake_timeout: 4.0 # 刹车悬停最长持续时间 (s)
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
     cylinder_approach_slow_speed: 0.15   # 接近对心后慢速微调
     cylinder_approach_memory_speed: 0.25 # 丢帧时向记忆圆心粗靠近速度
