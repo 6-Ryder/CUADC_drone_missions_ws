@@ -157,12 +157,16 @@ class MissionFSM(Node):
 
         # ---- 视觉数据缓存 ----
         self._cylinders: List[Any] = []
+        self._markers: List[Any] = []
         self._known_cylinders: List[Dict[str, Any]] = []
+        self._known_markers: List[Dict[str, Any]] = []
         self._next_known_cylinder_id: int = 1
+        self._next_known_marker_id: int = 1001
         self._hazards: List[Any] = []
         self._landing_target: Optional[Dict] = None
         self._coverage_status: Optional[Dict] = None
         self._cylinders_timestamp: float = 0.0
+        self._markers_timestamp: float = 0.0
         self._hazards_timestamp: float = 0.0
 
         # ---- 遥测缓存 (standalone mode, 通过 ROS2 话题获取) ----
@@ -219,9 +223,30 @@ class MissionFSM(Node):
         self.declare_parameter("min_drop_targets_required", 2)
         self.declare_parameter("cylinder_memory_merge_distance", 0.75)
         self.declare_parameter("cylinder_memory_min_observations", 1)
+        self.declare_parameter("drop_marker_min_confidence", 0.35)
+        self.declare_parameter("drop_marker_fallback_delay", 15.0)
+        self.declare_parameter("marker_memory_merge_distance", 0.75)
+        self.declare_parameter("marker_memory_min_observations", 1)
         self.declare_parameter("drop_descend_height", 2.0)
         self.declare_parameter("drop_confirmation_timeout", 3.0)
         self.declare_parameter("drop_align_pixel_tolerance", 35.0)
+        self.declare_parameter("drop_memory_pixel_tolerance", 90.0)
+        self.declare_parameter("drop_memory_position_tolerance", 0.30)
+        self.declare_parameter("drop_visual_align_speed", 0.08)
+        self.declare_parameter("drop_visual_align_max_step", 0.12)
+        self.declare_parameter("drop_visual_align_pixel_gain", 0.45)
+        self.declare_parameter("drop_visual_align_x_sign", -1.0)
+        self.declare_parameter("drop_visual_align_y_sign", 1.0)
+        self.declare_parameter("drop_visual_align_world_gate", 1.5)
+        self.declare_parameter("drop_visual_align_stable_frames", 6)
+        self.declare_parameter("drop_visual_align_timeout", 18.0)
+        self.declare_parameter("cylinder_approach_fast_speed", 0.30)
+        self.declare_parameter("cylinder_approach_slow_speed", 0.15)
+        self.declare_parameter("cylinder_approach_memory_speed", 0.25)
+        self.declare_parameter("cylinder_approach_pixel_gain", 0.65)
+        self.declare_parameter("cylinder_approach_max_step", 0.45)
+        self.declare_parameter("drop_final_align_pixel_gain", 0.45)
+        self.declare_parameter("drop_final_align_max_step", 0.12)
         self.declare_parameter("camera_fx", 539.9)
         self.declare_parameter("camera_fy", 539.9)
         self.declare_parameter("camera_cx", 640.0)
@@ -330,6 +355,9 @@ class MissionFSM(Node):
             self._cyl_sub = self.create_subscription(
                 CylinderArray, "/drone/vision/cylinders", self._cyl_cb, 10,
             )
+            self._marker_sub = self.create_subscription(
+                CylinderArray, "/drone/vision/markers", self._marker_cb, 10,
+            )
             self._hazard_sub = self.create_subscription(
                 HazardArray, "/drone/vision/hazards", self._hazard_cb, 10,
             )
@@ -364,6 +392,13 @@ class MissionFSM(Node):
             self._remember_cylinders(self._cylinders)
         self._watchdog.feed("vision")
         self._emergency.update_vision(len(self._cylinders) > 0)
+
+    def _marker_cb(self, msg):
+        self._markers = list(msg.cylinders)
+        self._markers_timestamp = time.time()
+        if self._current_state == MissionState.CYLINDER_SEARCH:
+            self._remember_markers(self._markers)
+        self._watchdog.feed("vision")
 
     @staticmethod
     def _cyl_field(cyl, key: str, default=0.0):
@@ -417,6 +452,54 @@ class MissionFSM(Node):
                     "last_seen": now,
                 })
                 self._next_known_cylinder_id += 1
+
+    def _remember_markers(self, markers: list) -> None:
+        """Accumulate blue drop-marker positions as fallback drop targets."""
+        min_conf = float(self.get_param("drop_marker_min_confidence", 0.35))
+        merge_dist = float(self.get_param("marker_memory_merge_distance", 0.75))
+        now = time.time()
+
+        for marker in markers:
+            conf = float(self._cyl_field(marker, "confidence", 0.0))
+            if conf < min_conf:
+                continue
+
+            raw_x = float(self._cyl_field(marker, "center_x", 0.0))
+            raw_y = float(self._cyl_field(marker, "center_y", 0.0))
+            target_xy = self._normalize_drop_target_xy(raw_x, raw_y)
+            if target_xy is None:
+                continue
+            mx, my = target_xy
+
+            best = None
+            best_dist = float("inf")
+            for known in self._known_markers:
+                dist = ((known["center_x"] - mx) ** 2 + (known["center_y"] - my) ** 2) ** 0.5
+                if dist < best_dist:
+                    best = known
+                    best_dist = dist
+
+            if best is not None and best_dist <= merge_dist:
+                obs = best["observations"]
+                weight = min(conf, 1.0)
+                total = obs + weight
+                best["center_x"] = (best["center_x"] * obs + mx * weight) / total
+                best["center_y"] = (best["center_y"] * obs + my * weight) / total
+                best["confidence"] = max(best["confidence"], conf)
+                best["observations"] = obs + 1
+                best["last_seen"] = now
+            else:
+                self._known_markers.append({
+                    "id": self._next_known_marker_id,
+                    "center_x": mx,
+                    "center_y": my,
+                    "radius": 0.5,
+                    "confidence": conf,
+                    "observations": 1,
+                    "last_seen": now,
+                    "source": "marker",
+                })
+                self._next_known_marker_id += 1
 
     def _drop_zone_world_bounds(self, margin: float = 1.0):
         n_min = float(self.get_param("area1_north_min", -4.0))
@@ -594,22 +677,27 @@ class MissionFSM(Node):
 
     def _handle_select_target(self):
         """处理圆筒选择."""
-        cylinders = self.get_known_cylinders() or self.get_cylinders()
-        if not cylinders:
-            self.get_logger().warn("SELECT_TARGET: 无圆筒可投")
-            self._transition_to(MissionState.TRANSIT_TO_RECON_ZONE)
+        targets = self.get_known_drop_targets()
+        if not targets:
+            self.get_logger().warn("SELECT_TARGET: 暂无可投目标, 返回投放区搜索")
+            self._transition_to(MissionState.CYLINDER_SEARCH)
             return
 
-        target_id = self._cylinder_selector.select(cylinders)
+        target_id = self._cylinder_selector.select(targets)
         if target_id is None:
-            self._transition_to(MissionState.TRANSIT_TO_RECON_ZONE)
+            max_drops = int(self.get_param("max_drops", 2))
+            if self._drop_success_count < max_drops:
+                self.get_logger().warn("SELECT_TARGET: 候选均被占用, 返回投放区重新搜索")
+                self._transition_to(MissionState.CYLINDER_SEARCH)
+            else:
+                self._transition_to(MissionState.TRANSIT_TO_RECON_ZONE)
             return
 
         self._current_drop_cyl_id = target_id
         self.get_logger().info(f"SELECT_TARGET: 选中圆筒 ID={target_id}")
         self._task_logger.log("target_selected", {
             "cylinder_id": target_id,
-            "drop_number": self._drop_count + 1,
+            "drop_number": self._drop_success_count + 1,
         })
         self._transition_to(MissionState.CYLINDER_APPROACH)
 
@@ -709,6 +797,10 @@ class MissionFSM(Node):
     def drop_count(self) -> int:
         return self._drop_count
 
+    @property
+    def drop_success_count(self) -> int:
+        return self._drop_success_count
+
     # -- 参数获取 --
     def get_param(self, key: str, default=None):
         try:
@@ -723,6 +815,12 @@ class MissionFSM(Node):
             return []
         return self._cylinders
 
+    def get_markers(self) -> list:
+        """获取最新的蓝色投放区标识检测结果 (过去 2s 内)."""
+        if time.time() - self._markers_timestamp > 2.0:
+            return []
+        return self._markers
+
     def get_known_cylinders(self) -> list:
         """获取搜索阶段累计的圆筒目标库."""
         min_obs = int(self.get_param("cylinder_memory_min_observations", 1))
@@ -731,11 +829,49 @@ class MissionFSM(Node):
             if int(c.get("observations", 0)) >= min_obs
         ]
 
+    def get_known_markers(self) -> list:
+        """获取搜索阶段累计的蓝色标识目标库."""
+        min_obs = int(self.get_param("marker_memory_min_observations", 1))
+        return [
+            m for m in self._known_markers
+            if int(m.get("observations", 0)) >= min_obs
+        ]
+
+    def get_known_drop_targets(self) -> list:
+        """
+        获取投放候选.
+
+        圆筒目标优先。只有完全没有圆筒候选时，才用蓝色圆形标识兜底。
+        """
+        cylinders = self.get_known_cylinders()
+        if cylinders:
+            return cylinders
+
+        markers = self.get_known_markers()
+        targets = []
+        for marker in markers:
+            mx = float(marker.get("center_x", 0.0))
+            my = float(marker.get("center_y", 0.0))
+            duplicate = any(
+                ((float(t.get("center_x", 0.0)) - mx) ** 2
+                 + (float(t.get("center_y", 0.0)) - my) ** 2) ** 0.5 < 0.6
+                for t in targets
+            )
+            if not duplicate:
+                targets.append(marker)
+        return targets
+
     def clear_known_cylinders(self) -> None:
-        """开始投放区搜索前重置目标库和选择器."""
+        """开始/重试投放区搜索前重置视觉目标库, 保留已投位置去重."""
         self._known_cylinders.clear()
+        self._known_markers.clear()
         self._next_known_cylinder_id = 1
-        self._cylinder_selector.reset()
+        self._next_known_marker_id = 1001
+
+    def release_current_drop_target(self) -> None:
+        """投放未执行或失败时释放当前选择, 允许重新搜索/重试."""
+        self._cylinder_selector.release_last_selection()
+        self._current_drop_cyl_id = -1
 
     def is_in_drop_zone_world(self, world_x: float, world_y: float, margin: float = 0.5) -> bool:
         wx_min, wx_max, wy_min, wy_max = self._drop_zone_world_bounds(margin=margin)

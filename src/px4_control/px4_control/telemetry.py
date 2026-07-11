@@ -134,14 +134,60 @@ def ned_to_world_pose(north: float, east: float, down: float,
     将 NED 位姿转换为 World 位姿.
 
     Returns (world_x, world_y, world_z, qx, qy, qz, qw).
-    注意: 四元数方向也需旋转 (NED→ENU).
+
+    输入四元数为 PX4 body→NED 姿态, 但顺序是 ROS 常用 xyzw。
+    输出四元数为 body→World(ENU/Gazebo) 姿态, 顺序仍为 xyzw。
     """
     wx, wy, wz = ned_to_world(north, east, down)
-    # NED→ENU 四元数旋转: (qx,qy,qz,qw)_enu = (qx,qy,-qz,qw)_ned  (近似)
-    # 实际上需要完整 NED→ENU 变换, 这里使用近似
-    # PX4 的 attitude 在 NED 帧中, 转到 ENU (World) 需做:
-    # q_enu = q_ned_to_enu * q_ned, 其中 q_ned_to_enu = (1,0,0,0) simple case
-    return (wx, wy, wz, q_x, q_y, q_z, q_w)
+    qx, qy, qz, qw = ned_body_to_world_quat(q_x, q_y, q_z, q_w)
+    return (wx, wy, wz, qx, qy, qz, qw)
+
+
+def _normalize_quat_xyzw(
+    q_x: float,
+    q_y: float,
+    q_z: float,
+    q_w: float,
+) -> Tuple[float, float, float, float]:
+    norm = math.sqrt(q_x * q_x + q_y * q_y + q_z * q_z + q_w * q_w)
+    if norm < 1e-12:
+        return (0.0, 0.0, 0.0, 1.0)
+    return (q_x / norm, q_y / norm, q_z / norm, q_w / norm)
+
+
+def _quat_multiply_xyzw(
+    a: Tuple[float, float, float, float],
+    b: Tuple[float, float, float, float],
+) -> Tuple[float, float, float, float]:
+    """Hamilton product for xyzw quaternions: result applies b, then a."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+def ned_body_to_world_quat(
+    q_x: float,
+    q_y: float,
+    q_z: float,
+    q_w: float,
+) -> Tuple[float, float, float, float]:
+    """
+    Convert a PX4 body→NED quaternion to body→World(ENU/Gazebo).
+
+    NED axes:   x=north, y=east, z=down.
+    World axes: x=east,  y=north, z=up.
+
+    The fixed NED→World rotation is a 180° rotation around axis (1, 1, 0).
+    """
+    q_body_to_ned = _normalize_quat_xyzw(q_x, q_y, q_z, q_w)
+    half_sqrt = math.sqrt(0.5)
+    q_ned_to_world = (half_sqrt, half_sqrt, 0.0, 0.0)
+    return _normalize_quat_xyzw(*_quat_multiply_xyzw(q_ned_to_world, q_body_to_ned))
 
 
 def yaw_from_quat(q_w: float, q_x: float, q_y: float, q_z: float) -> float:

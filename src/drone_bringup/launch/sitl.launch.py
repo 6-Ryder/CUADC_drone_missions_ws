@@ -79,7 +79,7 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-    # 4. 任务状态机 — 最后启动 (依赖以上所有)
+    # 4. 任务状态机 — 最后启动 (依赖以上所有, 内含低空投放视觉校准)
     mission_node = Node(
         package="drone_mission",
         executable="mission_fsm",
@@ -112,7 +112,7 @@ def generate_launch_description():
         LogInfo(msg="  1. PX4 Bridge (DDS → ROS2)"),
         LogInfo(msg="  2. Vision Pipeline (YOLO + OpenCV)"),
         LogInfo(msg="  3. Servo Controller (SITL Mock)"),
-        LogInfo(msg="  4. Mission FSM (任务状态机)"),
+        LogInfo(msg="  4. Mission FSM (任务状态机 + 低空投放视觉校准)"),
         px4_bridge_node,
         vision_delayed,
         servo_delayed,

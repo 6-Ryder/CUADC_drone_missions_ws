@@ -37,8 +37,8 @@ class CylinderApproachState:
         self._memory_arrival_count = 0
 
         # 从 SELECT_TARGET 已选中的目标获取世界坐标
-        cylinders = self._fsm.get_known_cylinders() if hasattr(self._fsm, "get_known_cylinders") else self._fsm.get_cylinders()
-        if not cylinders:
+        targets = self._fsm.get_known_drop_targets() if hasattr(self._fsm, "get_known_drop_targets") else self._fsm.get_cylinders()
+        if not targets:
             self._fsm.get_logger().warn("APPROACH: 无可用目标")
             return
 
@@ -48,7 +48,7 @@ class CylinderApproachState:
             self._target_world_xy = last_pos
         else:
             # 回退: 直接选第一个圆柱
-            c = cylinders[0]
+            c = targets[0]
             cx = c.center_x if hasattr(c, 'center_x') else c.get('center_x', 0)
             cy = c.center_y if hasattr(c, 'center_y') else c.get('center_y', 0)
             self._target_world_xy = (cx, cy)
@@ -95,7 +95,7 @@ class CylinderApproachState:
         return u - img_cx, v - img_cy
 
     def _goto_pixel_centered_target(self, cyl, speed: float) -> float:
-        """Use current pixel error to move the drone over the detected cylinder."""
+        """Move the drone over the detected cylinder and return current pixel error."""
         from px4_control.telemetry import ned_to_world, world_to_ned
 
         du, dv = self._pixel_error(cyl)
@@ -104,10 +104,13 @@ class CylinderApproachState:
         alt = max(abs(pos.down), 0.5)
         fx = float(self._fsm.get_param("camera_fx", 539.9))
         fy = float(self._fsm.get_param("camera_fy", 539.9))
+        gain = float(self._fsm.get_param("cylinder_approach_pixel_gain", 0.65))
+        max_step = float(self._fsm.get_param("cylinder_approach_max_step", 0.45))
+        step_x = max(-max_step, min(max_step, gain * du * alt / fx))
+        step_y = max(-max_step, min(max_step, gain * dv * alt / fy))
+        target_wx = drone_wx + step_x
+        target_wy = drone_wy + step_y
 
-        # 相机近似垂直向下: u→world x/east, v→world y/north.
-        target_wx = drone_wx + du * alt / fx
-        target_wy = drone_wy + dv * alt / fy
         if hasattr(self._fsm, "is_in_drop_zone_world"):
             if not self._fsm.is_in_drop_zone_world(target_wx, target_wy, margin=0.75):
                 # 不让像素伺服把飞机带出投放区, 但仍返回误差用于日志。
@@ -120,16 +123,37 @@ class CylinderApproachState:
 
     def _find_nearest_cylinder(self, cylinders: list) -> Optional[object]:
         """用位置匹配找最近的圆柱 (不用 ID, 因为 vision 每帧重新分配)."""
-        if not self._target_world_xy or not cylinders:
+        return self._find_nearest_target(cylinders, max_dist=2.0)
+
+    def _find_nearest_target(self, targets: list, max_dist: float = 2.0) -> Optional[object]:
+        if not self._target_world_xy or not targets:
             return None
         tx, ty = self._target_world_xy
         best, best_dist = None, float('inf')
-        for c in cylinders:
+        for c in targets:
             cx = c.center_x if hasattr(c, 'center_x') else c.get('center_x', 0)
             cy = c.center_y if hasattr(c, 'center_y') else c.get('center_y', 0)
             d = math.hypot(cx - tx, cy - ty)
-            if d < best_dist and d < 2.0:  # 2m 内认为是同一圆筒
+            if d < best_dist and d < max_dist:
                 best, best_dist = c, d
+        return best
+
+    def _find_pixel_centered_cylinder(self, targets: list) -> Optional[object]:
+        """World 匹配失败时, 选当前画面中最接近中心的目标作为视觉伺服目标."""
+        if not targets:
+            return None
+
+        best = None
+        best_err = float("inf")
+        for c in targets:
+            conf = float(self._field(c, "confidence", 0.0))
+            if conf < 0.25:
+                continue
+            du, dv = self._pixel_error(c)
+            err = (du * du + dv * dv) ** 0.5
+            if err < best_err:
+                best = c
+                best_err = err
         return best
 
     def execute(self) -> Optional[str]:
@@ -137,55 +161,65 @@ class CylinderApproachState:
             return "ASCEND"
 
         cylinders = self._fsm.get_cylinders()
-        target_cyl = self._find_nearest_cylinder(cylinders)
-
+        markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
+        target_cyl = self._find_nearest_target(cylinders, max_dist=2.0)
         if target_cyl is None:
-            self._target_lost_count += 1
-            try:
-                error = self._goto_target_xy(speed=0.5)
-            except ValueError as exc:
-                self._fsm.get_logger().error(f"APPROACH: {exc}, 放弃当前目标")
-                return "ASCEND"
-            if error < 0.25:
-                self._memory_arrival_count += 1
-            if self._target_lost_count == 1:
-                self._fsm.get_logger().info("APPROACH: 当前帧未见目标, 只使用记忆坐标粗靠近")
-            if self._memory_arrival_count >= 20:
-                self._fsm.get_logger().warn("APPROACH: 到达记忆坐标但未重新看见目标, 放弃投放")
-                return "ASCEND"
-            if time.time() - self._start_time > 25.0:
-                self._fsm.get_logger().warn("APPROACH: 目标未在当前视场恢复, 放弃投放")
-                return "ASCEND"
-            return None
-        self._target_lost_count = 0
+            target_cyl = self._find_nearest_target(markers, max_dist=2.5)
 
-        cx = target_cyl.center_x if hasattr(target_cyl, 'center_x') else target_cyl.get('center_x', 0)
-        cy = target_cyl.center_y if hasattr(target_cyl, 'center_y') else target_cyl.get('center_y', 0)
-        # 更新目标位置 (视觉检测可能有漂移)
-        self._target_world_xy = (cx, cy)
+        try:
+            speed = (
+                float(self._fsm.get_param("cylinder_approach_slow_speed", 0.15))
+                if target_cyl is not None
+                else float(self._fsm.get_param("cylinder_approach_memory_speed", 0.25))
+            )
+            error = self._goto_target_xy(speed=speed)
+        except ValueError as exc:
+            self._fsm.get_logger().error(f"APPROACH: {exc}, 放弃当前目标")
+            if hasattr(self._fsm, "release_current_drop_target"):
+                self._fsm.release_current_drop_target()
+            return "ASCEND"
 
-        pixel_error = self._goto_pixel_centered_target(
-            target_cyl, speed=0.6 if self._align_stable_count == 0 else 0.25
-        )
         tolerance_px = float(self._fsm.get_param("drop_align_pixel_tolerance", 35.0))
+        pixel_error = float("inf")
 
-        if pixel_error > tolerance_px:
-            self._align_stable_count = 0
+        if target_cyl is not None:
+            self._target_lost_count = 0
+            du, dv = self._pixel_error(target_cyl)
+            pixel_error = (du * du + dv * dv) ** 0.5
+            if pixel_error > tolerance_px:
+                self._align_stable_count = 0
+            else:
+                self._align_stable_count += 1
         else:
-            self._align_stable_count += 1
+            self._target_lost_count += 1
+            self._align_stable_count = 0
+            if self._target_lost_count == 1:
+                self._fsm.get_logger().info("APPROACH: 当前帧未见目标, 只飞向静态记忆坐标")
+
+        if error < 0.30:
+            self._memory_arrival_count += 1
+        else:
+            self._memory_arrival_count = 0
 
         elapsed = time.time() - self._start_time
         if elapsed > 2.0 and elapsed % 3.0 < 0.2:
             self._fsm.get_logger().info(
-                f"APPROACH: pixel_error={pixel_error:.1f}px stable={self._align_stable_count}"
+                f"APPROACH: target_error={error:.2f}m pixel_error={pixel_error:.1f}px "
+                f"stable={self._align_stable_count}"
             )
 
-        if self._align_stable_count >= 20:
-            self._fsm.get_logger().info(f"APPROACH: 像素对心完成 (error={pixel_error:.1f}px)")
+        if self._align_stable_count >= 10:
+            self._fsm.get_logger().info(f"APPROACH: 当前视觉目标已居中 (error={pixel_error:.1f}px)")
+            return "DESCEND_TO_DROP"
+
+        if self._memory_arrival_count >= 20:
+            self._fsm.get_logger().warn("APPROACH: 到达静态目标点, 进入低空视觉复查")
             return "DESCEND_TO_DROP"
 
         if elapsed > 30.0:
-            self._fsm.get_logger().warn("APPROACH: 像素对心超时, 放弃当前目标")
+            self._fsm.get_logger().warn("APPROACH: 逼近超时, 释放当前目标并重新搜索")
+            if hasattr(self._fsm, "release_current_drop_target"):
+                self._fsm.release_current_drop_target()
             return "ASCEND"
 
         return None

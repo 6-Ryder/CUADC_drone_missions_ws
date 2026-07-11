@@ -91,6 +91,20 @@ class CylinderSelector:
 
         return cid
 
+    def release_last_selection(self) -> None:
+        """撤销最近一次选择, 用于逼近/投放失败后的重试."""
+        if not self._selected_positions and not self._selected_ids:
+            return
+
+        if self._selected_positions:
+            self._selected_positions.pop()
+
+        # _selected_ids 是 set, 保序信息不可用；选择次数最多为 2 次，重试时
+        # 保守清空 ID 集合，再由位置列表重建不可行，因为位置没有 ID。
+        # 位置去重才是当前仿真里稳定的去重依据，所以这里直接清空 ID 约束。
+        self._selected_ids.clear()
+        self._selection_count = max(0, self._selection_count - 1)
+
     def select_with_confidence_check(self, cylinders: list,
                                      min_confidence: float = 0.5) -> tuple:
         """

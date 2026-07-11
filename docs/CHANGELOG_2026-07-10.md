@@ -56,3 +56,20 @@
 - 背景杂物闪烁 (单帧误检) 达不到 min_hits, 自动过滤
 - 真正目标额外延迟 ~67ms (3帧@30FPS), 对控制回路无影响
 - 配置: `vision_params.yaml` → `cylinder_tracking_min_hits`
+
+---
+
+## 2026-07-11 — 仿真视觉调试
+
+### 问题 1: 场地文件圆筒俯视不可见 ✅ 已修复
+- **根因**: `drone_field.sdf` 中圆筒 visual 使用开口杯形 STL 网格 (壁厚 5mm, 5m 高处仅 0.5px)
+- **修复**: 实体白色 `<cylinder>` 替代 STL mesh + 底部白色圆盘 (8 个圆筒全部修复)
+- **结果**: 圆筒检测 0 → 2/3 个, FSM 正常进入 SELECT → APPROACH
+
+### 问题 2: CYL_COORD 姿态投影坐标异常 ⚠️ 已定位
+- **根因**: `coordinate_transforms.py` 中 PX4 四元数输出是 NED, 但 World 坐标系是 ENU, 缺少转换
+- **影响**: 姿态投影 Y 分量系统性偏大 ~14m, 全部被 `max_reasonable_offset` 拒绝
+
+### 问题 3: APPROACH 逼近跟踪丢失 ⚠️ 已定位
+- **根因**: 问题 2 导致圆柱 world 坐标错误 → FSM 飞到错误位置 → 目标丢失 → 放弃
+- 详见 `docs/DEBUG_2026-07-11.md`

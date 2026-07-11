@@ -320,10 +320,10 @@ class PX4Bridge(Node):
 
         world_x, world_y, world_z, qx, qy, qz, qw = ned_to_world_pose(
             float(pos[0]), float(pos[1]), float(pos[2]),
-            float(q[0]) if att else 0.0,
             float(q[1]) if att else 0.0,
             float(q[2]) if att else 0.0,
-            float(q[3]) if att else 1.0,
+            float(q[3]) if att else 0.0,
+            float(q[0]) if att else 1.0,
         )
 
         pose = PoseStamped()

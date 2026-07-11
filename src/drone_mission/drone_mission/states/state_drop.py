@@ -12,8 +12,9 @@ DROP 状态 — 降高至投放高度 + 触发舵机投放 + 确认.
 """
 
 import time
-import math
 from typing import Optional
+
+from drone_mission.drop_visual_aligner import DropVisualAligner
 
 
 class DropState:
@@ -33,6 +34,8 @@ class DropState:
         self._drop_executed: bool = False
         self._drop_success: bool = False
         self._sub_state: str = "DESCEND_TO_DROP"
+        self._last_descend_log_time: float = 0.0
+        self._visual_aligner = DropVisualAligner(fsm)
 
     # ---- 子状态切换 ----
 
@@ -51,6 +54,8 @@ class DropState:
         self._start_time = time.time()
         self._drop_executed = False
         self._drop_success = False
+        self._last_descend_log_time = 0.0
+        self._visual_aligner.reset()
 
         if self._sub_state == "DESCEND_TO_DROP":
             self._enter_descend()
@@ -104,60 +109,59 @@ class DropState:
     def _execute_descend(self) -> Optional[str]:
         drop_h = self._fsm.get_param("drop_descend_height", 2.0)
         pos = self._fsm.bridge.get_current_position()
+        elapsed = time.time() - self._start_time
 
         if abs(pos.down + drop_h) < 0.3:
             if self._drop_target_is_centered():
                 self._fsm.get_logger().info("DESCEND: 到达投放高度且目标居中")
                 return "EXECUTE_DROP"
-            self._fsm.get_logger().warn("DESCEND: 到达投放高度但目标未居中/不可见, 放弃本次投放")
-            return "ASCEND"
 
-        if time.time() - self._start_time > 15.0:
-            self._fsm.get_logger().warn("DESCEND: 超时, 强制投放")
-            return "EXECUTE_DROP"
+            align_timeout = float(self._fsm.get_param("drop_visual_align_timeout", 18.0))
+            if elapsed > align_timeout:
+                status = self._visual_aligner.last_status
+                self._fsm.get_logger().warn(
+                    "DESCEND: 低空视觉校准超时, 放弃当前目标并重试 "
+                    f"source={status.source} pixel_error={status.pixel_error:.1f}px"
+                )
+                if hasattr(self._fsm, "release_current_drop_target"):
+                    self._fsm.release_current_drop_target()
+                return "ASCEND"
+
+            if self._nudge_to_visible_drop_target(drop_h):
+                return None
+            self._warn_descend_throttled("DESCEND: 到达投放高度但目标未居中/不可见, 继续等待复查")
+
+        if elapsed > 15.0:
+            if self._drop_target_is_centered():
+                self._fsm.get_logger().warn("DESCEND: 复查超时但投放许可通过, 执行投放")
+                return "EXECUTE_DROP"
+            self._fsm.get_logger().warn("DESCEND: 复查超时且投放许可失败, 放弃本次投放")
+            if hasattr(self._fsm, "release_current_drop_target"):
+                self._fsm.release_current_drop_target()
+            return "ASCEND"
 
         return None
 
+    def _warn_descend_throttled(self, message: str, interval: float = 1.0):
+        now = time.time()
+        if now - self._last_descend_log_time >= interval:
+            self._last_descend_log_time = now
+            self._fsm.get_logger().warn(message)
+
+    def _nudge_to_visible_drop_target(self, drop_h: float) -> bool:
+        return self._visual_aligner.command_alignment(drop_h)
+
     def _drop_target_is_centered(self) -> bool:
-        """投放许可: 当前帧必须看到目标, 且像素中心接近画面中心."""
-        cylinders = self._fsm.get_cylinders()
-        if not cylinders:
-            return False
-
-        selected_positions = getattr(self._fsm.cylinder_selector, "_selected_positions", [])
-        if not selected_positions:
-            return False
-
-        tx, ty = selected_positions[-1]
-        best = None
-        best_dist = float("inf")
-        for c in cylinders:
-            cx = getattr(c, "center_x", 0.0)
-            cy = getattr(c, "center_y", 0.0)
-            dist = math.hypot(cx - tx, cy - ty)
-            if dist < best_dist:
-                best = c
-                best_dist = dist
-
-        if best is None or best_dist > 1.0:
-            return False
-
-        u = getattr(best, "center_u", 0.0)
-        v = getattr(best, "center_v", 0.0)
-        img_cx = self._fsm.get_param("camera_cx", 640.0)
-        img_cy = self._fsm.get_param("camera_cy", 480.0)
-        pixel_error = math.hypot(u - img_cx, v - img_cy)
-        tolerance = self._fsm.get_param("drop_align_pixel_tolerance", 35.0)
-        if pixel_error > tolerance:
-            self._fsm.get_logger().warn(
-                f"DESCEND: 投放许可失败 pixel_error={pixel_error:.1f}px > {tolerance:.1f}px"
+        """投放许可: 当前帧必须看到目标, 且像素中心稳定接近画面中心."""
+        centered = self._visual_aligner.is_centered()
+        if not centered:
+            status = self._visual_aligner.last_status
+            self._warn_descend_throttled(
+                "DESCEND: 投放许可失败 "
+                f"source={status.source} pixel_error={status.pixel_error:.1f}px "
+                f"stable={status.stable_count}"
             )
-            return False
-
-        self._fsm.get_logger().info(
-            f"DESCEND: 投放许可通过 pixel_error={pixel_error:.1f}px dist={best_dist:.2f}m"
-        )
-        return True
+        return centered
 
     def _execute_drop(self) -> Optional[str]:
         # 等待投放确认
@@ -170,10 +174,14 @@ class DropState:
                     self._fsm.get_logger().info("DROP: 投放成功")
                 else:
                     self._fsm.get_logger().warn("DROP: 投放失败")
+                    if hasattr(self._fsm, "release_current_drop_target"):
+                        self._fsm.release_current_drop_target()
                 return "ASCEND"
 
         if time.time() - self._start_time > timeout:
             self._fsm.get_logger().warn("DROP: 投放确认超时")
+            if hasattr(self._fsm, "release_current_drop_target"):
+                self._fsm.release_current_drop_target()
             return "ASCEND"
         return None
 
@@ -184,7 +192,7 @@ class DropState:
         if abs(pos.down + takeoff_h) < 0.5:
             self._fsm.get_logger().info("ASCEND: 回到巡航高度")
             # 判断是否需要继续投放
-            drops = self._fsm.drop_count
+            drops = self._fsm.drop_success_count
             max_drops = self._fsm.get_param("max_drops", 2)
             if drops < max_drops:
                 return "SELECT_TARGET"
@@ -192,7 +200,7 @@ class DropState:
                 return "TRANSIT_TO_RECON_ZONE"
 
         if time.time() - self._start_time > 15.0:
-            drops = self._fsm.drop_count
+            drops = self._fsm.drop_success_count
             max_drops = self._fsm.get_param("max_drops", 2)
             return "SELECT_TARGET" if drops < max_drops else "TRANSIT_TO_RECON_ZONE"
 

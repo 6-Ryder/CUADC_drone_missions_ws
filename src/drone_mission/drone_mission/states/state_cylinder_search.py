@@ -61,10 +61,22 @@ class CylinderSearchState:
 
         # 获取视觉检测结果, 过滤低置信度假阳性
         cylinders = self._fsm.get_cylinders()
+        markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
         min_conf = 0.4  # 最低置信度, 过滤 OpenCV 噪声
         valid = [c for c in cylinders if c.confidence >= min_conf]
-        known = self._fsm.get_known_cylinders() if hasattr(self._fsm, "get_known_cylinders") else valid
+        marker_delay = float(self._fsm.get_param("drop_marker_fallback_delay", 8.0))
+        allow_marker_fallback = elapsed >= marker_delay
+        if hasattr(self._fsm, "get_known_cylinders"):
+            known_cylinders = self._fsm.get_known_cylinders()
+        else:
+            known_cylinders = valid
+
+        if allow_marker_fallback and not known_cylinders and hasattr(self._fsm, "get_known_drop_targets"):
+            known = self._fsm.get_known_drop_targets()
+        else:
+            known = known_cylinders
         cyl_count = len(valid)
+        marker_count = len([m for m in markers if getattr(m, "confidence", 0.0) >= 0.35])
         known_count = len(known)
 
         # 稳定检测计数
@@ -75,15 +87,16 @@ class CylinderSearchState:
 
         if known_count != self._last_cylinder_count:
             self._fsm.get_logger().info(
-                f"CYL_SEARCH: 当前 {cyl_count} 个, 累计 {known_count} 个圆筒 "
-                f"(稳定={self._detection_stable_count})"
+                f"CYL_SEARCH: 当前圆筒 {cyl_count} 个, marker {marker_count} 个, "
+                f"累计投放候选 {known_count} 个 "
+                f"(稳定={self._detection_stable_count}, marker_fallback={allow_marker_fallback})"
             )
             self._last_cylinder_count = known_count
 
         # 累计目标稳定 ≥ 0.25s (5 帧 @ 20Hz)
         if self._detection_stable_count >= 5 and known_count >= self._min_cylinders_required:
             self._fsm.get_logger().info(
-                f"CYL_SEARCH: 目标累计稳定 ({known_count} 个圆筒), 进入选择"
+                f"CYL_SEARCH: 投放候选累计稳定 ({known_count} 个), 进入选择"
             )
             return "SELECT_TARGET"
 
@@ -100,10 +113,12 @@ class CylinderSearchState:
         # 超时
         timeout = self._fsm.get_param("state_max_duration", 180.0)
         if elapsed > timeout:
-            self._fsm.get_logger().warn("CYL_SEARCH: 超时, 使用当前检测结果")
-            if known_count > 0 or cyl_count > 0:
+            self._fsm.get_logger().warn("CYL_SEARCH: 超时, 使用当前候选或继续等待")
+            if known_count > 0 or cyl_count > 0 or (allow_marker_fallback and marker_count > 0):
                 return "SELECT_TARGET"
-            return "TRANSIT_TO_RECON_ZONE"  # 放弃投放, 继续侦察
+            self._start_time = time.time()
+            self._scan_phase = 0
+            return None
 
         return None
 
@@ -132,10 +147,13 @@ class CylinderSearchState:
         if self._scan_wp_idx >= len(self._scan_waypoints):
             # 扫描完成
             self._scan_phase = 2
-            cylinders = self._fsm.get_known_cylinders() if hasattr(self._fsm, "get_known_cylinders") else self._fsm.get_cylinders()
-            if len(cylinders) > 0:
+            if hasattr(self._fsm, "get_known_drop_targets"):
+                targets = self._fsm.get_known_drop_targets()
+            else:
+                targets = self._fsm.get_cylinders()
+            if len(targets) > 0:
                 return "SELECT_TARGET"
-            self._fsm.get_logger().warn("CYL_SEARCH: 扫描完成但未累计到圆筒, 继续悬停等待")
+            self._fsm.get_logger().warn("CYL_SEARCH: 扫描完成但未累计到投放候选, 继续悬停等待")
             return None
 
         wp = self._scan_waypoints[self._scan_wp_idx]
@@ -153,8 +171,8 @@ class CylinderSearchState:
 
     def exit(self):
         if hasattr(self._fsm, "get_known_cylinders"):
-            cyl_count = len(self._fsm.get_known_cylinders())
+            cyl_count = len(self._fsm.get_known_drop_targets())
         else:
             cyl_count = len(self._fsm.get_cylinders())
         self._fsm.logger.log_state("CYL_SEARCH", "SELECT_TARGET",
-                                   f"搜索完成, 累计 {cyl_count} 个圆筒")
+                                   f"搜索完成, 累计 {cyl_count} 个投放候选")

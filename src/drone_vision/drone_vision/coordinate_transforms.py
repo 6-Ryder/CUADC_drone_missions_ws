@@ -105,12 +105,12 @@ class CoordinateTransformer:
         ray_cam = self.K_inv @ pixel  # 相机坐标系中的射线方向
 
         # 2. 相机 → 机体
-        # 相机安装: 垂直向下, 光轴 = -body_z
-        # R_cam_to_body: 相机 x→body right, 相机 y→body forward, 相机 z→body -down
+        # 相机安装: 垂直向下, PX4 机体系为 FRD (x前, y右, z下).
+        # R_cam_to_body: 相机 x→body right, 相机 y→body forward, 相机 z→body down.
         R_cam_to_body = np.array([
             [0,  1,  0],   # 相机 y → body front
             [1,  0,  0],   # 相机 x → body right
-            [0,  0, -1],   # 相机 z (光轴) → body -down
+            [0,  0,  1],   # 相机 z (光轴) → body down
         ])
         ray_body = R_cam_to_body @ ray_cam
 
@@ -176,7 +176,7 @@ class CoordinateTransformer:
         R_body_to_cam = np.array([
             [0,  1,  0],
             [1,  0,  0],
-            [0,  0, -1],
+            [0,  0,  1],
         ])  # R_cam_to_body 的逆 = 转置
 
         R_world_to_cam = R_body_to_cam @ R_world_to_body

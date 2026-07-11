@@ -461,6 +461,34 @@ class VisionPipelineNode(Node):
                 det.bbox_y1 = int(md.bbox[1])
                 det.bbox_x2 = int(md.bbox[2])
                 det.bbox_y2 = int(md.bbox[3])
+
+                fx = self.get_parameter("fx").value
+                fy = self.get_parameter("fy").value
+                cx = self.get_parameter("cx").value
+                cy = self.get_parameter("cy").value
+                alt = max(self._current_altitude, 0.5)
+                selected_xy = CoordinateTransformer.pixel_to_world_simple(
+                    md.cx, md.cy, alt, fx, fy, cx, cy,
+                    drone_world_x=self._drone_pose[0],
+                    drone_world_y=self._drone_pose[1],
+                )
+                if self._coord_xform:
+                    world_xy = self._coord_xform.pixel_to_world(
+                        md.cx, md.cy,
+                        (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
+                        (self._drone_pose[3], self._drone_pose[4],
+                         self._drone_pose[5], self._drone_pose[6]),
+                        ground_z=0.0, q_convention="xyzw",
+                    )
+                    if world_xy:
+                        dx = world_xy[0] - self._drone_pose[0]
+                        dy = world_xy[1] - self._drone_pose[1]
+                        max_reasonable_offset = max(alt * 1.5, 3.0)
+                        if (dx * dx + dy * dy) ** 0.5 <= max_reasonable_offset:
+                            selected_xy = world_xy
+
+                det.center_x = selected_xy[0]
+                det.center_y = selected_xy[1]
                 marker_array.cylinders.append(det)
             self._marker_pub.publish(marker_array)
             if marker_dets and self._frame_count % 30 == 0:
