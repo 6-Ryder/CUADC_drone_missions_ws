@@ -76,6 +76,9 @@ class DropVisualAligner:
         # 自适应步长
         self._step_scale: float = 1.0  # 1.0=大步, 0.5=中步, 0.25=小步
 
+        # 目标锁定: 整个 DESCEND 周期只追踪同一个 marker
+        self._locked_target_xy: Optional[Tuple[float, float]] = None
+
     def reset(self) -> None:
         self._stable_count = 0
         self._last_log_time = 0.0
@@ -92,6 +95,7 @@ class DropVisualAligner:
         self._brake_enter_time = 0.0
         self._brake_last_check = 0.0
         self._step_scale = 1.0
+        self._locked_target_xy: Optional[Tuple[float, float]] = None
 
     @property
     def last_status(self) -> VisualAlignStatus:
@@ -132,6 +136,7 @@ class DropVisualAligner:
 
         tx, ty = memory_xy
         world_gate = float(self._fsm.get_param("drop_visual_align_world_gate", 1.5))
+        lock_tolerance = float(self._fsm.get_param("drop_visual_align_lock_tolerance", 2.0))
 
         best = None
         best_score = float("inf")
@@ -146,6 +151,13 @@ class DropVisualAligner:
                 continue
             wx = float(self._field(target, "center_x", 0.0))
             wy = float(self._field(target, "center_y", 0.0))
+
+            # 已锁定目标 → 只接受同一物理 marker (世界坐标在容差内)
+            if self._locked_target_xy is not None:
+                lx, ly = self._locked_target_xy
+                if math.hypot(wx - lx, wy - ly) > lock_tolerance:
+                    continue
+
             world_error = math.hypot(wx - tx, wy - ty)
             du, dv = self._pixel_delta(target)
             pixel_error = math.hypot(du, dv)
@@ -164,7 +176,19 @@ class DropVisualAligner:
                 best_world = world_error
 
         if best is None:
+            # 锁定的目标暂时丢失, 不切换 — 等它回来
+            if self._locked_target_xy is not None:
+                return None, VisualAlignStatus(source=source, stable_count=self._stable_count)
             return None, VisualAlignStatus(source=source, stable_count=self._stable_count)
+
+        # 第一次选到目标 → 锁定
+        if self._locked_target_xy is None:
+            wx = float(self._field(best, "center_x", 0.0))
+            wy = float(self._field(best, "center_y", 0.0))
+            self._locked_target_xy = (wx, wy)
+            self._fsm.get_logger().info(
+                f"DESCEND_ALIGN: 锁定目标 world=({wx:.2f},{wy:.2f}) src={source}"
+            )
 
         return best, VisualAlignStatus(
             source=source,
