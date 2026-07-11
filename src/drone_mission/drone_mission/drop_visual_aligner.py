@@ -17,9 +17,12 @@ from px4_control.telemetry import ned_to_world, world_to_ned
 
 
 class ServoPhase(IntEnum):
-    PROBE_X = 0      # X 轴方向探测
-    PROBE_Y = 1      # Y 轴方向探测
-    BRAKING = 2      # 刹车悬停, 等待稳定对齐
+    PROBE_X_PLUS = 0    # 探测 +X
+    PROBE_X_MINUS = 1   # 探测 -X (从 +X 位置跳过去)
+    PROBE_Y_PLUS = 2    # 探测 +Y
+    PROBE_Y_MINUS = 3   # 探测 -Y
+    COMMIT_AXIS = 4     # 提交当前轴的最佳方向
+    BRAKING = 5         # 刹车悬停, 等待稳定对齐
 
 
 @dataclass
@@ -54,17 +57,14 @@ class DropVisualAligner:
         self._last_log_time = 0.0
         self._last_status = VisualAlignStatus()
 
-        # 探测状态
-        self._phase: ServoPhase = ServoPhase.PROBE_X
-        self._probing_plus: bool = True    # 当前在探 + 还是 - 方向
-        self._anchor_n: float = 0.0         # 本轮探测的锚点 NED North
-        self._anchor_e: float = 0.0         # 本轮探测的锚点 NED East
-        self._anchor_pixel_error: float = float("inf")
-        self._anchor_du: float = 0.0
-        self._anchor_dv: float = 0.0
+        # 探测状态 — 端点比较法, 不回锚点
+        self._phase: ServoPhase = ServoPhase.PROBE_X_PLUS
+        self._baseline_n: float = 0.0       # 本轮探测起点 NED North
+        self._baseline_e: float = 0.0       # 本轮探测起点 NED East
+        self._baseline_pixel_error: float = float("inf")
         self._probe_start_time: float = 0.0
-        self._plus_pixel_error: float = float("inf")
-        self._minus_pixel_error: float = float("inf")
+        self._endpoint_plus_error: float = float("inf")
+        self._endpoint_minus_error: float = float("inf")
 
         # 刹车
         self._brake_enter_time: float = 0.0
@@ -77,16 +77,13 @@ class DropVisualAligner:
         self._stable_count = 0
         self._last_log_time = 0.0
         self._last_status = VisualAlignStatus()
-        self._phase = ServoPhase.PROBE_X
-        self._probing_plus = True
-        self._anchor_n = 0.0
-        self._anchor_e = 0.0
-        self._anchor_pixel_error = float("inf")
-        self._anchor_du = 0.0
-        self._anchor_dv = 0.0
+        self._phase = ServoPhase.PROBE_X_PLUS
+        self._baseline_n = 0.0
+        self._baseline_e = 0.0
+        self._baseline_pixel_error = float("inf")
         self._probe_start_time = 0.0
-        self._plus_pixel_error = float("inf")
-        self._minus_pixel_error = float("inf")
+        self._endpoint_plus_error = float("inf")
+        self._endpoint_minus_error = float("inf")
         self._brake_enter_time = 0.0
         self._brake_last_check = 0.0
         self._step_scale = 1.0
@@ -208,23 +205,38 @@ class DropVisualAligner:
 
     def _current_step(self) -> float:
         """自适应步长: 根据当前误差大小选步长."""
-        base = float(self._fsm.get_param("drop_visual_align_probe_step", 0.20))
+        base = float(self._fsm.get_param("drop_visual_align_probe_step", 0.40))
         return base * self._step_scale
 
     def _update_step_scale(self, pixel_error: float) -> None:
         """根据当前像素误差调整步长档位."""
-        if pixel_error > 150:
-            self._step_scale = 1.0    # 大步 0.20m
-        elif pixel_error > 60:
-            self._step_scale = 0.6    # 中步 0.12m
+        if pixel_error > 200:
+            self._step_scale = 1.0    # 大步 0.40m
+        elif pixel_error > 100:
+            self._step_scale = 0.65   # 中步 0.26m
+        elif pixel_error > 50:
+            self._step_scale = 0.40   # 小步 0.16m
         else:
-            self._step_scale = 0.35   # 小步 0.07m
+            self._step_scale = 0.25   # 微步 0.10m
 
-    def _goto_ned(self, n: float, e: float, drop_h: float) -> None:
-        speed = float(self._fsm.get_param("drop_visual_align_probe_speed", 0.25))
+    def _probe_move(self, n: float, e: float, drop_h: float, label: str) -> None:
+        """发送探测移动指令."""
+        speed = float(self._fsm.get_param("drop_visual_align_probe_speed", 0.30))
         self._fsm.fc.goto_ned(n, e, -drop_h, speed=speed)
+        self._probe_start_time = self._fsm.get_clock().now().nanoseconds / 1e9
+        self._fsm.get_logger().info(
+            f"DESCEND_PROBE: {label} → NED({n:.2f},{e:.2f}) "
+            f"step={self._current_step():.3f}m scale={self._step_scale:.2f}"
+        )
 
-    # ── 梯度下降伺服 ──────────────────────────────────────────────
+    # ── 端点比较法梯度下降 ─────────────────────────────────────────
+
+    def _axis_delta_ned(self, axis_is_x: bool, sign: float, step: float) -> Tuple[float, float]:
+        """返回 (dn, de): 指定轴和方向的 NED 偏移."""
+        if axis_is_x:
+            return (0.0, sign * step)   # WorldX = NED East
+        else:
+            return (sign * step, 0.0)   # WorldY = NED North
 
     def command_alignment(self, drop_height: float) -> bool:
         """主入口. 返回是否发送了 setpoint."""
@@ -236,162 +248,147 @@ class DropVisualAligner:
         if self._phase == ServoPhase.BRAKING:
             return self._braking(status, drop_height)
 
-        return self._probing(status, drop_height)
-
-    def _set_anchor(self, status: VisualAlignStatus) -> None:
-        """记录当前位置和像素值为锚点."""
-        pos = self._fsm.bridge.get_current_position()
-        self._anchor_n = pos.north
-        self._anchor_e = pos.east
-        self._anchor_pixel_error = status.pixel_error
-        self._anchor_du = status.pixel_du
-        self._anchor_dv = status.pixel_dv
-
-    def _move_and_wait(self, n: float, e: float, drop_h: float, phase_label: str) -> None:
-        """发送移动指令并记录探测开始时间."""
-        self._goto_ned(n, e, drop_h)
-        self._probe_start_time = self._fsm.get_clock().now().nanoseconds / 1e9
-        self._fsm.get_logger().info(
-            f"DESCEND_PROBE: {phase_label} → NED({n:.2f},{e:.2f}) "
-            f"step={self._current_step():.3f}m"
-        )
-
-    def _probing(self, status: VisualAlignStatus, drop_h: float) -> bool:
-        """梯度下降探测状态机."""
-        now = self._fsm.get_clock().now().nanoseconds / 1e9
-        settle = float(self._fsm.get_param("drop_visual_align_probe_settle", 0.8))
-        step = self._current_step()
-        brake_threshold = float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0))
-
-        # ── 开始一轮新探测: 设定锚点 ──
-        if self._probe_start_time == 0.0:
-            self._set_anchor(status)
-            self._probing_plus = True
-            self._plus_pixel_error = float("inf")
-            self._minus_pixel_error = float("inf")
-            self._update_step_scale(status.pixel_error)
-
-            # X 轴: 尝试 +WorldX (NED +East)
-            if self._phase == ServoPhase.PROBE_X:
-                self._move_and_wait(
-                    self._anchor_n,
-                    self._anchor_e + step,
-                    drop_h,
-                    f"X+ probe anchor_err={self._anchor_pixel_error:.0f}px step_scale={self._step_scale:.2f}"
-                )
-            else:
-                # Y 轴: 尝试 +WorldY (NED +North)
-                self._move_and_wait(
-                    self._anchor_n + step,
-                    self._anchor_e,
-                    drop_h,
-                    f"Y+ probe anchor_err={self._anchor_pixel_error:.0f}px step_scale={self._step_scale:.2f}"
-                )
+        if self._phase == ServoPhase.COMMIT_AXIS:
+            # 等待提交移动到位, 然后推进
+            settle = float(self._fsm.get_param("drop_visual_align_probe_settle", 1.0))
+            if self._fsm.get_clock().now().nanoseconds / 1e9 - self._probe_start_time >= settle:
+                self._advance_phase(drop_height)
             return True
 
-        # ── 等待探测移动完成并采样 ──
+        return self._probing(status, drop_height)
+
+    def _probing(self, status: VisualAlignStatus, drop_h: float) -> bool:
+        """端点比较法: 每个轴分别采样 +step 和 -step, 取 pixel_error 小的提交."""
+        now = self._fsm.get_clock().now().nanoseconds / 1e9
+        settle = float(self._fsm.get_param("drop_visual_align_probe_settle", 1.0))
+        step = self._current_step()
+        brake_threshold = float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0))
+        is_x = self._phase in (ServoPhase.PROBE_X_PLUS, ServoPhase.PROBE_X_MINUS)
+
+        # ── 设定基线 ──
+        if self._probe_start_time == 0.0:
+            pos = self._fsm.bridge.get_current_position()
+            self._baseline_n = pos.north
+            self._baseline_e = pos.east
+            self._baseline_pixel_error = status.pixel_error
+            self._update_step_scale(status.pixel_error)
+            step = self._current_step()  # 重读 — scale 可能变了
+
+            # 探测 + 端点
+            self._phase = (ServoPhase.PROBE_X_PLUS if is_x else ServoPhase.PROBE_Y_PLUS)
+            dn, de = self._axis_delta_ned(is_x, +1.0, step)
+            self._probe_move(
+                self._baseline_n + dn, self._baseline_e + de, drop_h,
+                f"{'X' if is_x else 'Y'}+ baseline_err={self._baseline_pixel_error:.0f}px"
+            )
+            return True
+
+        # ── 等待到位 ──
         if now - self._probe_start_time < settle:
             return True
 
-        # 采样当前像素误差
+        # ── 采样端点 ──
         if not self._pixel_valid(status):
-            self._fsm.get_logger().warn("DESCEND_PROBE: 采样无效 (目标丢失)")
-            # 回到锚点
-            self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
+            self._fsm.get_logger().warn(f"DESCEND_PROBE: 采样无效, 回基线")
+            self._goto_baseline(drop_h)
             self._probe_start_time = 0.0
+            self._phase = ServoPhase.PROBE_X_PLUS  # 下一轮从 X 重新开始
             return True
 
-        current_pixel_error = status.pixel_error
-
-        if self._probing_plus:
-            # 刚探测了 + 方向
-            self._plus_pixel_error = current_pixel_error
-            delta = self._anchor_pixel_error - current_pixel_error  # 正=改善了
+        if self._phase in (ServoPhase.PROBE_X_PLUS, ServoPhase.PROBE_Y_PLUS):
+            # 刚采了 + 端点
+            self._endpoint_plus_error = status.pixel_error
+            delta = self._baseline_pixel_error - status.pixel_error
             self._fsm.get_logger().info(
-                f"DESCEND_PROBE: +采样 err={current_pixel_error:.0f}px "
+                f"DESCEND_PROBE: +采样 err={status.pixel_error:.0f}px "
                 f"delta={delta:+.0f}px (正=改善)"
             )
 
-            if current_pixel_error < self._anchor_pixel_error:
-                # + 方向改善了 → 直接提交, 跳过 - 探测
-                self._fsm.get_logger().info(
-                    f"DESCEND_PROBE: +方向改善, 提交 "
-                    f"err {self._anchor_pixel_error:.0f}→{current_pixel_error:.0f}px"
-                )
-                self._commit_and_advance(drop_h)
-            else:
-                # + 方向没改善 → 回到锚点, 试 - 方向
-                self._probing_plus = False
-                self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
-                self._probe_start_time = now  # 重置等待时间
-                direction = "-X" if self._phase == ServoPhase.PROBE_X else "-Y"
-                self._fsm.get_logger().info(
-                    f"DESCEND_PROBE: +方向恶化, 回锚试{direction}"
-                )
+            # 跳到 - 端点 (从 + 端点直接跳 -2*step)
+            sign = -1.0
+            self._phase = (ServoPhase.PROBE_X_MINUS if is_x else ServoPhase.PROBE_Y_MINUS)
+            dn, de = self._axis_delta_ned(is_x, sign, step)
+            # 当前位置在 baseline + step. 要跳到 baseline - step: 移动 -2*step
+            dn *= 2
+            de *= 2
+            # 但我们不知道当前精确位置（无人机可能没完全到位），用 baseline 计算
+            dn2, de2 = self._axis_delta_ned(is_x, -1.0, step)
+            self._probe_move(
+                self._baseline_n + dn2, self._baseline_e + de2, drop_h,
+                f"{'X' if is_x else 'Y'}- from baseline"
+            )
             return True
 
         else:
-            # 刚探测了 - 方向 (从锚点)
-            self._minus_pixel_error = current_pixel_error
-            delta = self._anchor_pixel_error - current_pixel_error
+            # 刚采了 - 端点
+            self._endpoint_minus_error = status.pixel_error
+            delta = self._baseline_pixel_error - status.pixel_error
             self._fsm.get_logger().info(
-                f"DESCEND_PROBE: -采样 err={current_pixel_error:.0f}px "
+                f"DESCEND_PROBE: -采样 err={status.pixel_error:.0f}px "
                 f"delta={delta:+.0f}px (正=改善)"
             )
 
-            # 回到锚点, 提交 ± 中更好的
-            self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
-            self._probe_start_time = now
+            # 三方比较: baseline, +端点, -端点
+            best = min(
+                (self._baseline_pixel_error, 0.0),
+                (self._endpoint_plus_error, +1.0),
+                (self._endpoint_minus_error, -1.0),
+                key=lambda x: x[0],
+            )
+            best_err, best_sign = best
 
-            if current_pixel_error < self._anchor_pixel_error:
-                # - 方向改善了
-                self._fsm.get_logger().info(
-                    f"DESCEND_PROBE: -方向改善, 提交 "
-                    f"err {self._anchor_pixel_error:.0f}→{current_pixel_error:.0f}px"
-                )
-                # 已经回到了锚点, 需要重新移动到 - 方向的目标位置
-                # 但 goto_ned 已经发出了回到锚点的指令
-                # 等回到锚点后再移动到 - 方向
-                self._goto_ned(self._anchor_n, self._anchor_e, drop_h)
-                self._probe_start_time = now
-                self._probing_plus = False  # 保持, 等回到锚点
-                # 标记: 下一轮回到锚点后要移动到 - 位置
-                # 用一个额外状态来处理
-                # 简化处理: 直接提交锚点, 因为 - 方向也没好到哪去
-                # 等自然进入下一轮重新探测
-                self._commit_and_advance(drop_h)
+            self._fsm.get_logger().info(
+                f"DESCEND_PROBE: 比较 baseline={self._baseline_pixel_error:.0f} "
+                f"+={self._endpoint_plus_error:.0f} -={self._endpoint_minus_error:.0f} "
+                f"→ 最佳={best_sign:+.0f} err={best_err:.0f}px"
+            )
+
+            if best_sign != 0.0:
+                # 提交到最佳端点
+                dn, de = self._axis_delta_ned(is_x, best_sign, step)
+                self._goto_ned(self._baseline_n + dn, self._baseline_e + de, drop_h)
+                self._probe_start_time = now  # 等待到位再切阶段
+                self._phase = ServoPhase.COMMIT_AXIS
             else:
-                # 两个方向都没改善 → 保持锚点, 进入下一轮
+                # 两个端点都不如 baseline → 保持基线, 缩小步长
+                self._goto_baseline(drop_h)
+                self._probe_start_time = now
+                self._phase = ServoPhase.COMMIT_AXIS
+                self._step_scale *= 0.5  # 缩半步长
                 self._fsm.get_logger().info(
-                    "DESCEND_PROBE: ±都未改善, 保持锚点 "
-                    f"plus={self._plus_pixel_error:.0f} minus={self._minus_pixel_error:.0f} "
-                    f"anchor={self._anchor_pixel_error:.0f}px"
+                    f"DESCEND_PROBE: 探测无改善, 缩半步长→{self._current_step():.3f}m"
                 )
-                self._commit_and_advance(drop_h)
+
             return True
 
-    def _commit_and_advance(self, drop_h: float) -> None:
-        """提交当前位置为新的工作点, 进入下一阶段."""
-        self._probe_start_time = 0.0
+    def _goto_baseline(self, drop_h: float) -> None:
+        """回到本轮基线位置."""
+        self._goto_ned(self._baseline_n, self._baseline_e, drop_h)
 
-        # 检查是否该进入刹车区
-        if self._last_status.pixel_error < float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0)):
+    def _goto_ned(self, n: float, e: float, drop_h: float) -> None:
+        speed = float(self._fsm.get_param("drop_visual_align_probe_speed", 0.30))
+        self._fsm.fc.goto_ned(n, e, -drop_h, speed=speed)
+
+    def _advance_phase(self, drop_h: float) -> None:
+        """提交后推进到下一个探测轴或刹车."""
+        self._probe_start_time = 0.0
+        brake_threshold = float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0))
+
+        if self._last_status.pixel_error < brake_threshold:
             self._phase = ServoPhase.BRAKING
             self._brake_enter_time = self._fsm.get_clock().now().nanoseconds / 1e9
             self._brake_last_check = 0.0
-            self._goto_ned(
-                self._fsm.bridge.get_current_position().north,
-                self._fsm.bridge.get_current_position().east,
-                drop_h,
-            )
+            pos = self._fsm.bridge.get_current_position()
+            self._goto_ned(pos.north, pos.east, drop_h)
             self._fsm.get_logger().info(
-                f"DESCEND_PROBE: pixel_error={self._last_status.pixel_error:.0f}px "
-                f"< brake_threshold → BRAKING"
+                f"DESCEND_PROBE: err={self._last_status.pixel_error:.0f}px < brake → BRAKING"
             )
-        elif self._phase == ServoPhase.PROBE_X:
-            self._phase = ServoPhase.PROBE_Y
+        elif self._phase in (ServoPhase.PROBE_X_PLUS, ServoPhase.PROBE_X_MINUS, ServoPhase.COMMIT_AXIS):
+            # X 轴结束 → 开始 Y 轴
+            self._phase = ServoPhase.PROBE_Y_PLUS
         else:
-            self._phase = ServoPhase.PROBE_X
+            # Y 轴结束 → 回到 X 轴
+            self._phase = ServoPhase.PROBE_X_PLUS
 
     # ── 刹车悬停 ──────────────────────────────────────────────────
 
@@ -410,14 +407,14 @@ class DropVisualAligner:
             self._fsm.get_logger().info(
                 f"DESCEND_BRAKE: 刹车超时 ({brake_timeout}s), 退出重试"
             )
-            self._phase = ServoPhase.PROBE_X
+            self._phase = ServoPhase.PROBE_X_PLUS
             self._probe_start_time = 0.0
             return True
 
         # 目标丢失 → 退出刹车
         if not self._pixel_valid(status):
             self._fsm.get_logger().warn("DESCEND_BRAKE: 目标丢失, 退出刹车")
-            self._phase = ServoPhase.PROBE_X
+            self._phase = ServoPhase.PROBE_X_PLUS
             self._probe_start_time = 0.0
             return True
 
@@ -426,7 +423,7 @@ class DropVisualAligner:
             self._fsm.get_logger().info(
                 f"DESCEND_BRAKE: pixel_error={status.pixel_error:.0f}px 超阈值, 退出刹车"
             )
-            self._phase = ServoPhase.PROBE_X
+            self._phase = ServoPhase.PROBE_X_PLUS
             self._probe_start_time = 0.0
             return True
 

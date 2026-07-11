@@ -55,9 +55,9 @@
     drop_confirmation_timeout: 3.0  # 投放确认超时 (s)
     drop_align_pixel_tolerance: 35.0 # 投放前圆筒中心允许像素误差
     # ── 低空视觉校准: 梯度下降探测 ──
-    drop_visual_align_probe_step: 0.20 # 单次探测步长 (m)
-    drop_visual_align_probe_speed: 0.25 # 探测移动速度 (m/s)
-    drop_visual_align_probe_settle: 0.8 # 探测后稳定等待时间 (s)
+    drop_visual_align_probe_step: 0.40 # 单次探测步长 (m), 信号大于噪声(~30px)
+    drop_visual_align_probe_speed: 0.30 # 探测移动速度 (m/s)
+    drop_visual_align_probe_settle: 1.0 # 探测后稳定等待时间 (s)
     drop_visual_align_world_gate: 1.5 # 当前视觉目标与记忆目标最大匹配距离 (m)
     drop_visual_align_stable_frames: 6 # 连续居中帧数后才允许投放
     drop_visual_align_timeout: 18.0 # 低空视觉校准最长等待时间 (s)
