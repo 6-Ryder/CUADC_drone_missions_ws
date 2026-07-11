@@ -59,8 +59,9 @@ class DropVisualAligner:
 
         # 探测状态 — 端点比较法, 不回锚点
         self._phase: ServoPhase = ServoPhase.PROBE_X_PLUS
-        self._baseline_n: float = 0.0       # 本轮探测起点 NED North
-        self._baseline_e: float = 0.0       # 本轮探测起点 NED East
+        self._working_axis_x: bool = True     # 当前在探 X 还是 Y 轴
+        self._baseline_n: float = 0.0
+        self._baseline_e: float = 0.0
         self._baseline_pixel_error: float = float("inf")
         self._probe_start_time: float = 0.0
         self._endpoint_plus_error: float = float("inf")
@@ -78,6 +79,7 @@ class DropVisualAligner:
         self._last_log_time = 0.0
         self._last_status = VisualAlignStatus()
         self._phase = ServoPhase.PROBE_X_PLUS
+        self._working_axis_x = True
         self._baseline_n = 0.0
         self._baseline_e = 0.0
         self._baseline_pixel_error = float("inf")
@@ -263,7 +265,7 @@ class DropVisualAligner:
         settle = float(self._fsm.get_param("drop_visual_align_probe_settle", 1.0))
         step = self._current_step()
         brake_threshold = float(self._fsm.get_param("drop_visual_align_brake_threshold", 80.0))
-        is_x = self._phase in (ServoPhase.PROBE_X_PLUS, ServoPhase.PROBE_X_MINUS)
+        axis_label = "X" if self._working_axis_x else "Y"
 
         # ── 设定基线 ──
         if self._probe_start_time == 0.0:
@@ -272,14 +274,13 @@ class DropVisualAligner:
             self._baseline_e = pos.east
             self._baseline_pixel_error = status.pixel_error
             self._update_step_scale(status.pixel_error)
-            step = self._current_step()  # 重读 — scale 可能变了
+            step = self._current_step()
 
-            # 探测 + 端点
-            self._phase = (ServoPhase.PROBE_X_PLUS if is_x else ServoPhase.PROBE_Y_PLUS)
-            dn, de = self._axis_delta_ned(is_x, +1.0, step)
+            self._phase = (ServoPhase.PROBE_X_PLUS if self._working_axis_x else ServoPhase.PROBE_Y_PLUS)
+            dn, de = self._axis_delta_ned(self._working_axis_x, +1.0, step)
             self._probe_move(
                 self._baseline_n + dn, self._baseline_e + de, drop_h,
-                f"{'X' if is_x else 'Y'}+ baseline_err={self._baseline_pixel_error:.0f}px"
+                f"{axis_label}+ baseline_err={self._baseline_pixel_error:.0f}px"
             )
             return True
 
@@ -292,7 +293,8 @@ class DropVisualAligner:
             self._fsm.get_logger().warn(f"DESCEND_PROBE: 采样无效, 回基线")
             self._goto_baseline(drop_h)
             self._probe_start_time = 0.0
-            self._phase = ServoPhase.PROBE_X_PLUS  # 下一轮从 X 重新开始
+            self._phase = ServoPhase.PROBE_X_PLUS
+            self._working_axis_x = True
             return True
 
         if self._phase in (ServoPhase.PROBE_X_PLUS, ServoPhase.PROBE_Y_PLUS):
@@ -304,23 +306,17 @@ class DropVisualAligner:
                 f"delta={delta:+.0f}px (正=改善)"
             )
 
-            # 跳到 - 端点 (从 + 端点直接跳 -2*step)
-            sign = -1.0
-            self._phase = (ServoPhase.PROBE_X_MINUS if is_x else ServoPhase.PROBE_Y_MINUS)
-            dn, de = self._axis_delta_ned(is_x, sign, step)
-            # 当前位置在 baseline + step. 要跳到 baseline - step: 移动 -2*step
-            dn *= 2
-            de *= 2
-            # 但我们不知道当前精确位置（无人机可能没完全到位），用 baseline 计算
-            dn2, de2 = self._axis_delta_ned(is_x, -1.0, step)
+            # 直接跳到 - 端点 (baseline - step), 不回锚点
+            self._phase = (ServoPhase.PROBE_X_MINUS if self._working_axis_x else ServoPhase.PROBE_Y_MINUS)
+            dn, de = self._axis_delta_ned(self._working_axis_x, -1.0, step)
             self._probe_move(
-                self._baseline_n + dn2, self._baseline_e + de2, drop_h,
-                f"{'X' if is_x else 'Y'}- from baseline"
+                self._baseline_n + dn, self._baseline_e + de, drop_h,
+                f"{axis_label}- from baseline"
             )
             return True
 
         else:
-            # 刚采了 - 端点
+            # 刚采了 - 端点 → 三方比较
             self._endpoint_minus_error = status.pixel_error
             delta = self._baseline_pixel_error - status.pixel_error
             self._fsm.get_logger().info(
@@ -328,7 +324,6 @@ class DropVisualAligner:
                 f"delta={delta:+.0f}px (正=改善)"
             )
 
-            # 三方比较: baseline, +端点, -端点
             best = min(
                 (self._baseline_pixel_error, 0.0),
                 (self._endpoint_plus_error, +1.0),
@@ -344,21 +339,18 @@ class DropVisualAligner:
             )
 
             if best_sign != 0.0:
-                # 提交到最佳端点
-                dn, de = self._axis_delta_ned(is_x, best_sign, step)
+                dn, de = self._axis_delta_ned(self._working_axis_x, best_sign, step)
                 self._goto_ned(self._baseline_n + dn, self._baseline_e + de, drop_h)
-                self._probe_start_time = now  # 等待到位再切阶段
+                self._probe_start_time = now
                 self._phase = ServoPhase.COMMIT_AXIS
             else:
-                # 两个端点都不如 baseline → 保持基线, 缩小步长
                 self._goto_baseline(drop_h)
                 self._probe_start_time = now
                 self._phase = ServoPhase.COMMIT_AXIS
-                self._step_scale *= 0.5  # 缩半步长
+                self._step_scale *= 0.5
                 self._fsm.get_logger().info(
                     f"DESCEND_PROBE: 探测无改善, 缩半步长→{self._current_step():.3f}m"
                 )
-
             return True
 
     def _goto_baseline(self, drop_h: float) -> None:
@@ -383,11 +375,13 @@ class DropVisualAligner:
             self._fsm.get_logger().info(
                 f"DESCEND_PROBE: err={self._last_status.pixel_error:.0f}px < brake → BRAKING"
             )
-        elif self._phase in (ServoPhase.PROBE_X_PLUS, ServoPhase.PROBE_X_MINUS, ServoPhase.COMMIT_AXIS):
+        elif self._working_axis_x:
             # X 轴结束 → 开始 Y 轴
+            self._working_axis_x = False
             self._phase = ServoPhase.PROBE_Y_PLUS
         else:
             # Y 轴结束 → 回到 X 轴
+            self._working_axis_x = True
             self._phase = ServoPhase.PROBE_X_PLUS
 
     # ── 刹车悬停 ──────────────────────────────────────────────────
