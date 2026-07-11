@@ -108,12 +108,13 @@ class DropVisualAligner:
         return selected_positions[-1]
 
     def _current_targets(self) -> Tuple[list, str]:
-        cylinders = self._fsm.get_cylinders()
-        if cylinders:
-            return cylinders, "cylinder"
+        # 低空 (2m) marker 检测比 cylinder 稳定得多 — 优先用 marker
         markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
         if markers:
             return markers, "marker"
+        cylinders = self._fsm.get_cylinders()
+        if cylinders:
+            return cylinders, "cylinder"
         return [], "none"
 
     def _pixel_delta(self, target: Any) -> Tuple[float, float]:
