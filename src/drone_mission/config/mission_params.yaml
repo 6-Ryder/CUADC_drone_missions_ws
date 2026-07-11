@@ -63,6 +63,7 @@
     drop_visual_align_timeout: 18.0 # 低空视觉校准最长等待时间 (s)
     drop_visual_align_brake_threshold: 80.0 # pixel_error 进入此阈值后悬停 (px)
     drop_visual_align_brake_timeout: 4.0 # 刹车悬停最长持续时间 (s)
+    drop_visual_align_hover_time: 2.5 # 探测提交后悬停观察时间 (s), 给 is_centered 稳定机会
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
     cylinder_approach_slow_speed: 0.15   # 接近对心后慢速微调
     cylinder_approach_memory_speed: 0.25 # 丢帧时向记忆圆心粗靠近速度

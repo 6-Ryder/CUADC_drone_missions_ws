@@ -238,6 +238,7 @@ class MissionFSM(Node):
         self.declare_parameter("drop_visual_align_timeout", 18.0)
         self.declare_parameter("drop_visual_align_brake_threshold", 80.0)
         self.declare_parameter("drop_visual_align_brake_timeout", 4.0)
+        self.declare_parameter("drop_visual_align_hover_time", 2.5)
         self.declare_parameter("cylinder_approach_fast_speed", 0.30)
         self.declare_parameter("cylinder_approach_slow_speed", 0.15)
         self.declare_parameter("cylinder_approach_memory_speed", 0.25)

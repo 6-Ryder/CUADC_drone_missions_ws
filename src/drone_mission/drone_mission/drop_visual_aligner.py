@@ -21,8 +21,9 @@ class ServoPhase(IntEnum):
     PROBE_X_MINUS = 1   # 探测 -X (从 +X 位置跳过去)
     PROBE_Y_PLUS = 2    # 探测 +Y
     PROBE_Y_MINUS = 3   # 探测 -Y
-    COMMIT_AXIS = 4     # 提交当前轴的最佳方向
-    BRAKING = 5         # 刹车悬停, 等待稳定对齐
+    COMMIT_AXIS = 4     # 提交移动到位
+    HOVER = 5           # 悬停观察, 给 is_centered 稳定累积机会
+    BRAKING = 6         # 刹车悬停, 等待稳定对齐
 
 
 @dataclass
@@ -253,9 +254,25 @@ class DropVisualAligner:
             return self._braking(status, drop_height)
 
         if self._phase == ServoPhase.COMMIT_AXIS:
-            # 等待提交移动到位, 然后推进
             settle = float(self._fsm.get_param("drop_visual_align_probe_settle", 1.0))
             if self._fsm.get_clock().now().nanoseconds / 1e9 - self._probe_start_time >= settle:
+                # 到位后进入悬停观察, 不立即探测下一轴
+                self._phase = ServoPhase.HOVER
+                self._probe_start_time = self._fsm.get_clock().now().nanoseconds / 1e9
+                pos = self._fsm.bridge.get_current_position()
+                self._goto_ned(pos.north, pos.east, drop_height)
+                self._fsm.get_logger().info(
+                    "DESCEND_PROBE: 提交到位, 进入悬停观察 "
+                    f"pixel_error={status.pixel_error:.0f}px"
+                )
+            return True
+
+        if self._phase == ServoPhase.HOVER:
+            # 悬停 2 秒让 is_centered 有机会累积稳定帧
+            pos = self._fsm.bridge.get_current_position()
+            self._fsm.fc.goto_ned(pos.north, pos.east, -drop_height, speed=0.0)
+            hover_duration = float(self._fsm.get_param("drop_visual_align_hover_time", 2.5))
+            if self._fsm.get_clock().now().nanoseconds / 1e9 - self._probe_start_time >= hover_duration:
                 self._advance_phase(drop_height)
             return True
 
