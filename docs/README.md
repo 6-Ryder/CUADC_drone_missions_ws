@@ -421,11 +421,12 @@ drone_tasks_ws/
 | 5.5 | `src/drone_mission/drone_mission/states/state_cylinder_search.py` | ~161 | CYLINDER_SEARCH：悬停→累积记忆→慢速扫描→超时策略 |
 | 5.6 | `src/drone_mission/drone_mission/cylinder_selector.py` | ~135 | 半径排序+位置去重+已选排除 |
 | 5.7 | `src/drone_mission/drone_mission/states/state_cylinder_approach.py` | ~196 | **最复杂的单状态**。像素伺服 vs 记忆导航双模式；`_goto_pixel_centered_target` vs `_goto_target_xy`；位置匹配（不依赖ID）；20帧对心稳定性检查 |
-| 5.8 | `src/drone_mission/drone_mission/states/state_drop.py` | ~204 | 降高→投放许可检查（`_drop_target_is_centered`）→异步投放→回升→判断是否再投 |
-| 5.9 | `src/drone_mission/drone_mission/states/state_recon_patrol.py` | ~149 | 弓字形路径生成→逐航点飞行→覆盖监控→超时/完成返航 |
-| 5.10 | `src/drone_mission/drone_mission/states/state_return.py` | ~82 | 返航 H 点→2s 稳定性确认 |
-| 5.11 | `src/drone_mission/drone_mission/states/state_precision_land.py` | ~177 | 三阶段降落：搜索→伺服→盲降；视觉丢失退化策略 |
-| 5.12 | `src/drone_mission/drone_mission/path_planner.py` | ~367 | 自动最优条带方向；`plan_coverage_ned` NED 弓字形；`plan_transit` 过渡路径 |
+| 5.8 | `src/drone_mission/drone_mission/states/state_drop.py` | ~212 | 降高→投放许可检查→异步投放→回升→判断是否再投；超时原地重试 |
+| 5.9 | `src/drone_mission/drone_mission/drop_visual_aligner.py` | ~444 | **低空投放视觉校准**。端点比较法梯度下降：锁定目标→±探测→三方比较→提交→悬停观察→刹车。在线目标身份锁定 + 自适应步长 |
+| 5.10 | `src/drone_mission/drone_mission/states/state_recon_patrol.py` | ~149 | 弓字形路径生成→逐航点飞行→覆盖监控→超时/完成返航 |
+| 5.11 | `src/drone_mission/drone_mission/states/state_return.py` | ~82 | 返航 H 点→2s 稳定性确认 |
+| 5.12 | `src/drone_mission/drone_mission/states/state_precision_land.py` | ~177 | 三阶段降落：搜索→伺服→盲降；视觉丢失退化策略 |
+| 5.13 | `src/drone_mission/drone_mission/path_planner.py` | ~367 | 自动最优条带方向；`plan_coverage_ned` NED 弓字形；`plan_transit` 过渡路径 |
 
 **读完应能回答**：状态机怎么从 INIT 一步步走到 COMPLETE？每个状态的 enter/execute/exit 三阶段做了什么决策？异常怎么处理？
 

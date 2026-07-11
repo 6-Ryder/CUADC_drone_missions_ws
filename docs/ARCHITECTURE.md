@@ -155,6 +155,7 @@ drone_tasks_ws/src/
 │   │   │   ├── state_cylinder_search.py    # 投放区搜索 & 选筒
 │   │   │   ├── state_cylinder_approach.py  # 逼近圆筒圆心
 │   │   │   ├── state_drop.py        # 触发投放
+│   │   ├── drop_visual_aligner.py  # 低空视觉校准 (梯度下降伺服)
 │   │   │   ├── state_recon_patrol.py       # 侦察区全覆盖巡视
 │   │   │   ├── state_recon_inspect.py      # 危险品分类确认 (已废弃, 不再使用)
 │   │   │   ├── state_return.py      # 返航
