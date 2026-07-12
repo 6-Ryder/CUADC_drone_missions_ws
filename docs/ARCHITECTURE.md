@@ -436,6 +436,26 @@ CylinderRefiner.refine(image, bbox):
 CylinderTracker: IoU 多帧匹配 → min_hits 过滤闪烁 → 稳定 ID
 ```
 
+#### 6.2.3b 投放区蓝色标识 OpenCV 精修 (`vision_pipeline.py:_refine_marker_center`)
+
+投放区蓝色标识在低空 (2m) 是主要的伺服目标。与圆筒一样，YOLO bbox 中心每帧可跳动 50-100px，必须经过 OpenCV 精修才能用于像素级伺服。
+
+```
+YOLO 检出 "drop_zone_marker" bbox
+    ↓
+_refine_marker_center(image, bbox):
+  ROI 提取 → BGR→HSV
+  → 蓝色分割: H∈[95,135], S>60, V>60
+  → 形态学开闭运算去噪填孔
+  → findContours → 取最大蓝色轮廓
+  → cv2.moments() → 亚像素质心 (cx, cy)
+    ↓
+精修成功 → 用于 center_u/center_v + World 坐标计算
+精修失败 → 回退到 YOLO bbox 中心
+```
+
+蓝色标识是地面上的标准圆形，HSV 分割 + 轮廓矩质心的精度远高于 YOLO bbox 中心。可通过 `drop_marker_refine_enable` 参数开关。
+
 #### 6.2.4 危险品分类 (`hazard_classifier.py`) — ⚠️ 已废弃
 
 > **状态变更 (2026-07-07)**: 侦察区任务简化为纯全覆盖路径巡视。危险品识别分类功能已从主线视觉管线中移除。`hazard_classifier.py` 保留供独立使用，`vision_pipeline.py` 中的 `_process_hazards()` 调用已禁用。
@@ -952,7 +972,7 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 | `px4_control/flight_controller.py` | 桩代码 | ~20 | 飞行控制接口 |
 | `px4_control/telemetry.py` | 桩代码 | ~10 | 遥测数据模型 |
 | `drone_vision/models/yolo_engine.py` | ✅ 已实现 | ~320 | ONNX/TensorRT YOLO推理引擎 |
-| `drone_vision/vision_pipeline.py` | ✅ 已实现 | ~550 | 统一视觉管线 (单模型多任务) |
+| `drone_vision/vision_pipeline.py` | ✅ 已实现 | ~900 | 统一视觉管线 (单模型多任务 + marker OpenCV精修) |
 | `drone_vision/cylinder_detector.py` | ✅ 已实现 | ~530 | 圆筒检测: YOLO→椭圆拟合→追踪 |
 | `drone_vision/hazard_classifier.py` | ⚠️ 已废弃 | ~220 | 危险品分类 (已从主线禁用, 可独立使用) |
 | `drone_vision/landing_detector.py` | ✅ 已实现 | ~250 | H降落: YOLO→圆形底板→PCA方向 |
@@ -1057,6 +1077,7 @@ ros2 topic echo /drone/vision/hazards
 | 侦察区纯路径覆盖 | 不执行危险品识别, 聚焦全覆盖巡视的路径算法 |
 | 单模型6类 → 实际使用2类 | 训练6类保持模型通用性, 主线仅用 cylinder+landing_H |
 | 双单类模型分离推理 | V1(蓝色标识)+V2(白色圆筒) 独立引擎, 避免类别数不匹配 |
+| 投放标识 OpenCV 精修 | 蓝色标识 YOLO bbox 中心每帧跳动 50-100px，HSV 分割+轮廓矩质心替代，消除 pixel_error 噪声主源 |
 | class_names YAML 驱动 | 模型类别数变更只需改配置, 无需改代码 |
 | camera_device 可配置 | 切换摄像头 -p camera_device:=/dev/video1 无需改代码 |
 | PID视觉伺服(双模式) | 积分项修正漂移；降落/圆筒逼近不同参数 |

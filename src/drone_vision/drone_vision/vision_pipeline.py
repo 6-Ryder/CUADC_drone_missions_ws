@@ -150,6 +150,8 @@ class VisionPipelineNode(Node):
         # 类别名 (YAML 配置, 必须与模型输出类别数一致)
         self.declare_parameter("class_names", ["cylinder"])
         self.declare_parameter("drop_marker_class_names", ["drop_zone_marker"])
+        # 投放区蓝色标识 OpenCV 精修
+        self.declare_parameter("drop_marker_refine_enable", True)
         # 相机
         self.declare_parameter("fx", 400.0)
         self.declare_parameter("fy", 400.0)
@@ -450,12 +452,22 @@ class VisionPipelineNode(Node):
             marker_array = CylinderArray()
             marker_array.header.stamp = self.get_clock().now().to_msg()
             marker_array.header.frame_id = "world"
+            n_refined = 0
             for i, md in enumerate(marker_dets):
+                # --- OpenCV 精修: 蓝色 HSV 分割 → 轮廓矩质心 (替代 YOLO bbox 中心) ---
+                refined_cx, refined_cy, refined_ok = self._refine_marker_center(
+                    image, md.bbox, md.cx, md.cy,
+                )
+                if refined_ok:
+                    n_refined += 1
+                use_cx = refined_cx if refined_ok else md.cx
+                use_cy = refined_cy if refined_ok else md.cy
+
                 det = CylinderDetection()
                 det.id = i
                 det.confidence = float(md.confidence)
-                det.center_u = float(md.cx)
-                det.center_v = float(md.cy)
+                det.center_u = float(use_cx)
+                det.center_v = float(use_cy)
                 det.radius = 0.5  # 蓝色标识固定 1m 直径, 半径 0.5m
                 det.bbox_x1 = int(md.bbox[0])
                 det.bbox_y1 = int(md.bbox[1])
@@ -468,13 +480,13 @@ class VisionPipelineNode(Node):
                 cy = self.get_parameter("cy").value
                 alt = max(self._current_altitude, 0.5)
                 selected_xy = CoordinateTransformer.pixel_to_world_simple(
-                    md.cx, md.cy, alt, fx, fy, cx, cy,
+                    use_cx, use_cy, alt, fx, fy, cx, cy,
                     drone_world_x=self._drone_pose[0],
                     drone_world_y=self._drone_pose[1],
                 )
                 if self._coord_xform:
                     world_xy = self._coord_xform.pixel_to_world(
-                        md.cx, md.cy,
+                        use_cx, use_cy,
                         (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
                         (self._drone_pose[3], self._drone_pose[4],
                          self._drone_pose[5], self._drone_pose[6]),
@@ -493,8 +505,9 @@ class VisionPipelineNode(Node):
             self._marker_pub.publish(marker_array)
             if marker_dets and self._frame_count % 30 == 0:
                 self.get_logger().info(
-                    "DROP_MARKER: detected "
+                    "DROP_MARKER: "
                     f"n={len(marker_dets)} "
+                    f"refined={n_refined}/{len(marker_dets)} "
                     f"conf={marker_dets[0].confidence:.2f}"
                 )
             all_dets.extend(marker_dets)
@@ -829,6 +842,59 @@ class VisionPipelineNode(Node):
         msg.coverage_ratio = ratio
         msg.is_complete = self._coverage.is_complete if self._coverage else False
         self._cov_pub.publish(msg)
+
+    # ================================================================
+    # 投放区蓝色标识 OpenCV 精修
+    # ================================================================
+
+    @staticmethod
+    def _refine_marker_center(image: np.ndarray, bbox, yolo_cx, yolo_cy):
+        """
+        OpenCV HSV 分割 → 轮廓矩质心, 替代 YOLO bbox 中心.
+
+        蓝色标识是地面上的蓝色圆形, HSV 分割后取最大蓝色轮廓的矩质心,
+        精度远高于 YOLO bbox 中心 (后者每帧可跳动 50-100px)。
+
+        Returns (cx, cy, ok). 调用方负责在 ok=False 时回退到 YOLO 中心.
+        """
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        margin = 3
+        x1c = max(0, x1 - margin)
+        y1c = max(0, y1 - margin)
+        x2c = min(image.shape[1], x2 + margin)
+        y2c = min(image.shape[0], y2 + margin)
+
+        roi = image[y1c:y2c, x1c:x2c]
+        if roi.size == 0:
+            return yolo_cx, yolo_cy, False
+
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        # 蓝色: H ∈ [95, 135], S > 60, V > 60
+        lower_blue = np.array([95, 60, 60])
+        upper_blue = np.array([135, 255, 255])
+        mask = cv2.inRange(hsv, lower_blue, upper_blue)
+
+        # 形态学清理: 开运算去噪 → 闭运算填孔
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return yolo_cx, yolo_cy, False
+
+        best = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(best)
+        if area < 80:
+            return yolo_cx, yolo_cy, False
+
+        M = cv2.moments(best)
+        if M["m00"] <= 0:
+            return yolo_cx, yolo_cy, False
+
+        return (M["m10"] / M["m00"] + x1c,
+                M["m01"] / M["m00"] + y1c,
+                True)
 
     # ================================================================
     # OpenCV 回退 (无 YOLO 模型时的全图搜索)

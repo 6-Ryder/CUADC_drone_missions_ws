@@ -395,7 +395,7 @@ drone_tasks_ws/
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
 | 4.1 | `src/drone_vision/drone_vision/models/yolo_engine.py` | ~450 | YOLO ONNX/TensorRT/PyTorch 推理引擎；letterbox→推理→`_rescale_bbox()` 回原图（**关键修复点**）；`Detection` 数据类；自动按后缀选后端 |
-| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~860 | **全系统第二关键的单文件**。`_lazy_init` 加载双模型(V2圆筒+V1投放区标识)；`_image_cb` 主回调（帧率自适应→YOLO推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`/drone/vision/markers` 投放区标识发布 |
+| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~900 | **全系统第二关键的单文件**。`_lazy_init` 加载双模型(V2圆筒+V1投放区标识)；`_image_cb` 主回调（帧率自适应→YOLO推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`/drone/vision/markers` 投放区标识发布（含 OpenCV HSV 精修）；`_refine_marker_center` 蓝色分割+轮廓矩质心 |
 | 4.3 | `src/drone_vision/drone_vision/cylinder_detector.py` | ~530 | `CylinderRefiner.refine()`: YOLO bbox→ROI→Canny→椭圆拟合→白度评分；`CylinderTracker`: IoU 多帧匹配→min_hits过滤闪烁→稳定ID (支持 bbox) |
 | 4.4 | `src/drone_vision/drone_vision/landing_detector.py` | ~250 | `LandingPadRefiner.refine()`: 自适应阈值→圆形检测→PCA 方向估计 |
 | 4.5 | `src/drone_vision/drone_vision/coverage_monitor.py` | ~180 | 网格离散化 + FOV 投影覆盖标记 + 覆盖率计算 |
@@ -422,7 +422,7 @@ drone_tasks_ws/
 | 5.6 | `src/drone_mission/drone_mission/cylinder_selector.py` | ~135 | 半径排序+位置去重+已选排除 |
 | 5.7 | `src/drone_mission/drone_mission/states/state_cylinder_approach.py` | ~196 | **最复杂的单状态**。像素伺服 vs 记忆导航双模式；`_goto_pixel_centered_target` vs `_goto_target_xy`；位置匹配（不依赖ID）；20帧对心稳定性检查 |
 | 5.8 | `src/drone_mission/drone_mission/states/state_drop.py` | ~212 | 降高→投放许可检查→异步投放→回升→判断是否再投；超时原地重试 |
-| 5.9 | `src/drone_mission/drone_mission/drop_visual_aligner.py` | ~444 | **低空投放视觉校准**。端点比较法梯度下降：锁定目标→±探测→三方比较→提交→悬停观察→刹车。在线目标身份锁定 + 自适应步长 |
+| 5.9 | `src/drone_mission/drone_mission/drop_visual_aligner.py` | ~490 | **低空投放视觉校准**。端点比较法梯度下降：锁定目标→±探测→三方比较→提交→悬停观察→刹车。在线目标身份锁定 + 自适应步长。marker 中心已改用 OpenCV HSV 精修（`vision_pipeline.py:_refine_marker_center`）替代 YOLO bbox，消除 50-100px 帧间抖动 |
 | 5.10 | `src/drone_mission/drone_mission/states/state_recon_patrol.py` | ~149 | 弓字形路径生成→逐航点飞行→覆盖监控→超时/完成返航 |
 | 5.11 | `src/drone_mission/drone_mission/states/state_return.py` | ~82 | 返航 H 点→2s 稳定性确认 |
 | 5.12 | `src/drone_mission/drone_mission/states/state_precision_land.py` | ~177 | 三阶段降落：搜索→伺服→盲降；视觉丢失退化策略 |

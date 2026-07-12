@@ -31,6 +31,7 @@
     drop_marker_model_path: "drop_marker_yolo.pt"
     drop_marker_class_names:
       - "drop_zone_marker"                 # 0: 蓝色投放区标识
+    drop_marker_refine_enable: true        # YOLO bbox 内 HSV 蓝色分割 → 轮廓矩质心
 
     # ============================================================
     # 圆筒检测精确后处理 (OpenCV)
