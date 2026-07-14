@@ -36,6 +36,7 @@ class CylinderSelector:
         self._min_radius_first = min_radius_first
         self._selected_ids: Set[int] = set()
         self._selected_positions: List[tuple] = []  # [(x, y), ...]
+        self._selected_id_list: List[int] = []      # ordered IDs matching _selected_positions
         self._selection_count: int = 0
         self._position_tolerance: float = 0.5  # 位置去重容差 (m)
 
@@ -87,22 +88,17 @@ class CylinderSelector:
         # 记录
         self._selected_ids.add(cid)
         self._selected_positions.append((cx, cy))
+        self._selected_id_list.append(cid)
         self._selection_count += 1
 
         return cid
 
     def release_last_selection(self) -> None:
-        """撤销最近一次选择, 用于逼近/投放失败后的重试."""
-        if not self._selected_positions and not self._selected_ids:
-            return
+        """撤销最近一次选择, 用于逼近/投放失败后切换到下一个目标.
 
-        if self._selected_positions:
-            self._selected_positions.pop()
-
-        # _selected_ids 是 set, 保序信息不可用；选择次数最多为 2 次，重试时
-        # 保守清空 ID 集合，再由位置列表重建不可行，因为位置没有 ID。
-        # 位置去重才是当前仿真里稳定的去重依据，所以这里直接清空 ID 约束。
-        self._selected_ids.clear()
+        保留选择历史 (_selected_positions / _selected_ids) 不变,
+        仅递减计数, 确保下次 select() 排除已失败的目标.
+        """
         self._selection_count = max(0, self._selection_count - 1)
 
     def select_with_confidence_check(self, cylinders: list,
@@ -137,6 +133,7 @@ class CylinderSelector:
         """重置选择器 (新任务开始时调用)."""
         self._selected_ids.clear()
         self._selected_positions.clear()
+        self._selected_id_list.clear()
         self._selection_count = 0
 
     @property
@@ -145,4 +142,4 @@ class CylinderSelector:
 
     @property
     def selected_list(self) -> list:
-        return list(zip(self._selected_ids, self._selected_positions))
+        return list(zip(self._selected_id_list, self._selected_positions))

@@ -8,6 +8,7 @@
   loiter(duration)           悬停
   land()                     原地降落
   set_velocity_ned(vn,ve,vd) 速度控制
+  set_velocity_body(fwd,right,down) 机体系速度控制
   force_disarm()            紧急上锁
   reached(target, tol)      航点到达判断
 """
@@ -163,6 +164,36 @@ class FlightController:
             偏航速率 (rad/s).
         """
         self._bridge.set_velocity_target(vn, ve, vd, yaw_rate)
+
+    def set_velocity_body(
+        self,
+        forward: float,
+        right: float,
+        down: float = 0.0,
+        yaw_rate: float = 0.0,
+    ):
+        """
+        设置机体系速度指令, 内部转换为 NED 速度发布.
+
+        forward/right/down 使用 FRD 机体系: forward=机头方向, right=机体右侧,
+        down=向下。当前 px4_msgs/TrajectorySetpoint 仅支持 NED velocity, 因此
+        这里用当前 yaw 做 body→NED 旋转, 不直接假设 PX4 ROS2 支持 body frame。
+        """
+        yaw = self._current_yaw()
+        vn = float(forward) * math.cos(yaw) - float(right) * math.sin(yaw)
+        ve = float(forward) * math.sin(yaw) + float(right) * math.cos(yaw)
+        self.set_velocity_ned(vn, ve, float(down), yaw_rate)
+
+    def stop_velocity(self):
+        """停止速度控制, 保持当前位置悬停."""
+        self.set_velocity_ned(0.0, 0.0, 0.0)
+
+    def _current_yaw(self) -> float:
+        """Return current PX4 yaw in NED if available."""
+        if hasattr(self._bridge, "_current_yaw"):
+            return float(getattr(self._bridge, "_current_yaw"))
+        attitude = self._bridge.get_current_attitude()
+        return float(getattr(attitude, "yaw", 0.0))
 
     # ================================================================
     # 着陆

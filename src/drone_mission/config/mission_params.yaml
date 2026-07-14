@@ -80,7 +80,7 @@
     precision_align_fine_step_s: 0.08     # 精微调短脉冲, 降低越过中心
     precision_align_hover_s: 0.08         # 每步后归零观察时间 (s)
     precision_align_timeout: 40.0         # 低空精校最长等待时间 (s)
-    precision_align_max_retries: 2        # 精校超时/丢失后低空原地重置次数
+    precision_align_max_retries: 3        # 精校超时/丢失后低空原地重置次数
     precision_align_image_x_to_right_sign: 1.0   # +1: 图像右侧目标 → 机体右移
     precision_align_image_y_to_forward_sign: -1.0 # CUADC 标定: 图像下侧目标 → 机体后退
     precision_align_threshold_norm_x: 0.006 # 归一化水平误差阈值 (约 7.7px)
@@ -92,11 +92,11 @@
     precision_align_release_max_horizontal_speed: 0.02 # 释放时最大水平速度 (m/s)
     precision_align_min_confidence: 0.25
     precision_align_target_world_gate: 1.5  # 初次锁定与粗定位记忆目标匹配的世界坐标门限 (m)
-    precision_align_max_jump_diag_ratio: 0.45 # CUADC 像素跳变拒绝阈值 (占图像对角线)
+    precision_align_max_jump_diag_ratio: 0.55 # CUADC 像素跳变拒绝阈值 (占图像对角线)
     precision_align_reject_center_ratio: 0.28 # 跳变候选仍远离中心时拒绝
-    precision_align_reacquire_after_lost: 6   # 丢失 N 帧后清除像素锁定, 近中心重捕获
-    precision_align_max_lost_frames: 32       # 丢失超限后放弃当前目标
-    precision_align_drop_height_tolerance: 0.40 # 进入精校/投放的高度误差 (m), SITL 稳态~0.3m, 0.30 卡边界
+    precision_align_reacquire_after_lost: 12   # 丢失 N 帧后清除像素锁定, 近中心重捕获
+    precision_align_max_lost_frames: 48       # 丢失超限后放弃当前目标
+    precision_align_drop_height_tolerance: 0.50 # 进入精校/投放的高度误差 (m), SITL 稳态~0.42m, 需留余量
     precision_align_final_descent_enable: true  # 先在2m捕获, 再降至最终高度重精校
     precision_align_final_drop_height: 1.25     # 最终投放高度, 降低落体漂移和像素厘米换算
     precision_align_final_descent_speed: 0.25   # 最终降高速度 (m/s)

@@ -19,6 +19,7 @@
 运行频率: 20Hz (0.05s 控制周期)
 """
 
+import math
 import time
 from enum import Enum
 from typing import Any, Dict, List, Optional, Type
@@ -240,6 +241,41 @@ class MissionFSM(Node):
         self.declare_parameter("drop_visual_align_brake_timeout", 4.0)
         self.declare_parameter("drop_visual_align_hover_time", 2.5)
         self.declare_parameter("drop_visual_align_lock_tolerance", 2.0)
+        self.declare_parameter("precision_align_enable", True)
+        self.declare_parameter("precision_align_target_source", "cylinder")
+        self.declare_parameter("precision_align_image_width", 1280.0)
+        self.declare_parameter("precision_align_image_height", 960.0)
+        self.declare_parameter("precision_align_alpha", 0.45)
+        self.declare_parameter("precision_align_gain", 0.65)
+        self.declare_parameter("precision_align_max_speed", 0.075)
+        self.declare_parameter("precision_align_fine_pixel_error", 80.0)
+        self.declare_parameter("precision_align_fine_max_speed", 0.022)
+        self.declare_parameter("precision_align_min_correction_speed", 0.006)
+        self.declare_parameter("precision_align_step_s", 0.12)
+        self.declare_parameter("precision_align_fine_step_s", 0.08)
+        self.declare_parameter("precision_align_hover_s", 0.08)
+        self.declare_parameter("precision_align_timeout", 40.0)
+        self.declare_parameter("precision_align_max_retries", 3)
+        self.declare_parameter("precision_align_image_x_to_right_sign", 1.0)
+        self.declare_parameter("precision_align_image_y_to_forward_sign", -1.0)
+        self.declare_parameter("precision_align_threshold_norm_x", 0.006)
+        self.declare_parameter("precision_align_threshold_norm_y", 0.006)
+        self.declare_parameter("precision_align_raw_pixel_tolerance", 6.0)
+        self.declare_parameter("precision_align_smooth_pixel_tolerance", 5.0)
+        self.declare_parameter("precision_align_stable_frames", 8)
+        self.declare_parameter("precision_align_final_brake_s", 0.8)
+        self.declare_parameter("precision_align_release_max_horizontal_speed", 0.02)
+        self.declare_parameter("precision_align_min_confidence", 0.25)
+        self.declare_parameter("precision_align_target_world_gate", 1.5)
+        self.declare_parameter("precision_align_max_jump_diag_ratio", 0.55)
+        self.declare_parameter("precision_align_reject_center_ratio", 0.28)
+        self.declare_parameter("precision_align_reacquire_after_lost", 12)
+        self.declare_parameter("precision_align_max_lost_frames", 48)
+        self.declare_parameter("precision_align_drop_height_tolerance", 0.50)
+        self.declare_parameter("precision_align_final_descent_enable", True)
+        self.declare_parameter("precision_align_final_drop_height", 1.25)
+        self.declare_parameter("precision_align_final_descent_speed", 0.25)
+        self.declare_parameter("precision_align_log_interval", 0.5)
         self.declare_parameter("cylinder_approach_fast_speed", 0.30)
         self.declare_parameter("cylinder_approach_slow_speed", 0.15)
         self.declare_parameter("cylinder_approach_memory_speed", 0.25)
@@ -1032,7 +1068,12 @@ class _StandaloneBridgeFacade:
         # VehicleCommand 通过 /drone/cmd/vehicle_command_relay 中继,
         # 由 px4_bridge 转发到 /fmu/in/vehicle_command (已验证的 DDS 路径)
         from px4_msgs.msg import VehicleCommand
-        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
+        from rclpy.qos import (
+            QoSDurabilityPolicy,
+            QoSHistoryPolicy,
+            QoSProfile,
+            QoSReliabilityPolicy,
+        )
         px4_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -1045,12 +1086,15 @@ class _StandaloneBridgeFacade:
 
         # ---- Subscriptions to PX4 telemetry ----
         # PX4 发布 vehicle_status_v4 (不是 vehicle_status)
-        from px4_msgs.msg import VehicleStatus, VehicleLandDetected
+        from px4_msgs.msg import VehicleStatus, VehicleLandDetected, VehicleAttitude
         self._fsm.create_subscription(
             VehicleStatus, "/fmu/out/vehicle_status_v4", self._status_cb, px4_qos,
         )
         self._fsm.create_subscription(
             VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, px4_qos,
+        )
+        self._fsm.create_subscription(
+            VehicleAttitude, "/fmu/out/vehicle_attitude", self._attitude_cb, px4_qos,
         )
 
     # ---- PX4 telemetry callbacks ----
@@ -1060,6 +1104,15 @@ class _StandaloneBridgeFacade:
 
     def _land_cb(self, msg):
         self._px4_landed = msg.landed
+
+    def _attitude_cb(self, msg):
+        q = msg.q  # [w, x, y, z]
+        if len(q) >= 4:
+            w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+            self._current_yaw = math.atan2(
+                2.0 * (w * z + x * y),
+                1.0 - 2.0 * (y * y + z * z),
+            )
 
     # ---- Publish VehicleCommand helper (借鉴 Task_flight_ws) ----
     def _send_command(self, command, param1=0.0, param2=0.0):
@@ -1090,7 +1143,7 @@ class _StandaloneBridgeFacade:
 
         t = Telemetry()
         t.position = self._position
-        t.attitude = Attitude()
+        t.attitude = Attitude(yaw=self._current_yaw)
         t.status.armed = self._px4_armed
         t.status.landed = self._px4_landed
         t.status.battery_remaining = self._fsm._standalone_battery
@@ -1246,6 +1299,15 @@ class _StandaloneFlightFacade:
     def set_velocity_ned(self, vn, ve, vd, yaw_rate=0.0):
         self._velocity_mode = True
         self._vel_target = (float(vn), float(ve), float(vd))
+
+    def set_velocity_body(self, forward, right, down=0.0, yaw_rate=0.0):
+        yaw = float(getattr(self._fsm.bridge, "_current_yaw", 0.0))
+        vn = float(forward) * math.cos(yaw) - float(right) * math.sin(yaw)
+        ve = float(forward) * math.sin(yaw) + float(right) * math.cos(yaw)
+        self.set_velocity_ned(vn, ve, float(down), yaw_rate)
+
+    def stop_velocity(self):
+        self.set_velocity_ned(0.0, 0.0, 0.0)
 
     def land(self):
         self._fsm.bridge._send_command(21)  # VEHICLE_CMD_NAV_LAND
