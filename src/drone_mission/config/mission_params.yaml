@@ -65,6 +65,42 @@
     drop_visual_align_brake_timeout: 4.0 # 刹车悬停最长持续时间 (s)
     drop_visual_align_hover_time: 2.5 # 探测提交后悬停观察时间 (s), 给 is_centered 稳定机会
     drop_visual_align_lock_tolerance: 2.0 # 目标锁定容差 (m), 锁定后只接受世界坐标在此范围内的目标
+    # ── 低空视觉精校: CUADC 风格像素闭环 (默认替代梯度下降探测) ──
+    precision_align_enable: true          # true=使用新精校控制器, false=回退 DropVisualAligner
+    precision_align_target_source: "cylinder" # cylinder=最终投放追选中圆筒, marker 仅兜底
+    precision_align_image_width: 1280.0
+    precision_align_image_height: 960.0
+    precision_align_alpha: 0.45           # EMA 平滑系数, 提高响应避免 smooth 滞后放行
+    precision_align_gain: 0.65            # 归一化像素误差 → 机体系速度比例
+    precision_align_max_speed: 0.075      # 粗微调水平合速度上限 (m/s)
+    precision_align_fine_pixel_error: 80.0 # 进入精微调速度限制的像素误差
+    precision_align_fine_max_speed: 0.022 # 精微调水平合速度上限 (m/s)
+    precision_align_min_correction_speed: 0.006 # 防止极小误差修正低于飞控响应
+    precision_align_step_s: 0.12          # 每次速度步进持续时间 (s)
+    precision_align_fine_step_s: 0.08     # 精微调短脉冲, 降低越过中心
+    precision_align_hover_s: 0.08         # 每步后归零观察时间 (s)
+    precision_align_timeout: 40.0         # 低空精校最长等待时间 (s)
+    precision_align_max_retries: 2        # 精校超时/丢失后低空原地重置次数
+    precision_align_image_x_to_right_sign: 1.0   # +1: 图像右侧目标 → 机体右移
+    precision_align_image_y_to_forward_sign: -1.0 # CUADC 标定: 图像下侧目标 → 机体后退
+    precision_align_threshold_norm_x: 0.006 # 归一化水平误差阈值 (约 7.7px)
+    precision_align_threshold_norm_y: 0.006 # 归一化垂直误差阈值 (约 5.8px)
+    precision_align_raw_pixel_tolerance: 6.0 # 当前帧必须进入厘米级像素误差
+    precision_align_smooth_pixel_tolerance: 5.0 # 平滑误差也必须进入厘米级
+    precision_align_stable_frames: 8      # 连续稳定帧数后进入最终刹车复查
+    precision_align_final_brake_s: 0.8    # 投放前零速度悬停复查时间 (s)
+    precision_align_release_max_horizontal_speed: 0.02 # 释放时最大水平速度 (m/s)
+    precision_align_min_confidence: 0.25
+    precision_align_target_world_gate: 1.5  # 初次锁定与粗定位记忆目标匹配的世界坐标门限 (m)
+    precision_align_max_jump_diag_ratio: 0.45 # CUADC 像素跳变拒绝阈值 (占图像对角线)
+    precision_align_reject_center_ratio: 0.28 # 跳变候选仍远离中心时拒绝
+    precision_align_reacquire_after_lost: 6   # 丢失 N 帧后清除像素锁定, 近中心重捕获
+    precision_align_max_lost_frames: 32       # 丢失超限后放弃当前目标
+    precision_align_drop_height_tolerance: 0.40 # 进入精校/投放的高度误差 (m), SITL 稳态~0.3m, 0.30 卡边界
+    precision_align_final_descent_enable: true  # 先在2m捕获, 再降至最终高度重精校
+    precision_align_final_drop_height: 1.25     # 最终投放高度, 降低落体漂移和像素厘米换算
+    precision_align_final_descent_speed: 0.25   # 最终降高速度 (m/s)
+    precision_align_log_interval: 0.5
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
     cylinder_approach_slow_speed: 0.15   # 接近对心后慢速微调
     cylinder_approach_memory_speed: 0.25 # 丢帧时向记忆圆心粗靠近速度

@@ -156,6 +156,7 @@ drone_tasks_ws/src/
 │   │   │   ├── state_cylinder_approach.py  # 逼近圆筒圆心
 │   │   │   ├── state_drop.py        # 触发投放
 │   │   ├── drop_visual_aligner.py  # 低空视觉校准 (梯度下降伺服)
+│   │   ├── precision_align_controller.py  # 低空精校 (CUADC 风格像素闭环, 替代梯度下降探测)
 │   │   │   ├── state_recon_patrol.py       # 侦察区全覆盖巡视
 │   │   │   ├── state_recon_inspect.py      # 危险品分类确认 (已废弃, 不再使用)
 │   │   │   ├── state_return.py      # 返航
@@ -594,7 +595,39 @@ class ServoController:
 
 **关键设计决策**: 纯路径覆盖, 不进行圆筒悬停或危险品检测。侦察区默认必须完成弓字形路径, 确保下视相机按路径观察完整区域；覆盖率由 `CoverageMonitor` 实时跟踪, 作为相机视场覆盖验证指标。若设置 `recon_require_full_path=false`, 可恢复覆盖率≥95%提前返航。
 
-#### 6.4.3 状态机核心框架
+#### 6.4.3b 低空精校控制器 (`precision_align_controller.py`) — 2026-07-12 新增
+
+替代原来的梯度下降探测 (`DropVisualAligner`)。CUADC 风格纯像素闭环控制：
+
+```
+像素误差 → 归一化 → EMA平滑 → P增益 → 机体速度(m/s) → 飞控执行
+    ↑                                                    │
+    └────────────── 摄像头反馈 ←──────────────────────────┘
+```
+
+**核心特性**:
+- 纯图像空间工作, 不依赖高度值 (drop_height 参数未被使用)
+- 双速模式: 粗调 ≤0.075m/s (pixel>80px), 精调 ≤0.022m/s (pixel≤80px)
+- 步进-悬停-观察周期: 粗调 0.12s 步进 + 0.08s 悬停, 精调 0.08s 步进
+- 收敛条件: raw≤6px + smooth≤5px + 连续 8 帧 → 0.8s 刹车复查 → 释放投放许可
+- 两级投放高度: 2.0m 初次精校达标 → 慢速降至 1.25m 重新精校 (final_descent)
+
+**关键参数** (均在 `mission_params.yaml`):
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `precision_align_enable` | true | true=新精校控制器, false=回退 DropVisualAligner |
+| `precision_align_alpha` | 0.45 | EMA 平滑系数 |
+| `precision_align_gain` | 0.65 | 归一化像素→速度 P 增益 |
+| `precision_align_timeout` | 40.0 | 单次精校最长等待 (s) |
+| `precision_align_max_retries` | 2 | 超时/丢失后原地重置次数 |
+| `precision_align_drop_height_tolerance` | 0.40 | 进入精校的高度误差阈值. 2026-07-14 从 0.30 调整为 0.40 以适配 SITL 稳态偏差 |
+| `precision_align_final_descent_enable` | true | 初次达标后降至 final_drop_height 重校 |
+| `precision_align_final_drop_height` | 1.25 | 最终投放高度 (m) |
+| `precision_align_final_descent_speed` | 0.25 | 最终降高速度 (m/s) |
+
+> **SITL 注意**: PX4 SITL (X500, MPC_THR_HOVER=0.6) 在低空存在 ~0.3m 高度跟踪稳态误差, 原因是位置环只有 P 控制器 + Gazebo 物理模型与推力估计不匹配。已将 `precision_align_drop_height_tolerance` 从 0.30 调整为 0.40。真机上 MPC_THR_HOVER_LEARN 会自动消除此偏差。详见 `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`。
+
+#### 6.4.4 状态机核心框架
 
 ```python
 class MissionStateMachine:
@@ -988,12 +1021,17 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 | `drone_servo/servo_controller.py` | 桩代码 | ~30 | 舵机控制 |
 | `drone_servo/servo_mock.py` | 桩代码 | ~10 | SITL模拟 |
 | `drone_servo/drop_manager.py` | 桩代码 | ~10 | 投放管理 |
-| `drone_mission/mission_state_machine.py` | 桩代码 | ~30 | FSM核心 |
-| `drone_mission/states/*.py` | 桩代码 | ~10×10 | 10个状态 |
-| `drone_mission/path_planner.py` | 桩代码 | ~15 | 路径规划 |
-| `drone_mission/cylinder_selector.py` | 桩代码 | ~10 | 选筒策略 |
-| `drone_utils/*.py` | 桩代码 | ~40 | 日志/看门狗/配置/紧急 |
-| **总计** | | **~3500** |
+| `drone_mission/mission_state_machine.py` | ✅ 已实现 | ~1382 | FSM核心 + StandaloneBridgeFacade + StandaloneFlightFacade |
+| `drone_mission/states/*.py` | ✅ 已实现 | ~1500 | 10个状态处理器 |
+| `drone_mission/path_planner.py` | ✅ 已实现 | ~367 | 路径规划 |
+| `drone_mission/cylinder_selector.py` | ✅ 已实现 | ~135 | 选筒策略 |
+| `drone_mission/drop_visual_aligner.py` | ✅ 已实现 | ~490 | 低空视觉校准 (梯度下降) |
+| `drone_mission/precision_align_controller.py` | ✅ 已实现 | ~430 | 低空精校 (CUADC 像素闭环, 默认启用) |
+| `drone_servo/servo_controller.py` | ✅ 已实现 | ~290 | 舵机控制 (SITL/Jetson 自适应) |
+| `drone_servo/servo_mock.py` | ✅ 已实现 | ~70 | SITL 模拟 |
+| `drone_servo/drop_manager.py` | ✅ 已实现 | ~80 | 投放管理 |
+| `drone_utils/*.py` | ✅ 已实现 | ~160 | 日志/看门狗/配置/紧急 |
+| **总计** | | **~8000** |
 
 ---
 
@@ -1084,7 +1122,34 @@ ros2 topic echo /drone/vision/hazards
 
 ---
 
-## 十九、关键参考文件
+## 十九、SITL 与真机双路线策略 (2026-07-14)
+
+SITL 仿真已跑通。真机部署通过**独立 launch/config 层**覆盖差异, 核心状态机/视觉/飞控代码共用:
+
+```
+                    ┌─ 状态机 (共用)
+                    ├─ 视觉管线 (共用)
+                    ├─ 飞行控制器 (共用)
+                    ├─ PX4 Bridge (共用)
+                    └─ 舵机逻辑 (共用)
+                           │
+           ┌───────────────┴───────────────┐
+           ▼                               ▼
+    SITL 路线 (已跑通)              真机路线 (待开发)
+    ├ sitl.launch.py              ├ real_flight.launch.py ✅
+    ├ start_full_simulation.sh    ├ start_real_flight.sh ❌
+    ├ ARM: param2=21196 (force)   ├ ARM: param2=0 (标准解锁)
+    ├ 舵机: ServoMock             ├ 舵机: PCA9685/GPIO
+    ├ 相机: Gazebo bridge         ├ 相机: GStreamer
+    ├ 通信: UDP MicroXRCEAgent    ├ 通信: Serial MicroXRCEAgent
+    └ 模型: .pt (PyTorch)         └ 模型: .engine (TensorRT)
+```
+
+真机审计详情见 `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`。
+
+---
+
+## 二十、关键参考文件
 
 本方案设计参考了以下文件中的已有模式和接口：
 

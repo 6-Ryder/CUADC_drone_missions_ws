@@ -164,6 +164,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
     area1_altitude: 2.0           # 投放区飞行高度 (m) — 低于巡航以便视觉检测
     area2_altitude: 5.0           # 侦察区飞行高度 (m)
     drop_descend_height: 2.0      # 投放时降高高度 (m)
+    precision_align_drop_height_tolerance: 0.40  # 进入精校的高度误差阈值 (SITL 稳态~0.3m)
     landing_search_altitude: 5.0  # 降落前搜索H标识的高度 (m)
     landing_blind_altitude: 0.5   # 盲降切换高度 (m, 视觉丢失时启用)
 
@@ -310,6 +311,8 @@ drone_tasks_ws/
 ├── src/
 │   ├── drone_mission/       # 任务状态机 + 路径规划
 │   │   ├── config/mission_params.yaml
+│   │   ├── drop_visual_aligner.py     # 低空视觉校准 (梯度下降探测)
+│   │   ├── precision_align_controller.py  # 低空精校 (CUADC 像素闭环, 默认)
 │   │   └── drone_mission/states/   # 各任务状态处理器
 │   ├── px4_control/         # PX4 DDS 通信桥接
 │   ├── drone_vision/        # YOLO + OpenCV 视觉管线
@@ -512,3 +515,13 @@ Gazebo 相机 (分辨率取决于 PX4 模型)
 - OpenCV VideoCapture 内部缓冲导致显示延迟 → grab/retrieve 替代 read（`CHANGELOG_2026-07-10.md`）
 - launch 文件空字符串覆盖 YAML 参数 → 移除 model_path 覆盖（`CHANGELOG_2026-07-10.md`）
 - class_names 必须与模型 nc 一致，否则后处理列偏移错误 → YAML 驱动
+
+---
+
+## SITL 与真机双路线
+
+SITL 仿真已跑通。真机通过独立 launch/config 覆盖差异, 核心代码共用。
+
+> 审计报告: `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`
+> 关键发现: `precision_align_drop_height_tolerance: 0.30→0.40` 修复 SITL 稳态高度偏差 (PX4 MPC_THR_HOVER 估计偏差)
+> 真机 ARM force-magic (21196) 在 SITL 侧保留, 真机侧需新建标准解锁流程
