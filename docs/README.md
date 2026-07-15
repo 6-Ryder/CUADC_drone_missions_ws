@@ -73,7 +73,7 @@ YAML 文件 → ROS2 Node 启动时加载 → Node.get_param() 读取 → 运行
 ## 快速启动
 
 ```bash
-cd /home/bridge/drone_tasks_ws
+cd /home/bridge/CUADC_drone_missions_ws
 ./scripts/start_full_simulation.sh
 ```
 
@@ -308,7 +308,7 @@ tail -f log/simulation_*/ros2_system.log
 ## 项目结构
 
 ```
-drone_tasks_ws/
+CUADC_drone_missions_ws/
 ├── src/
 │   ├── drone_mission/       # 任务状态机 + 路径规划 + 精校控制
 │   │   ├── config/mission_params.yaml

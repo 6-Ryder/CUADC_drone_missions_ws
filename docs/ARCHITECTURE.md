@@ -80,7 +80,7 @@
 ## 三、ROS2 包结构
 
 ```
-drone_tasks_ws/src/
+CUADC_drone_missions_ws/src/
 ├── px4_msgs/                       # PX4 uORB → ROS2 消息定义 (从Task_flight_ws复用)
 │   └── msg/                        # 150+ .msg 文件
 │
@@ -1007,7 +1007,7 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 
 ## 十四、项目文件映射 (v2 更新)
 
-| 文件 (drone_tasks_ws/src/) | 状态 | 行数 | 对应功能 |
+| 文件 (CUADC_drone_missions_ws/src/) | 状态 | 行数 | 对应功能 |
 |---------------------------|------|------|---------|
 | `px4_control/px4_bridge.py` | ✅ 已实现 | ~657 | PX4 DDS通信桥接 + NED→World pose发布 + 20Hz 控制循环 |
 | `px4_control/flight_controller.py` | ✅ 已实现 | ~328 | 飞行控制接口 (takeoff, goto_ned, land, reached) |
@@ -1161,5 +1161,5 @@ SITL 仿真已跑通。真机部署通过**独立 launch/config 层**覆盖差�
 
 - `Task_flight_ws/src/px4_control_dds/px4_control_dds/mission_control_node_v2.py` — DDS 通信模式 (QoS/注册/Offboard心跳/斜坡setpoint/强制解锁/着陆策略)
 - `PX4-Autopilot/src/modules/uxrce_dds_client/dds_topics.yaml` — DDS 话题映射 (所有 /fmu/in/* 和 /fmu/out/* 话题)
-- `drone_tasks_ws/field/drone_field.sdf` — Gazebo 世界定义 (场地布局/圆筒模型/危险品标识)
-- `drone_tasks_ws/field/generate_random_field.py` — 随机场地生成器 (SITL 测试时作为视觉检测的 ground truth)
+- `CUADC_drone_missions_ws/field/drone_field.sdf` — Gazebo 世界定义 (场地布局/圆筒模型/危险品标识)
+- `CUADC_drone_missions_ws/field/generate_random_field.py` — 随机场地生成器 (SITL 测试时作为视觉检测的 ground truth)

@@ -8,12 +8,12 @@
     "python.analysis.extraPaths": [
         "/opt/ros/humble/lib/python3.10/site-packages",
         "/opt/ros/humble/local/lib/python3.10/dist-packages",
-        "/home/bridge/drone_tasks_ws/src/px4_control",
-        "/home/bridge/drone_tasks_ws/src/drone_mission",
-        "/home/bridge/drone_tasks_ws/src/drone_vision",
-        "/home/bridge/drone_tasks_ws/src/drone_utils",
-        "/home/bridge/drone_tasks_ws/src/drone_servo",
-        "/home/bridge/drone_tasks_ws/src/drone_bringup"
+        "/home/bridge/CUADC_drone_missions_ws/src/px4_control",
+        "/home/bridge/CUADC_drone_missions_ws/src/drone_mission",
+        "/home/bridge/CUADC_drone_missions_ws/src/drone_vision",
+        "/home/bridge/CUADC_drone_missions_ws/src/drone_utils",
+        "/home/bridge/CUADC_drone_missions_ws/src/drone_servo",
+        "/home/bridge/CUADC_drone_missions_ws/src/drone_bringup"
     ],
     "github.copilot.chat.codeGeneration.useInstructionFiles": true
 }
