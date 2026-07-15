@@ -100,9 +100,9 @@ drone_tasks_ws/src/
 ├── px4_control/                     # 飞行控制抽象层
 │   ├── px4_control/
 │   │   ├── __init__.py
-│   │   ├── px4_bridge.py            # PX4 DDS 通信桥接 (注册/心跳/遥测/NED→World)
-│   │   ├── flight_controller.py     # 飞行控制指令接口 (takeoff, goto_ned, land)
-│   │   └── telemetry.py             # 遥测数据模型 (Position, Status, Attitude)
+│   │   ├── px4_bridge.py            # PX4 DDS 通信桥接 (657行, 注册/心跳/遥测/NED→World)
+│   │   ├── flight_controller.py     # 飞行控制指令接口 (328行, takeoff, goto_ned, land)
+│   │   └── telemetry.py             # 遥测数据模型 (197行, Position, Status, Attitude)
 │   ├── config/
 │   │   └── px4_params.yaml
 │   └── package.xml
@@ -110,7 +110,7 @@ drone_tasks_ws/src/
 ├── drone_vision/                    # 视觉处理管线 (YOLO + OpenCV 混合)
 │   ├── drone_vision/
 │   │   ├── __init__.py              # 包文档与版本
-│   │   ├── vision_pipeline.py       # ★ 统一管线: 单YOLO模型多任务推理 (推荐部署)
+│   │   ├── vision_pipeline.py       # ★ 统一管线 (982行): 双模型推理 + OpenCV精修 + IBVS伺服
 │   │   ├── cylinder_detector.py     # 圆筒检测: YOLO粗定位→OpenCV椭圆拟合
 │   │   ├── hazard_classifier.py     # 危险品分类 (已禁用, 保留供独立使用)
 │   │   ├── landing_detector.py      # H标识检测: YOLO→圆形底板精修
@@ -119,8 +119,9 @@ drone_tasks_ws/src/
 │   │   ├── coordinate_transforms.py # 姿态补偿坐标变换 (6-DoF射线-地面求交)
 │   │   ├── camera.py                # 相机驱动 (SITL/GStreamer)
 │   │   ├── models/                  # YOLO推理引擎 + 训练权重
-│   │   │   ├── yolo_engine.py       # ONNX/TensorRT 推理后端
-│   │   │   └── *.onnx               # 训练好的模型文件
+│   │   │   ├── yolo_engine.py       # ONNX/TensorRT/PyTorch 推理后端 (自动选引擎)
+│   │   │   ├── cylinder_yolo.pt     # V2 白色圆筒检测模型
+│   │   │   └── drop_marker_yolo.pt  # V1 蓝色投放区标识模型
 │   │   └── core/                    # 纯算法 (无ROS依赖, 可独立测试)
 │   │       └── __init__.py
 │   ├── training/                    # 训练管线 (独立于ROS, PC上运行)
@@ -136,9 +137,9 @@ drone_tasks_ws/src/
 ├── drone_servo/                     # 舵机投放控制
 │   ├── drone_servo/
 │   │   ├── __init__.py
-│   │   ├── servo_controller.py      # GPIO/PWM 舵机控制接口
-│   │   ├── drop_manager.py          # 投放逻辑管理 (单投/连投/状态监测)
-│   │   └── servo_mock.py            # SITL 模拟舵机
+│   │   ├── servo_controller.py      # 舵机控制 (285行, SITL Mock / Jetson GPIO 双模式)
+│   │   ├── drop_manager.py          # 投放逻辑管理 (195行, TriggerDrop 服务)
+│   │   └── servo_mock.py            # SITL 模拟舵机 (95行)
 │   ├── config/
 │   │   └── servo_params.yaml
 │   └── package.xml
@@ -146,7 +147,7 @@ drone_tasks_ws/src/
 ├── drone_mission/                   # 任务编排层
 │   ├── drone_mission/
 │   │   ├── __init__.py
-│   │   ├── mission_state_machine.py # 任务状态机核心
+│   │   ├── mission_state_machine.py # 任务状态机核心 (1381行)
 │   │   ├── states/                  # 各状态处理逻辑
 │   │   │   ├── __init__.py
 │   │   │   ├── state_init.py        # 初始化 & 注册 & 预热
@@ -154,15 +155,15 @@ drone_tasks_ws/src/
 │   │   │   ├── state_transit.py     # 跨区域飞行
 │   │   │   ├── state_cylinder_search.py    # 投放区搜索 & 选筒
 │   │   │   ├── state_cylinder_approach.py  # 逼近圆筒圆心
-│   │   │   ├── state_drop.py        # 触发投放
-│   │   ├── drop_visual_aligner.py  # 低空视觉校准 (梯度下降伺服)
-│   │   ├── precision_align_controller.py  # 低空精校 (CUADC 风格像素闭环, 替代梯度下降探测)
+│   │   │   ├── state_drop.py        # 触发投放 (465行, 含精校+投放逻辑)
 │   │   │   ├── state_recon_patrol.py       # 侦察区全覆盖巡视
 │   │   │   ├── state_recon_inspect.py      # 危险品分类确认 (已废弃, 不再使用)
 │   │   │   ├── state_return.py      # 返航
 │   │   │   └── state_precision_land.py    # 视觉精准降落
-│   │   ├── path_planner.py          # 路径规划 (覆盖路径+过渡路径)
-│   │   └── cylinder_selector.py     # 圆筒选择策略
+│   │   ├── precision_align_controller.py  # 低空精校 (426行, CUADC 像素闭环, 默认启用)
+│   │   ├── drop_visual_aligner.py  # 低空视觉校准 (489行, 梯度下降, precision_align_enable=false 时启用)
+│   │   ├── path_planner.py          # 路径规划 (366行, 覆盖路径+过渡路径)
+│   │   └── cylinder_selector.py     # 圆筒选择策略 (145行)
 │   ├── config/
 │   │   └── mission_params.yaml
 │   ├── launch/
@@ -182,10 +183,10 @@ drone_tasks_ws/src/
 └── drone_utils/                     # 通用工具
     ├── drone_utils/
     │   ├── __init__.py
-    │   ├── logger.py                # 任务日志 (记录每次飞行)
-    │   ├── watchdog.py              # 看门狗/心跳监测
-    │   ├── emergency.py             # 紧急处理 (失控保护)
-    │   └── config_loader.py         # 统一配置加载
+    │   ├── logger.py                # 任务日志 (178行, 记录每次飞行)
+    │   ├── watchdog.py              # 看门狗/心跳监测 (108行)
+    │   ├── emergency.py             # 紧急处理 (216行, 失控保护)
+    │   └── config_loader.py         # 统一配置加载 (91行)
     └── package.xml
 ```
 
@@ -375,36 +376,43 @@ class FlightController:
 **推荐部署模式**: 单一 ROS2 节点，一次 YOLO 前向传播，多任务后处理。
 
 ```
-YOLOv8n (640×640, 6类)
-    │ ONNX / TensorRT
-    ▼
-┌─────────────────────────────────────────────┐
-│              vision_pipeline.py              │
-│                                              │
-│  cylinder dets  → CylinderRefiner (椭圆拟合) │
+cylinder_yolo.pt (V2, 1类)       drop_marker_yolo.pt (V1, 1类)
+    │ Ultralytics                      │ Ultralytics
+    ▼                                  ▼
+┌──────────────────────────────────────────────────┐
+│                vision_pipeline.py                 │
+│                                                   │
+│  cylinder dets  → CylinderRefiner (椭圆拟合)      │
 │                  → CylinderTracker (多帧ID+min_hits过滤) │
-│                  → 姿态补偿 World 坐标        │
-│                  → /drone/vision/cylinders   │
-│                                              │
-│  landing_H dets → LandingPadRefiner (圆拟合) │
-│                  → 姿态补偿 World 坐标        │
-│                  → /drone/vision/landing_target│
-│                                              │
-│  无人机位姿      → CoverageMonitor            │
-│                  → /drone/vision/coverage    │
-└─────────────────────────────────────────────┘
+│                  → 姿态补偿 World 坐标              │
+│                  → /drone/vision/cylinders        │
+│                                                   │
+│  drop_marker dets → _refine_marker_center (HSV精修) │
+│                  → World 坐标                      │
+│                  → /drone/vision/markers          │
+│                                                   │
+│  landing_H dets → LandingPadRefiner (圆拟合)      │
+│                  → 姿态补偿 World 坐标              │
+│                  → /drone/vision/landing_target   │
+│                                                   │
+│  无人机位姿      → CoverageMonitor                 │
+│                  → /drone/vision/coverage         │
+└──────────────────────────────────────────────────┘
 ```
 
-**YOLO 6 类输出**:
+**双模型独立推理**:
 
-> **注意**: 当前侦察任务仅使用 cylinder(0) 和 landing_H(4) 两类。危险品类别 (1-3,5) 在主线视觉管线中已禁用，仅在 `hazard_classifier` 独立节点中可选使用。
+当前使用两个独立的单类 YOLO 模型 (非单模型多类):
 
-| ID | 类名 | 模型来源 | 状态 |
-|----|------|---------|------|
-| 0 | cylinder | cv_trainer V2 (white-cylinder-detection, YOLOv8n, .pt) | ✅ 主模型 |
-| — | drop_zone_marker | cv_trainer V1 (blue-carpet-detection, YOLO11n, .pt) | ✅ 独立引擎 |
-| — | landing_H | 暂无模型 | ⚠️ 待训练 |
-| 1-3,5 | 危险品类 | — | ❌ 已移除 |
+| 模型文件 | 类别 | 训练来源 | 用途 |
+|----------|------|---------|------|
+| `cylinder_yolo.pt` | cylinder (白色圆筒) | cv_trainer V2, YOLOv8n | 圆筒检测 → 投放目标选择 |
+| `drop_marker_yolo.pt` | drop_zone_marker (蓝色标识) | cv_trainer V1, YOLO11n | 投放区标识 → 低空精校伺服目标 |
+
+> **注意**: 
+> - 两个模型为独立 `YOLOEngine` 实例，推理串行但共享 preprocess 开销
+> - 危险品分类 (1-3) 已在主线视觉管线中禁用 (`_process_hazards` 调用已注释)
+> - H 降落标识 (landing_H) 暂无专用模型，使用 OpenCV 回退 (自适应阈值+圆形检测)
 
 #### 6.2.2 高度自适应
 
@@ -799,9 +807,10 @@ python train.py --data dataset_real/data.yaml \
     --model runs/drone/train/weights/best.pt \
     --epochs 50 --lr0 0.0005
 
-# Step 5: 导出 ONNX → 复制到 models/
-python export.py --weights runs/drone/train/weights/best.pt --format onnx --half
-cp runs/drone/train/weights/best.onnx ../models/drone_yolo.onnx
+# Step 5: 导出 → 复制到 models/ (当前使用 .pt 格式, UltralyticsYOLOEngine 直接加载)
+cp runs/drone/train/weights/best.pt ../models/cylinder_yolo.pt
+# 若需 ONNX/TensorRT 部署:
+# python export.py --weights runs/drone/train/weights/best.pt --format onnx --half
 ```
 
 ### 9.3 数据增强
@@ -859,9 +868,8 @@ ros2 run ros_gz_image image_bridge /camera/image /drone/camera/image_raw
 # 终端4: 全系统启动 (使用统一视觉管线)
 ros2 launch drone_bringup sitl.launch.py
 
-# 可选: 指定自定义 YOLO 模型
-ros2 launch drone_bringup sitl.launch.py \
-    model_path:=src/drone_vision/models/drone_yolo.onnx
+# 可选: 指定自定义 YOLO 模型 (默认使用 vision_params.yaml 中的配置)
+ros2 launch drone_bringup sitl.launch.py
 ```
 
 ---
@@ -1001,37 +1009,34 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 
 | 文件 (drone_tasks_ws/src/) | 状态 | 行数 | 对应功能 |
 |---------------------------|------|------|---------|
-| `px4_control/px4_bridge.py` | 桩代码 | ~30 | PX4 DDS通信桥接 + NED→World pose发布 |
-| `px4_control/flight_controller.py` | 桩代码 | ~20 | 飞行控制接口 |
-| `px4_control/telemetry.py` | 桩代码 | ~10 | 遥测数据模型 |
-| `drone_vision/models/yolo_engine.py` | ✅ 已实现 | ~320 | ONNX/TensorRT YOLO推理引擎 |
-| `drone_vision/vision_pipeline.py` | ✅ 已实现 | ~900 | 统一视觉管线 (单模型多任务 + marker OpenCV精修) |
+| `px4_control/px4_bridge.py` | ✅ 已实现 | ~657 | PX4 DDS通信桥接 + NED→World pose发布 + 20Hz 控制循环 |
+| `px4_control/flight_controller.py` | ✅ 已实现 | ~328 | 飞行控制接口 (takeoff, goto_ned, land, reached) |
+| `px4_control/telemetry.py` | ✅ 已实现 | ~197 | 遥测数据模型 (Position, Status, Attitude) |
+| `drone_vision/models/yolo_engine.py` | ✅ 已实现 | ~451 | ONNX/TensorRT/PyTorch YOLO推理引擎 (自动选后端) |
+| `drone_vision/vision_pipeline.py` | ✅ 已实现 | ~982 | 统一视觉管线 (双模型 + OpenCV精修 + IBVS伺服) |
 | `drone_vision/cylinder_detector.py` | ✅ 已实现 | ~530 | 圆筒检测: YOLO→椭圆拟合→追踪 |
 | `drone_vision/hazard_classifier.py` | ⚠️ 已废弃 | ~220 | 危险品分类 (已从主线禁用, 可独立使用) |
 | `drone_vision/landing_detector.py` | ✅ 已实现 | ~250 | H降落: YOLO→圆形底板→PCA方向 |
 | `drone_vision/visual_servoing.py` | ✅ 已实现 | ~280 | IBVS: 降落 + 圆筒逼近双模式 |
 | `drone_vision/coverage_monitor.py` | ✅ 已实现 | ~180 | 覆盖监控 |
-| `drone_vision/coordinate_transforms.py` | ✅ 已实现 | ~250 | 姿态补偿坐标变换 + 高度自适应 |
+| `drone_vision/coordinate_transforms.py` | ✅ 已实现 | ~330 | 姿态补偿坐标变换 + 高度自适应 |
 | `drone_vision/camera.py` | ✅ 已实现 | ~200 | 相机驱动 (SITL/GStreamer) |
 | `drone_vision/training/generate_labels.py` | ✅ 已实现 | ~200 | SDF→YOLO标签自动生成 |
 | `drone_vision/training/train.py` | ✅ 已实现 | ~80 | YOLOv8 训练 |
 | `drone_vision/training/export.py` | ✅ 已实现 | ~50 | ONNX/TensorRT 导出 |
 | `drone_vision/scripts/vision_viewer.py` | ✅ 已实现 | ~200 | 实时画面查看器 |
-| `scripts/debug_vision.sh` | ✅ 已实现 | ~70 | 一键视觉调试 |
-| `drone_servo/servo_controller.py` | 桩代码 | ~30 | 舵机控制 |
-| `drone_servo/servo_mock.py` | 桩代码 | ~10 | SITL模拟 |
-| `drone_servo/drop_manager.py` | 桩代码 | ~10 | 投放管理 |
-| `drone_mission/mission_state_machine.py` | ✅ 已实现 | ~1382 | FSM核心 + StandaloneBridgeFacade + StandaloneFlightFacade |
-| `drone_mission/states/*.py` | ✅ 已实现 | ~1500 | 10个状态处理器 |
-| `drone_mission/path_planner.py` | ✅ 已实现 | ~367 | 路径规划 |
-| `drone_mission/cylinder_selector.py` | ✅ 已实现 | ~135 | 选筒策略 |
-| `drone_mission/drop_visual_aligner.py` | ✅ 已实现 | ~490 | 低空视觉校准 (梯度下降) |
-| `drone_mission/precision_align_controller.py` | ✅ 已实现 | ~430 | 低空精校 (CUADC 像素闭环, 默认启用) |
-| `drone_servo/servo_controller.py` | ✅ 已实现 | ~290 | 舵机控制 (SITL/Jetson 自适应) |
-| `drone_servo/servo_mock.py` | ✅ 已实现 | ~70 | SITL 模拟 |
-| `drone_servo/drop_manager.py` | ✅ 已实现 | ~80 | 投放管理 |
-| `drone_utils/*.py` | ✅ 已实现 | ~160 | 日志/看门狗/配置/紧急 |
-| **总计** | | **~8000** |
+| `scripts/debug_vision.sh` | ✅ 已实现 | ~65 | 一键视觉调试 (双模型 + 摄像头 + viewer) |
+| `drone_servo/servo_controller.py` | ✅ 已实现 | ~285 | 舵机控制 (SITL Mock / Jetson PCA9685 双模式) |
+| `drone_servo/servo_mock.py` | ✅ 已实现 | ~95 | SITL 模拟投放 |
+| `drone_servo/drop_manager.py` | ✅ 已实现 | ~195 | 投放管理 (TriggerDrop 服务) |
+| `drone_mission/mission_state_machine.py` | ✅ 已实现 | ~1381 | FSM核心 + StandaloneBridgeFacade + StandaloneFlightFacade |
+| `drone_mission/states/*.py` | ✅ 已实现 | ~1734 | 11 个状态处理器 (含已废弃的 recon_inspect) |
+| `drone_mission/path_planner.py` | ✅ 已实现 | ~366 | 路径规划 (弓字形覆盖 + 过渡路径) |
+| `drone_mission/cylinder_selector.py` | ✅ 已实现 | ~145 | 选筒策略 (半径排序 + 去重 + 排除) |
+| `drone_mission/precision_align_controller.py` | ✅ 已实现 | ~426 | 低空精校 (CUADC 像素闭环, 默认启用) |
+| `drone_mission/drop_visual_aligner.py` | ✅ 已实现 | ~489 | 低空视觉校准 (梯度下降, 备选方案) |
+| `drone_utils/*.py` | ✅ 已实现 | ~593 | 日志(178) + 看门狗(108) + 紧急(216) + 配置(91) |
+| **总计** | | **~8700** |
 
 ---
 
@@ -1083,14 +1088,14 @@ ros2 topic echo /drone/vision/hazards
 |------|------|------|------|---------|
 | 1 | `drone_interfaces` | ✅ | 无 | 编译通过的自定义 msg/srv/action |
 | 2 | `px4_msgs` | ✅ | 无 (软链接) | PX4 uORB 消息可用 |
-| 3 | `drone_utils` | ⏳ | `drone_interfaces` | 配置加载/日志/看门狗/紧急处理 |
-| 4 | `px4_control` | ⏳ | `px4_msgs`, `drone_utils` | DDS桥接 + /drone/pose 发布 + 飞行控制 |
-| 5 | `drone_servo` | ⏳ | `drone_interfaces`, `drone_utils` | 舵机控制 + SITL Mock |
-| 6 | `drone_vision` | ✅ | `drone_interfaces` | YOLO检测 + OpenCV精修 + IBVS伺服 (完整) |
-| 7 | `drone_mission` | ⏳ | 以上全部 | FSM + 路径规划 + 视觉管线集成 |
-| 8 | `drone_bringup` | ✅ | 以上全部 | `sitl.launch.py` 一键启动全系统 |
+| 3 | `drone_utils` | ✅ | `drone_interfaces` | 配置加载/日志/看门狗/紧急处理 |
+| 4 | `px4_control` | ✅ | `px4_msgs`, `drone_utils` | DDS桥接 + /drone/pose 发布 + 飞行控制 |
+| 5 | `drone_servo` | ✅ | `drone_interfaces`, `drone_utils` | 舵机控制 + SITL Mock |
+| 6 | `drone_vision` | ✅ | `drone_interfaces` | YOLO(.pt)检测 + OpenCV精修 + IBVS伺服 (完整) |
+| 7 | `drone_mission` | ✅ | 以上全部 | FSM + 路径规划 + PrecisionAlignController 集成 |
+| 8 | `drone_bringup` | ✅ | 以上全部 | `sitl.launch.py` + `real_flight.launch.py` + `vision_only.launch.py` |
 
-**图例**: ✅=已实现, ⏳=桩代码待实现
+**图例**: ✅=已实现并完成 SITL 验证
 
 ---
 
@@ -1101,7 +1106,7 @@ ros2 topic echo /drone/vision/hazards
 | 7包非单体架构 | 独立测试、清晰职责、并行开发 |
 | 视觉为独立节点 | 计算密集，需独立进程；Jetson上利用GPU不阻塞飞控 |
 | YOLO + OpenCV 混合检测 | YOLO提供鲁棒粗定位，OpenCV做亚像素精修；泛化强于纯传统CV |
-| 单模型6类多任务 | 一次推理 vs 三个独立模型 → 延迟降3x, 显存省3x |
+| 双独立模型分离推理 | V1(蓝色标识)+V2(白色圆筒) 独立引擎, 避免类别数不匹配; 各模型可独立更新 |
 | 姿态补偿坐标变换 | 5m+5°倾斜时误差从0.44m→<0.05m；/drone/pose不可用时回退简化版 |
 | 高度自适应阈值 | 10m高空目标仅~7px, 必须降conf阈值；避免固定参数导致的漏检/误检 |
 | 仿真预训练+真实微调 | 仿真零标注成本快速迭代；200-500张真实数据微调即可实飞 |
@@ -1113,8 +1118,7 @@ ros2 topic echo /drone/vision/hazards
 | 自动最优条带方向 | 沿区域长边飞行使转弯最少; Area 2 从16次转弯降至10次 |
 | 覆盖率驱动返航 | 覆盖率≥95%触发返航, 不等候全部航点, 比固定超时更智能 |
 | 侦察区纯路径覆盖 | 不执行危险品识别, 聚焦全覆盖巡视的路径算法 |
-| 单模型6类 → 实际使用2类 | 训练6类保持模型通用性, 主线仅用 cylinder+landing_H |
-| 双单类模型分离推理 | V1(蓝色标识)+V2(白色圆筒) 独立引擎, 避免类别数不匹配 |
+| 双单类模型分离推理 | V1(蓝色标识)+V2(白色圆筒) 独立引擎, 避免类别数不匹配; 各模型可独立更新 |
 | 投放标识 OpenCV 精修 | 蓝色标识 YOLO bbox 中心每帧跳动 50-100px，HSV 分割+轮廓矩质心替代，消除 pixel_error 噪声主源 |
 | class_names YAML 驱动 | 模型类别数变更只需改配置, 无需改代码 |
 | camera_device 可配置 | 切换摄像头 -p camera_device:=/dev/video1 无需改代码 |
@@ -1124,7 +1128,9 @@ ros2 topic echo /drone/vision/hazards
 
 ## 十九、SITL 与真机双路线策略 (2026-07-14)
 
-SITL 仿真已跑通。真机部署通过**独立 launch/config 层**覆盖差异, 核心状态机/视觉/飞控代码共用:
+SITL 仿真已跑通。真机部署通过**独立 launch/config 层**覆盖差异, 核心状态机/视觉/飞控代码共用。
+
+> **2026-07-15 修复**: `drone_vision/setup.py` 添加 `package_data={'drone_vision': ['models/*.pt']}` + `zip_safe=False`，确保 YOLO 模型文件随 `colcon build` 安装。此前真机和仿真均因模型未安装导致视觉管线降级到纯 OpenCV 回退模式。
 
 ```
                     ┌─ 状态机 (共用)

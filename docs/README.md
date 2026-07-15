@@ -91,16 +91,16 @@ pkill -f "bin/px4"; pkill -f "MicroXRCEAgent"; pkill -f "ros_gz_image"
 ```
 ┌──────────────────────────────────────────────────────┐
 │  Layer 4: Mission Orchestrator (drone_mission)       │
-│  - 任务状态机 (FSM)   - 圆筒选择   - 路径规划        │
+│  - 任务状态机 (FSM)   - PrecisionAlign 精校   - 路径规划 │
 ├──────────────────────────────────────────────────────┤
 │  Layer 3: Skill Modules                              │
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ │
 │  │ drone_vision │ │ drone_servo  │ │ px4_control   │ │
-│  │ YOLO+OpenCV  │ │ PWM/投放     │ │ 飞行控制抽象  │ │
+│  │ YOLO+OpenCV  │ │ PWM/投放     │ │ 飞行控制+遥测 │ │
 │  └──────────────┘ └──────────────┘ └──────────────┘ │
 ├──────────────────────────────────────────────────────┤
 │  Layer 2: Flight Control Abstraction (px4_bridge)    │
-│  - Offboard 管理  - 坐标变换  - 遥测收集            │
+│  - Offboard 管理  - 坐标变换(NED↔World)  - 遥测收集 │
 ├──────────────────────────────────────────────────────┤
 │  Layer 1: Communication (MicroXRCEAgent / DDS)       │
 │  - /fmu/out/* (PX4→ROS2)  - /fmu/in/* (ROS2→PX4)    │
@@ -111,7 +111,8 @@ pkill -f "bin/px4"; pkill -f "MicroXRCEAgent"; pkill -f "ros_gz_image"
 
 ```
 INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
-→ SELECT_TARGET → APPROACH_CYLINDER → DESCEND_TO_DROP → EXECUTE_DROP(×2)
+→ SELECT_TARGET → APPROACH_CYLINDER → DESCEND_TO_DROP
+→ PRECISION_ALIGN (像素闭环精校, 双速 + 两级降高) → EXECUTE_DROP(×2)
 → ASCEND → TRANSIT_TO_RECON_ZONE → RECON_PATROL (全覆盖弓字形)
 → RETURN_TO_HOME → PRECISION_LAND → COMPLETE
 ```
@@ -309,25 +310,31 @@ tail -f log/simulation_*/ros2_system.log
 ```
 drone_tasks_ws/
 ├── src/
-│   ├── drone_mission/       # 任务状态机 + 路径规划
+│   ├── drone_mission/       # 任务状态机 + 路径规划 + 精校控制
 │   │   ├── config/mission_params.yaml
-│   │   ├── drop_visual_aligner.py     # 低空视觉校准 (梯度下降探测)
-│   │   ├── precision_align_controller.py  # 低空精校 (CUADC 像素闭环, 默认)
-│   │   └── drone_mission/states/   # 各任务状态处理器
-│   ├── px4_control/         # PX4 DDS 通信桥接
-│   ├── drone_vision/        # YOLO + OpenCV 视觉管线
-│   ├── drone_servo/         # 舵机投放控制
-│   ├── drone_interfaces/    # 自定义 ROS2 接口
-│   ├── drone_utils/         # 日志/看门狗/紧急处理
-│   ├── drone_bringup/       # 启动脚本 (launch files)
+│   │   ├── drone_mission/mission_state_machine.py  # FSM 核心 (1381行)
+│   │   ├── drone_mission/precision_align_controller.py  # 低空精校 (CUADC 像素闭环, 默认)
+│   │   ├── drone_mission/drop_visual_aligner.py     # 低空视觉校准 (梯度下降备选)
+│   │   ├── drone_mission/path_planner.py            # 弓字形路径规划
+│   │   ├── drone_mission/cylinder_selector.py       # 圆筒选择策略
+│   │   └── drone_mission/states/        # 11 个任务状态处理器
+│   ├── px4_control/         # PX4 DDS 通信桥接 (657行) + 飞行控制 API (328行)
+│   ├── drone_vision/        # YOLO(.pt) + OpenCV 视觉管线 (982行)
+│   │   ├── drone_vision/models/  # YOLO 引擎 + 模型权重 (.pt)
+│   │   └── scripts/vision_viewer.py  # 实时标注查看器
+│   ├── drone_servo/         # 舵机投放控制 (SITL Mock + Jetson GPIO)
+│   ├── drone_interfaces/    # 自定义 ROS2 接口 (msg/srv/action)
+│   ├── drone_utils/         # 日志/看门狗/紧急处理/配置加载
+│   ├── drone_bringup/       # 启动脚本 (launch files: SITL + 实飞 + 视觉调试)
 │   └── px4_msgs/            # PX4 uORB → ROS2 消息定义
-├── field/
-│   └── drone_field.sdf      # Gazebo 场地描述文件
+├── field/                   # Gazebo 场地描述 + 随机场地生成器
 ├── PX4-Autopilot -> /home/ryder/PX4-Autopilot
 ├── scripts/
-│   ├── start_full_simulation.sh # 一键 SITL 启动
-│   └── debug_vision.sh         # 一键视觉调试 (摄像头+管线+viewer)
+│   ├── start_full_simulation.sh  # 一键 SITL 启动
+│   └── debug_vision.sh           # 一键视觉调试 (摄像头 + 双YOLO模型 + viewer)
 ├── cv_trainer -> /home/ryder/cv_trainer  # 模型训练来源
+├── docs/                    # 架构文档 + 工作日志
+└── log/                     # 构建/仿真/视觉截图日志
 ```
 
 ---
@@ -383,7 +390,7 @@ drone_tasks_ws/
 
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
-| 3.1 | `src/px4_control/px4_control/px4_bridge.py` | ~660 | **全系统最关键的单文件**。4 步注册握手；QoS 配置；`_odom_cb` 中 NED→World 变换 + `/drone/pose` 发布；`_offboard_heartbeat` 10Hz Offboard 模式声明；`_control_loop` 20Hz 斜坡平滑；位置/速度双模式切换；VehicleCommand 中继 |
+| 3.1 | `src/px4_control/px4_control/px4_bridge.py` | ~657 | **全系统最关键的单文件**。4 步注册握手；QoS 配置；`_odom_cb` 中 NED→World 变换 + `/drone/pose` 发布；`_offboard_heartbeat` 10Hz Offboard 模式声明；`_control_loop` 20Hz 斜坡平滑；位置/速度双模式切换；VehicleCommand 中继 |
 | 3.2 | `src/px4_control/px4_control/flight_controller.py` | ~300 | `takeoff()`/`goto_ned()`/`goto_world()`/`land()`/`set_velocity_ned()` 高级 API；`reached()` 航点到达判断；超时保护 |
 | 3.3 | `src/drone_bringup/scripts/gz_camera_bridge.py` | ~100 | Gazebo 相机的实际分辨率（`gz topic --json-output`）——直接决定了 cx/cy 参数对不对 |
 
@@ -398,7 +405,7 @@ drone_tasks_ws/
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
 | 4.1 | `src/drone_vision/drone_vision/models/yolo_engine.py` | ~450 | YOLO ONNX/TensorRT/PyTorch 推理引擎；letterbox→推理→`_rescale_bbox()` 回原图（**关键修复点**）；`Detection` 数据类；自动按后缀选后端 |
-| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~900 | **全系统第二关键的单文件**。`_lazy_init` 加载双模型(V2圆筒+V1投放区标识)；`_image_cb` 主回调（帧率自适应→YOLO推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`/drone/vision/markers` 投放区标识发布（含 OpenCV HSV 精修）；`_refine_marker_center` 蓝色分割+轮廓矩质心 |
+| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~982 | **全系统第二关键的单文件**。`_lazy_init` 加载双模型 (V2 圆筒 `.pt` + V1 投放区标识 `.pt`)；`_image_cb` 主回调（帧率自适应→双模型推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`/drone/vision/markers` 投放区标识发布（含 OpenCV HSV 精修）；`_refine_marker_center` 蓝色分割+轮廓矩质心 |
 | 4.3 | `src/drone_vision/drone_vision/cylinder_detector.py` | ~530 | `CylinderRefiner.refine()`: YOLO bbox→ROI→Canny→椭圆拟合→白度评分；`CylinderTracker`: IoU 多帧匹配→min_hits过滤闪烁→稳定ID (支持 bbox) |
 | 4.4 | `src/drone_vision/drone_vision/landing_detector.py` | ~250 | `LandingPadRefiner.refine()`: 自适应阈值→圆形检测→PCA 方向估计 |
 | 4.5 | `src/drone_vision/drone_vision/coverage_monitor.py` | ~180 | 网格离散化 + FOV 投影覆盖标记 + 覆盖率计算 |
@@ -417,19 +424,20 @@ drone_tasks_ws/
 
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
-| 5.1 | `src/drone_mission/drone_mission/mission_state_machine.py` | ~1186 | **全系统第三关键的单文件**。`MissionFSM` 主类：参数声明、`_lazy_init`、20Hz `_control_loop`；`STATE_TRANSITIONS` 转移表；`_remember_cylinders` 记忆库积累+合并；`_normalize_drop_target_xy` 投放区边界验证；`_StandaloneBridgeFacade` PX4 桥接门面；`_StandaloneFlightFacade` 飞行控制门面（`/drone/cmd_setpoint_ned` 和 `/drone/cmd_velocity_ned` 发布）；`start_drop_service`/`check_drop_service_result` 异步投放 |
+| 5.1 | `src/drone_mission/drone_mission/mission_state_machine.py` | ~1381 | **全系统第三关键的单文件**。`MissionFSM` 主类：参数声明、`_lazy_init`、20Hz `_control_loop`；`STATE_TRANSITIONS` 转移表；`_remember_cylinders` 记忆库积累+合并；`_normalize_drop_target_xy` 投放区边界验证；`_StandaloneBridgeFacade` PX4 桥接门面；`_StandaloneFlightFacade` 飞行控制门面（`/drone/cmd_setpoint_ned` 和 `/drone/cmd_velocity_ned` 发布）；`start_drop_service`/`check_drop_service_result` 异步投放 |
 | 5.2 | `src/drone_mission/drone_mission/states/state_init.py` | ~83 | INIT：等待 odom + 30s 超时 |
 | 5.3 | `src/drone_mission/drone_mission/states/state_takeoff.py` | ~127 | TAKEOFF：ARM→OFFBOARD→CLIMB 三子阶段；15s/30s 超时 |
 | 5.4 | `src/drone_mission/drone_mission/states/state_transit.py` | ~105 | TRANSIT：通用过渡飞行，120s 超时 |
-| 5.5 | `src/drone_mission/drone_mission/states/state_cylinder_search.py` | ~161 | CYLINDER_SEARCH：悬停→累积记忆→慢速扫描→超时策略 |
-| 5.6 | `src/drone_mission/drone_mission/cylinder_selector.py` | ~135 | 半径排序+位置去重+已选排除 |
-| 5.7 | `src/drone_mission/drone_mission/states/state_cylinder_approach.py` | ~196 | **最复杂的单状态**。像素伺服 vs 记忆导航双模式；`_goto_pixel_centered_target` vs `_goto_target_xy`；位置匹配（不依赖ID）；20帧对心稳定性检查 |
-| 5.8 | `src/drone_mission/drone_mission/states/state_drop.py` | ~212 | 降高→投放许可检查→异步投放→回升→判断是否再投；超时原地重试 |
-| 5.9 | `src/drone_mission/drone_mission/drop_visual_aligner.py` | ~490 | **低空投放视觉校准**。端点比较法梯度下降：锁定目标→±探测→三方比较→提交→悬停观察→刹车。在线目标身份锁定 + 自适应步长。marker 中心已改用 OpenCV HSV 精修（`vision_pipeline.py:_refine_marker_center`）替代 YOLO bbox，消除 50-100px 帧间抖动 |
-| 5.10 | `src/drone_mission/drone_mission/states/state_recon_patrol.py` | ~149 | 弓字形路径生成→逐航点飞行→覆盖监控→超时/完成返航 |
-| 5.11 | `src/drone_mission/drone_mission/states/state_return.py` | ~82 | 返航 H 点→2s 稳定性确认 |
-| 5.12 | `src/drone_mission/drone_mission/states/state_precision_land.py` | ~177 | 三阶段降落：搜索→伺服→盲降；视觉丢失退化策略 |
-| 5.13 | `src/drone_mission/drone_mission/path_planner.py` | ~367 | 自动最优条带方向；`plan_coverage_ned` NED 弓字形；`plan_transit` 过渡路径 |
+| 5.5 | `src/drone_mission/drone_mission/states/state_cylinder_search.py` | ~178 | CYLINDER_SEARCH：悬停→累积记忆→慢速扫描→超时策略 |
+| 5.6 | `src/drone_mission/drone_mission/cylinder_selector.py` | ~145 | 半径排序+位置去重+已选排除 |
+| 5.7 | `src/drone_mission/drone_mission/states/state_cylinder_approach.py` | ~229 | **最复杂的单状态**。像素伺服 vs 记忆导航双模式；`_goto_pixel_centered_target` vs `_goto_target_xy`；位置匹配（不依赖ID）；20帧对心稳定性检查 |
+| 5.8 | `src/drone_mission/drone_mission/states/state_drop.py` | ~465 | 降高→精校→投放许可检查→异步投放→回升→判断是否再投；使用 PrecisionAlignController (CUADC 像素闭环, 双速+两级降高) 作为默认精校方案，DropVisualAligner (梯度下降) 备选；超时原地重试 |
+| 5.9 | `src/drone_mission/drone_mission/precision_align_controller.py` | ~426 | **默认精校方案**。CUADC 风格像素闭环：像素误差→归一化→EMA平滑→P增益→机体速度；双速模式(粗调≤0.075m/s, 精调≤0.022m/s)；步进-悬停-观察周期；收敛→0.8s 刹车复查→投放许可；两级投放高度(2.0m→1.25m)。关键参数在 `mission_params.yaml` 中以 `precision_align_` 前缀 |
+| 5.10 | `src/drone_mission/drone_mission/drop_visual_aligner.py` | ~489 | **备选方案** (`precision_align_enable: false`)。端点比较法梯度下降：锁定目标→±探测→三方比较→提交→悬停观察→刹车。在线目标身份锁定 + 自适应步长。marker 中心已改用 OpenCV HSV 精修 |
+| 5.11 | `src/drone_mission/drone_mission/states/state_recon_patrol.py` | ~148 | 弓字形路径生成→逐航点飞行→覆盖监控→超时/完成返航 |
+| 5.12 | `src/drone_mission/drone_mission/states/state_return.py` | ~82 | 返航 H 点→2s 稳定性确认 |
+| 5.13 | `src/drone_mission/drone_mission/states/state_precision_land.py` | ~176 | 三阶段降落：搜索→伺服→盲降；视觉丢失退化策略 |
+| 5.14 | `src/drone_mission/drone_mission/path_planner.py` | ~366 | 自动最优条带方向；`plan_coverage_ned` NED 弓字形；`plan_transit` 过渡路径 |
 
 **读完应能回答**：状态机怎么从 INIT 一步步走到 COMPLETE？每个状态的 enter/execute/exit 三阶段做了什么决策？异常怎么处理？
 
@@ -441,9 +449,9 @@ drone_tasks_ws/
 
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
-| 6.1 | `src/drone_servo/drone_servo/servo_controller.py` | ~30 | 舵机控制（桩） |
-| 6.2 | `src/drone_servo/drone_servo/servo_mock.py` | ~10 | SITL 模拟投放 |
-| 6.3 | `src/drone_servo/drone_servo/drop_manager.py` | ~10 | 投放逻辑管理 |
+| 6.1 | `src/drone_servo/drone_servo/servo_controller.py` | ~285 | 舵机控制 (SITL Mock / Jetson GPIO PCA9685 双模式) |
+| 6.2 | `src/drone_servo/drone_servo/servo_mock.py` | ~95 | SITL 模拟投放 |
+| 6.3 | `src/drone_servo/drone_servo/drop_manager.py` | ~195 | 投放逻辑管理 (TriggerDrop 服务) |
 | 6.4 | `src/drone_interfaces/msg/` 目录 | — | CylinderDetection、LandingTarget、CoverageStatus 消息定义 |
 | 6.5 | `src/drone_interfaces/srv/` 目录 | — | TriggerDrop 服务定义 |
 | 6.6 | `src/drone_bringup/launch/sitl.launch.py` | ~139 | 4 节点启动顺序 + 延迟 |
@@ -474,6 +482,8 @@ drone_tasks_ws/
 | 5. 状态机 | 90 min | 5h 25min |
 | 6. 执行与接口 | 30 min | 5h 55min |
 | 7. 参数配置 | 15 min | 6h 10min |
+
+> **总计**: ~25 个关键文件，约 8000 行 Python 代码
 
 ---
 
@@ -522,6 +532,8 @@ Gazebo 相机 (分辨率取决于 PX4 模型)
 
 SITL 仿真已跑通。真机通过独立 launch/config 覆盖差异, 核心代码共用。
 
+> **最新修复 (2026-07-15)**: `setup.py` 添加 `package_data={'drone_vision': ['models/*.pt']}` + `zip_safe=False`，确保 YOLO 模型文件随 `colcon build` 安装到 `install/`，修复真机和仿真中视觉管线降级到纯 OpenCV 回退的问题。
+>
 > 审计报告: `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`
 > 关键发现: `precision_align_drop_height_tolerance: 0.30→0.40` 修复 SITL 稳态高度偏差 (PX4 MPC_THR_HOVER 估计偏差)
 > 真机 ARM force-magic (21196) 在 SITL 侧保留, 真机侧需新建标准解锁流程
