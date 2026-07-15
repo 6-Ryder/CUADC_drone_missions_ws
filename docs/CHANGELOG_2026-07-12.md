@@ -292,7 +292,7 @@ YOLO bbox
 
 ### 4.1 信息来源
 
-CUADC 项目位于 `/home/ryder/CUADC-UAV-Project/`，核心文档：
+CUADC 项目位于 `/home/bridge/CUADC-UAV-Project/`，核心文档：
 
 - `docs/analysis/02-visual-servo-strategy.md` — 完整的视觉伺服精校策略（6 步流程）
 - `docs/analysis/04-fusion-plan.md` — CUADC 精校 × DTW 架构融合方案

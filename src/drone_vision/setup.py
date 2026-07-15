@@ -16,8 +16,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=False,
-    maintainer='ryder',
-    maintainer_email='ryder@todo.todo',
+    maintainer='bridge',
+    maintainer_email='bridge@todo.todo',
     description='Vision pipeline: YOLO + OpenCV for cylinder detection, hazard classification, precision landing',
     license='Apache-2.0',
     extras_require={

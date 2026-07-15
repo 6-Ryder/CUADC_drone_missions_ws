@@ -34,7 +34,7 @@ mkdir -p "$ROS_LOG_DIR"
 # ============================================================================
 # 环境检测
 # ============================================================================
-PX4_DIR="/home/ryder/PX4-Autopilot"
+PX4_DIR="/home/bridge/PX4-Autopilot"
 PX4_BLD="$PX4_DIR/build/px4_sitl_default"
 
 if [ ! -f "$PX4_BLD/bin/px4" ]; then
