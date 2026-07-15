@@ -1,0 +1,7 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 生成的随机场地（每次运行重新生成）
+drone_field_random.sdf

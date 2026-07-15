@@ -1,0 +1,976 @@
+<?xml version="1.0" ?>
+<sdf version="1.11">
+  <!--
+    无人机飞行场地 - Drone Flight Field
+    =====================================
+    场地总尺寸: 70m (长) × 8m (宽)
+
+    子区域划分 (从左到右):
+      准备区 (Preparation):    x:  0m ~  7m, 长 7m,  绿色
+      起降区 (Takeoff/Landing): x:  7m ~ 40m, 长 33m, 深灰色
+        - 起降点: 直径 80cm 圆形, 圆心 x=10m, y=4m, 中心有 "H" 标识
+        - 起飞线: 虚线, x=12m, 贯穿场地宽边
+      投放区 (Drop):           x: 40m ~ 45m, 长 5m, 宽 8m
+        - 起降点(x=10m)前 30m
+        - 3 个白色圆筒 (h=30cm): 1号Ø15cm, 2号Ø20cm, 3号Ø25cm, 随机放置
+        - A 区 (有效): 筒内区域
+        - B 区 (有效): 筒心向外延伸直径 1m 的圆环区域 → 蓝色
+        - 无效区: 投放区中除 A、B 区以外的区域 → 黄色
+      间隔区 (Gap):            x: 45m ~ 65m, 长 20m, 地面原色
+      侦察区 (Reconnaissance): x: 65m ~ 70m, 长 5m,  橙色
+        - 5 个中空白色圆筒 (Ø20cm, h=15cm, 壁厚 0.5cm), 随机放置
+        - 其中 3 个筒内各放 12×12cm 危险品标识板 (贴地朝上)
+        - 标识: 易燃(橙)/健康危害(蓝)/危险(红) — 来自 PDF
+      投放区/侦察区圆筒均为开口杯形中空圆柱筒, 外壁厚 0.5cm
+
+    区域分界线 (细红线): x = 0m, 7m, 40m, 45m, 65m, 70m
+
+    启动命令:
+      gz sim drone_field.sdf
+  -->
+  <world name="drone_field">
+
+    <!-- ============================================================ -->
+    <!-- 场景与光照 -->
+    <!-- ============================================================ -->
+    <scene>
+      <ambient>0.6 0.6 0.6</ambient>
+      <background>0.4 0.6 0.9</background>
+      <sky></sky>
+    </scene>
+
+    <!-- GUI 默认相机 — 对准无人机初始位置 (10, 4) 上方 -->
+    <gui fullscreen="false">
+      <camera name="user_camera">
+        <pose>10 -6 6 0 1.0 -1.57</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>35 4 20 0 0 0</pose>
+      <diffuse>0.9 0.9 0.8 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>0 -0.2 -0.9</direction>
+    </light>
+
+    <!-- 物理引擎 (改为 ode 以兼容 PX4 SITL) -->
+    <physics name="1ms" type="ode">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+
+    <!-- PX4 EKF 初始化必需 -->
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type="adiabatic"/>
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>47.39797</latitude_deg>
+      <longitude_deg>8.54616</longitude_deg>
+      <elevation>0</elevation>
+    </spherical_coordinates>
+
+    <!-- ============================================================ -->
+    <!-- 地面 (无限碰撞平面) -->
+    <!-- ============================================================ -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>1.0</mu>
+                <mu2>1.0</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.3 0.4 0.2 1</ambient>
+            <diffuse>0.4 0.5 0.3 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 场地底板 (70m × 8m, 深色基底，使场地轮廓清晰可见) -->
+    <!-- ============================================================ -->
+    <model name="field_base">
+      <static>true</static>
+      <pose>35 4 0.001 0 0 0</pose>
+      <link name="base_link">
+        <visual name="base_visual">
+          <geometry>
+            <box>
+              <size>70 8 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.35 0.35 0.35 1</ambient>
+            <diffuse>0.45 0.45 0.45 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 场地外围边框 (白色, 便于从空中识别场地边界) -->
+    <!-- ============================================================ -->
+    <model name="field_border">
+      <static>true</static>
+      <!-- 底边 (y=0) -->
+      <link name="border_bottom">
+        <pose>35 0 0.25 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>70.1 0.1 0.5</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 顶边 (y=8) -->
+      <link name="border_top">
+        <pose>35 8 0.25 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>70.1 0.1 0.5</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 左边 (x=0) -->
+      <link name="border_left">
+        <pose>0 4 0.25 0 0 1.5708</pose>
+        <visual name="visual">
+          <geometry><box><size>8.1 0.1 0.5</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 右边 (x=70) -->
+      <link name="border_right">
+        <pose>70 4 0.25 0 0 1.5708</pose>
+        <visual name="visual">
+          <geometry><box><size>8.1 0.1 0.5</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 准备区 (Preparation Zone) — 绿色, x: 0~7m -->
+    <!-- ============================================================ -->
+    <model name="zone_preparation">
+      <static>true</static>
+      <pose>3.5 4 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>7 8 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.1 0.5 0.2 1</ambient>
+            <diffuse>0.2 0.7 0.3 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 起降区 (Takeoff/Landing Zone) — 深灰色, x: 7~40m -->
+    <!-- ============================================================ -->
+    <model name="zone_takeoff_landing">
+      <static>true</static>
+      <pose>23.5 4 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>33 8 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.25 0.25 0.3 1</ambient>
+            <diffuse>0.35 0.35 0.4 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 起降点 (Landing Pad) — 直径 80cm 圆形区域, 圆心 x=10m, y=4m -->
+    <!--   圆心距离准备区右边界(x=7m) 3m                         -->
+    <!-- ============================================================ -->
+    <model name="landing_pad">
+      <static>true</static>
+      <pose>10 4 0.010 0 0 0</pose>
+      <link name="pad_base">
+        <!-- 圆形底板 (深灰, 直径 80cm = 半径 0.4m) -->
+        <visual name="pad_base_visual">
+          <geometry>
+            <cylinder>
+              <radius>0.40</radius>
+              <length>0.008</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.2 0.2 0.2 1</ambient>
+            <diffuse>0.25 0.25 0.25 1</diffuse>
+          </material>
+        </visual>
+        <!-- 外环 (白色, 半径 0.4m, 环宽约 3cm) -->
+        <visual name="pad_ring_visual">
+          <geometry>
+            <cylinder>
+              <radius>0.40</radius>
+              <length>0.004</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.9 0.9 0.9 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- "H" 标识 — 位于起降点圆心 (x=10, y=4)                       -->
+    <!--   使用 3 个白色细长条拼成 H 字形, 总尺寸约 0.35m×0.35m       -->
+    <!-- ============================================================ -->
+    <model name="h_marking">
+      <static>true</static>
+      <!-- H 左竖条: center at (9.87, 4, 0.012), size=(0.04, 0.35, 0.004) -->
+      <link name="h_left_bar">
+        <pose>9.87 4 0.013 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.04 0.35 0.004</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- H 右竖条: center at (10.13, 4, 0.012), size=(0.04, 0.35, 0.004) -->
+      <link name="h_right_bar">
+        <pose>10.13 4 0.013 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.04 0.35 0.004</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- H 横条: center at (10, 4, 0.012), size=(0.30, 0.04, 0.004) -->
+      <link name="h_cross_bar">
+        <pose>10 4 0.013 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.30 0.04 0.004</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 起飞线 (Takeoff Line) — 白色虚线, x=12m, 贯穿场地宽边      -->
+    <!--   距离起降点圆心(x=10m) 右侧 2m                              -->
+    <!--   虚线: 9 段, 每段 0.5m 长, 间隔 0.3m, 两端留边距 0.3m       -->
+    <!-- ============================================================ -->
+    <model name="takeoff_line">
+      <static>true</static>
+      <!-- 段 1: y=0.55 -->
+      <link name="seg_01">
+        <pose>12 0.55 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 2: y=1.35 -->
+      <link name="seg_02">
+        <pose>12 1.35 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 3: y=2.15 -->
+      <link name="seg_03">
+        <pose>12 2.15 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 4: y=2.95 -->
+      <link name="seg_04">
+        <pose>12 2.95 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 5: y=3.75 -->
+      <link name="seg_05">
+        <pose>12 3.75 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 6: y=4.55 -->
+      <link name="seg_06">
+        <pose>12 4.55 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 7: y=5.35 -->
+      <link name="seg_07">
+        <pose>12 5.35 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 8: y=6.15 -->
+      <link name="seg_08">
+        <pose>12 6.15 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 段 9: y=6.95 -->
+      <link name="seg_09">
+        <pose>12 6.95 0.012 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 投放区 (Drop Zone) — x: 40~45m, 5m长 × 8m宽                  -->
+    <!--   起降点(x=10m)前 30m                                       -->
+    <!--   有效区(A+B)地面为蓝色; 无效区为黄色                          -->
+    <!-- ============================================================ -->
+
+    <!-- 投放区底板 (黄色 — 无效区) -->
+    <model name="zone_drop">
+      <static>true</static>
+      <pose>42.5 4 0.006 0 0 0</pose>
+      <link name="base_link">
+        <visual name="base_visual">
+          <geometry>
+            <box>
+              <size>5 8 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.6 0.5 0.1 1</ambient>
+            <diffuse>0.85 0.7 0.15 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 有效区 B 区 (蓝色圆, r=0.5m, 筒心向外延伸至直径1m)            -->
+    <!--   叠放在投放区底板上方, 表示有效区域                           -->
+    <!-- ============================================================ -->
+    <model name="effective_zone_b">
+      <static>true</static>
+      <!-- 1号筒 B区: 圆心 (41.5, 3.0), r=0.5m -->
+      <link name="b_zone_1">
+        <pose>41.5 3.0 0.010 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.50</radius>
+              <length>0.005</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.1 0.3 0.7 1</ambient>
+            <diffuse>0.15 0.4 0.85 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 2号筒 B区: 圆心 (43.0, 5.5), r=0.5m -->
+      <link name="b_zone_2">
+        <pose>43.0 5.5 0.010 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.50</radius>
+              <length>0.005</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.1 0.3 0.7 1</ambient>
+            <diffuse>0.15 0.4 0.85 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 3号筒 B区: 圆心 (44.0, 2.0), r=0.5m -->
+      <link name="b_zone_3">
+        <pose>44.0 2.0 0.010 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.50</radius>
+              <length>0.005</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.1 0.3 0.7 1</ambient>
+            <diffuse>0.15 0.4 0.85 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 投放圆筒 (A 区 — 筒内区域, 中空圆柱筒, 外壁厚 0.5cm)          -->
+    <!--   外壁半透明以展示中空效果和筒内标识                            -->
+    <!--   1号筒: Ø15cm,  2号筒: Ø20cm,  3号筒: Ø25cm,  h=30cm        -->
+    <!-- ============================================================ -->
+        <!-- ============================================================ -->
+    <!-- 投放圆筒 (A 区) — 开口杯形, 12~16段壁拼成, 外壁厚 0.5cm       -->
+    <!--   1号: Ø15cm h=30cm, 2号: Ø20cm h=30cm, 3号: Ø25cm h=30cm   -->
+    <!-- ============================================================ -->
+        <!-- ============================================================ -->
+    <!-- 投放圆筒 (A 区) — 开口杯形, 连续圆柱壁 STL 网格, 壁厚 0.5cm   -->
+    <!--   1号: Ø15cm h=30cm, 2号: Ø20cm h=30cm, 3号: Ø25cm h=30cm   -->
+    <!-- ============================================================ -->
+    <model name="drop_cylinders">
+      <static>true</static>
+      <link name="cylinder_1">
+        <pose>41.5 3.0 0.1500 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.0750</radius><length>0.3000</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格, 保证俯视可见 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.0750</radius><length>0.3000</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘, 增强俯视可见性 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.150 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.0750</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="cylinder_2">
+        <pose>43.0 5.5 0.1500 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.1000</radius><length>0.3000</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.3000</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.150 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="cylinder_3">
+        <pose>44.0 2.0 0.1500 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.1250</radius><length>0.3000</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1250</radius><length>0.3000</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.150 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1250</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+<!-- ============================================================ -->
+    <!-- 侦察区 (Reconnaissance Zone) — 橙色, x: 65~70m               -->
+    <!--   5 个中空白色圆筒: Ø20cm, h=15cm, 外壁厚 0.5cm, 随机放置       -->
+    <!--   其中 3 个筒内放置 12×12cm 危险化学品标识 (红色)                -->
+    <!-- ============================================================ -->
+    <model name="zone_reconnaissance">
+      <static>true</static>
+      <pose>67.5 4 0.006 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>5 8 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.7 0.35 0.1 1</ambient>
+            <diffuse>0.95 0.5 0.15 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 侦察区圆筒 (中空, Ø20cm/内径Ø19cm, h=15cm, 外壁厚 0.5cm) -->
+        <!-- 侦察区圆筒 — 开口杯形, 12段壁拼成, Ø20cm h=15cm, 壁厚 0.5cm -->
+        <!-- 侦察区圆筒 — 开口杯形, 连续圆柱壁, Ø20cm h=15cm, 壁厚 0.5cm -->
+    <model name="recon_cylinders">
+      <static>true</static>
+      <link name="recon_cyl_1">
+        <pose>66.0 2.0 0.0750 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.1500</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.075 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="recon_cyl_2">
+        <pose>67.5 5.5 0.0750 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.1500</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.075 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="recon_cyl_3">
+        <pose>68.5 7.0 0.0750 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.1500</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.075 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="recon_cyl_4">
+        <pose>66.5 3.5 0.0750 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.1500</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.075 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="recon_cyl_5">
+        <pose>69.0 1.5 0.0750 0 0 0</pose>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
+        </collision>
+        <!-- 选项B: 实体圆柱替代STL网格 -->
+        <visual name="visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.1500</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+        <!-- 选项C: 底部白色圆盘 -->
+        <visual name="bottom_disk">
+          <pose>0 0 -0.075 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.1000</radius><length>0.005</length></cylinder>
+          </geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================================================ -->
+    <!-- 危险品标识板 (12cm×12cm×1cm, 贴地, 标识朝上)                 -->
+    <!--   PBR纹理 + 匹配底色, 提高可见性                              -->
+    <!--   标识来源: PDF 第1页(易燃/橙), 第7页(健康/蓝), 第10页(危险/红) -->
+    <!-- ============================================================ -->
+    <model name="hazard_plates">
+      <static>true</static>
+      <!-- 易燃标识 — 橙底, 筒1 (66.0, 2.0) -->
+      <link name="hazard_plate_1">
+        <pose>66.0 2.0 0.010 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.12 0.12 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.65 0.65 0.65 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <emissive>0 0 0 1</emissive>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/ryder/Task_flight_ws/drone_field_meshes/textures/hazard_flammable.png</albedo_map>
+                <metalness>0</metalness>
+                <roughness>1</roughness>
+              </metal>
+            </pbr>
+          </material>
+        </visual>
+      </link>
+      <!-- 健康危害标识 — 蓝底, 筒3 (68.5, 7.0) -->
+      <link name="hazard_plate_2">
+        <pose>68.5 7.0 0.010 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.12 0.12 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.65 0.65 0.65 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <emissive>0 0 0 1</emissive>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/ryder/Task_flight_ws/drone_field_meshes/textures/hazard_health.png</albedo_map>
+                <metalness>0</metalness>
+                <roughness>1</roughness>
+              </metal>
+            </pbr>
+          </material>
+        </visual>
+      </link>
+      <!-- 危险标识 — 红底, 筒5 (69.0, 1.5) -->
+      <link name="hazard_plate_3">
+        <pose>69.0 1.5 0.010 0 0 0</pose>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.12 0.12 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.65 0.65 0.65 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <emissive>0 0 0 1</emissive>
+            <pbr>
+              <metal>
+                <albedo_map>file:///home/ryder/Task_flight_ws/drone_field_meshes/textures/hazard_danger.png</albedo_map>
+                <metalness>0</metalness>
+                <roughness>1</roughness>
+              </metal>
+            </pbr>
+          </material>
+        </visual>
+      </link>
+    </model>
+<!-- 左边界: x=0 -->
+    <!-- 准备区 | 起降区分界: x=7 -->
+    <!-- 起降区 | 投放区分界: x=40 -->
+    <!-- 投放区 | 间隔区分界: x=45 -->
+    <!-- 间隔区 | 侦察区分界: x=65 -->
+    <!-- 右边界: x=70 -->
+    <!-- ============================================================ -->
+    <!-- 文字标注 (使用彩色小型方块在空中标注区域名称) -->
+    <!-- ============================================================ -->
+
+    <!-- ============================================================ -->
+    <!-- 角锥标记 (场地四角 + 投放区/侦察区角点, 方便无人机视觉定位) -->
+    <!-- ============================================================ -->
+    <model name="corner_markers">
+      <static>true</static>
+      <!-- 左下角 (0, 0) -->
+      <link name="corner_00">
+        <pose>0 0 0.5 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.0</size></box></geometry>
+          <material>
+            <ambient>1 1 0 1</ambient>
+            <diffuse>1 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 左上角 (0, 8) -->
+      <link name="corner_08">
+        <pose>0 8 0.5 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.0</size></box></geometry>
+          <material>
+            <ambient>1 1 0 1</ambient>
+            <diffuse>1 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 右下角 (70, 0) -->
+      <link name="corner_70_0">
+        <pose>70 0 0.5 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.0</size></box></geometry>
+          <material>
+            <ambient>1 1 0 1</ambient>
+            <diffuse>1 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <!-- 右上角 (70, 8) -->
+      <link name="corner_70_8">
+        <pose>70 8 0.5 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.0</size></box></geometry>
+          <material>
+            <ambient>1 1 0 1</ambient>
+            <diffuse>1 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 投放区与侦察区角点标记 (红色, 突出关键任务区域) -->
+    <model name="mission_corner_markers">
+      <static>true</static>
+      <!-- 投放区左下 (40, 0) -->
+      <link name="drop_corner_40_0">
+        <pose>40 0 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+      <!-- 投放区左上 (40, 8) -->
+      <link name="drop_corner_40_8">
+        <pose>40 8 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+      <!-- 投放区右下 (45, 0) -->
+      <link name="drop_corner_45_0">
+        <pose>45 0 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+      <!-- 投放区右上 (45, 8) -->
+      <link name="drop_corner_45_8">
+        <pose>45 8 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+      <!-- 侦察区左下 (65, 0) -->
+      <link name="recon_corner_65_0">
+        <pose>65 0 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+      <!-- 侦察区左上 (65, 8) -->
+      <link name="recon_corner_65_8">
+        <pose>65 8 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+      <!-- 侦察区右下 (70, 0) — 与右下角共用位置但更高 -->
+      <link name="recon_corner_70_0">
+        <pose>70 0 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+      <!-- 侦察区右上 (70, 8) — 与右上角共用位置但更高 -->
+      <link name="recon_corner_70_8">
+        <pose>70 8 0.75 0 0 0</pose>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+            <emissive>0.3 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
