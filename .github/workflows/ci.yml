@@ -21,6 +21,10 @@ jobs:
         with:
           required-ros-distributions: humble
 
+      # rosidl_generator_rs 依赖 rosidl_pycommon，但 ROS2 Humble 镜像未预装
+      - name: Install missing rosidl deps
+        run: pip install rosidl-pycommon
+
       - name: Build and Test
         uses: ros-tooling/action-ros-ci@v0.3
         with:
