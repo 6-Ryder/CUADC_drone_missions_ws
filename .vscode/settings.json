@@ -15,5 +15,6 @@
         "/home/bridge/CUADC_drone_missions_ws/src/drone_servo",
         "/home/bridge/CUADC_drone_missions_ws/src/drone_bringup"
     ],
-    "github.copilot.chat.codeGeneration.useInstructionFiles": true
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    "cmake.ignoreCMakeListsMissing": true
 }
