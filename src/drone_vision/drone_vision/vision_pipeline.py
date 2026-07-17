@@ -261,7 +261,7 @@ class VisionPipelineNode(Node):
         model_path = self.get_parameter("model_path").value
         if not model_path:
             default = os.path.join(
-                os.path.dirname(__file__), "models", "cylinder_yolo.pt",
+                os.path.dirname(__file__), "models", "cylinder_yolo.onnx",
             )
             if os.path.exists(default):
                 model_path = default

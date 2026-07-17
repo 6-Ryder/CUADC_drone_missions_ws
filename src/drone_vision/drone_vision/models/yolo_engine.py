@@ -349,6 +349,36 @@ class UltralyticsYOLOEngine(YOLOEngine):
         detections.sort(key=lambda d: d.confidence, reverse=True)
         return detections
 
+'''
+#==========TensorRT 引擎类=========================
+class TensorRTYOLOEngine(YOLOEngine):
+    
+    def _check_backend(self) -> bool:
+        try:
+            import tensorrt
+            import ultralytics
+            return True
+        excpt ImportError:
+            print("[TensorRTYOLOEngine] tensorrt/ultralytics do not installed")
+            return False
+    
+    def _do_load(self) ->None:
+        from ultralytics import YOLO
+        self._model = YOLO(str(self.model_path), task='detect')
+    def _predict_device(self) -> str:
+        return "0
+    def _do_infer(self,image: np.ndarray) -> List[Detection]:
+        
+        results = self._model.predict(
+            image,
+            imgsz=(self.input_height, self.input_width),
+            conf=self.conf_threshold,
+            iou=self.nms_iou_threshold,
+            device="0",
+            verbose=False,
+        )
+
+'''
 
 # ============================================================
 # 工厂函数

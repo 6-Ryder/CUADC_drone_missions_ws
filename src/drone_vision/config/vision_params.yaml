@@ -17,7 +17,7 @@
     # YOLO 模型参数
     # ============================================================
     # ---- YOLO 主模型 (白色圆筒检测, 单类) ----
-    model_path: "cylinder_yolo.pt"         # .pt 或 .onnx; 相对 models/ 或绝对路径
+    model_path: "cylinder_yolo.onnx"       # .pt/.onnx/.engine; 相对 models/ 或绝对路径
     model_width: 640                       # 模型输入宽
     model_height: 640                      # 模型输入高
     conf_threshold: 0.35                   # YOLO 置信度阈值 (匹配 cv_trainer 推理脚本)
@@ -28,7 +28,7 @@
       - "cylinder"                         # 0: 白色圆筒
 
     # ---- 投放区蓝色标识模型 (单类, 可选) ----
-    drop_marker_model_path: "drop_marker_yolo.pt"
+    drop_marker_model_path: "drop_marker_yolo.onnx"
     drop_marker_class_names:
       - "drop_zone_marker"                 # 0: 蓝色投放区标识
     drop_marker_refine_enable: true        # YOLO bbox 内 HSV 蓝色分割 → 轮廓矩质心

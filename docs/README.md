@@ -537,3 +537,4 @@ SITL 仿真已跑通。真机通过独立 launch/config 覆盖差异, 核心代�
 > 审计报告: `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`
 > 关键发现: `precision_align_drop_height_tolerance: 0.30→0.40` 修复 SITL 稳态高度偏差 (PX4 MPC_THR_HOVER 估计偏差)
 > 真机 ARM force-magic (21196) 在 SITL 侧保留, 真机侧需新建标准解锁流程
+> **真机开发方案**: `docs/2026-07-17-real-hardware-workspace-plan.md` — 工作空间布局、4 阶段开发顺序、文件改动清单
