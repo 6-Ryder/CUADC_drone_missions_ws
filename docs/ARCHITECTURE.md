@@ -155,12 +155,12 @@ drone_tasks_ws/src/
 │   │   │   ├── state_transit.py     # 跨区域飞行
 │   │   │   ├── state_cylinder_search.py    # 投放区搜索 & 选筒
 │   │   │   ├── state_cylinder_approach.py  # 逼近圆筒圆心
-│   │   │   ├── state_drop.py        # 触发投放 (465行, 含精校+投放逻辑)
+│   │   │   ├── state_drop.py        # 触发投放 (467行, 含精校+三级降高: 5m→2m→1.25m)
 │   │   │   ├── state_recon_patrol.py       # 侦察区全覆盖巡视
 │   │   │   ├── state_recon_inspect.py      # 危险品分类确认 (已废弃, 不再使用)
 │   │   │   ├── state_return.py      # 返航
 │   │   │   └── state_precision_land.py    # 视觉精准降落
-│   │   ├── precision_align_controller.py  # 低空精校 (426行, CUADC 像素闭环, 默认启用)
+│   │   ├── precision_align_controller.py  # 低空精校 (441行, CUADC 像素闭环; reset_confirmation() 支持高度变化后热重启)
 │   │   ├── drop_visual_aligner.py  # 低空视觉校准 (489行, 梯度下降, precision_align_enable=false 时启用)
 │   │   ├── path_planner.py          # 路径规划 (366行, 覆盖路径+过渡路径)
 │   │   └── cylinder_selector.py     # 圆筒选择策略 (145行)
@@ -618,7 +618,10 @@ class ServoController:
 - 双速模式: 粗调 ≤0.075m/s (pixel>80px), 精调 ≤0.022m/s (pixel≤80px)
 - 步进-悬停-观察周期: 粗调 0.12s 步进 + 0.08s 悬停, 精调 0.08s 步进
 - 收敛条件: raw≤6px + smooth≤5px + 连续 8 帧 → 0.8s 刹车复查 → 释放投放许可
-- 两级投放高度: 2.0m 初次精校达标 → 慢速降至 1.25m 重新精校 (final_descent)
+- 两级投放高度: 2.0m 初次精校达标 → 定点直降至 1.25m 热重启复查 (final_descent)
+  - 降高期间暂停精校控制, 避免下降运动与像素修正指令冲突导致 XY 抖动
+  - `reset_confirmation()` 仅清零确认状态 (stable_count/brake/release), 保留目标锁和 EMA 平滑值
+  - 热重启使低空复查无需冷启动收敛, 消除此前 19-29s 的来回振荡
 
 **关键参数** (均在 `mission_params.yaml`):
 | 参数 | 默认值 | 说明 |
@@ -1033,7 +1036,7 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 | `drone_mission/states/*.py` | ✅ 已实现 | ~1734 | 11 个状态处理器 (含已废弃的 recon_inspect) |
 | `drone_mission/path_planner.py` | ✅ 已实现 | ~366 | 路径规划 (弓字形覆盖 + 过渡路径) |
 | `drone_mission/cylinder_selector.py` | ✅ 已实现 | ~145 | 选筒策略 (半径排序 + 去重 + 排除) |
-| `drone_mission/precision_align_controller.py` | ✅ 已实现 | ~426 | 低空精校 (CUADC 像素闭环, 默认启用) |
+| `drone_mission/precision_align_controller.py` | ✅ 已实现 | ~441 | 低空精校 (CUADC 像素闭环, 默认启用; reset_confirmation() 热重启) |
 | `drone_mission/drop_visual_aligner.py` | ✅ 已实现 | ~489 | 低空视觉校准 (梯度下降, 备选方案) |
 | `drone_utils/*.py` | ✅ 已实现 | ~593 | 日志(178) + 看门狗(108) + 紧急(216) + 配置(91) |
 | **总计** | | **~8700** |

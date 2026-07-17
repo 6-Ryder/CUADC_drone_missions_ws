@@ -112,7 +112,7 @@ pkill -f "bin/px4"; pkill -f "MicroXRCEAgent"; pkill -f "ros_gz_image"
 ```
 INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 → SELECT_TARGET → APPROACH_CYLINDER → DESCEND_TO_DROP
-→ PRECISION_ALIGN (像素闭环精校, 双速 + 两级降高) → EXECUTE_DROP(×2)
+→ PRECISION_ALIGN (像素闭环精校, 双速 + 两级降高, 2m→1.25m 热重启复查) → EXECUTE_DROP(×2)
 → ASCEND → TRANSIT_TO_RECON_ZONE → RECON_PATROL (全覆盖弓字形)
 → RETURN_TO_HOME → PRECISION_LAND → COMPLETE
 ```
