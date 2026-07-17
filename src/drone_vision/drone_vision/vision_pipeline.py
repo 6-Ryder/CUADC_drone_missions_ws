@@ -17,6 +17,7 @@
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple
 
 import cv2
@@ -66,6 +67,9 @@ class VisionPipelineNode(Node):
         self._engine: Optional[YOLOEngine] = None
         self._drop_marker_engine: Optional[YOLOEngine] = None
         self._bridge = CvBridge()
+
+        # 双模型并行推理线程池 (max_workers=2: 主模型 + 投放标识模型)
+        self._infer_pool = ThreadPoolExecutor(max_workers=2)
 
         # 坐标变换 + 姿态补偿
         self._coord_xform: Optional[CoordinateTransformer] = None
@@ -440,14 +444,25 @@ class VisionPipelineNode(Node):
         else:
             effective_conf = self.get_parameter("conf_threshold").value
 
-        # ---- 1. YOLO 推理 ----
+        # ---- 1. YOLO 推理 (双模型并行) ----
+        # 主模型和投放标识模型对同一帧独立推理, 用线程池并行执行.
+        # 两个 infer() 瓶颈在 ONNX Runtime C++ 层, 不受 Python GIL 限制.
+        future_main = None
+        future_marker = None
         if self._engine and self._engine.is_loaded:
-            all_dets = self._engine.infer(image)
+            future_main = self._infer_pool.submit(self._engine.infer, image)
+        if self._drop_marker_engine and self._drop_marker_engine.is_loaded:
+            future_marker = self._infer_pool.submit(self._drop_marker_engine.infer, image)
+
+        # 收集主模型结果
+        if future_main is not None:
+            all_dets = future_main.result()
         else:
             all_dets = self._fallback_all(image)
 
-        if self._drop_marker_engine and self._drop_marker_engine.is_loaded:
-            marker_dets = self._drop_marker_engine.infer(image)
+        # 收集并处理投放标识模型结果
+        if future_marker is not None:
+            marker_dets = future_marker.result()
             # 发布投放区标识检测
             marker_array = CylinderArray()
             marker_array.header.stamp = self.get_clock().now().to_msg()
