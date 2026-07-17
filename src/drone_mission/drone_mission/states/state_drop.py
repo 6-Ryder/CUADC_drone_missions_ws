@@ -258,15 +258,18 @@ class DropState:
 
         三阶段判断:
           1. 快速通道: height_error < tolerance → 立即通过
+             (最终下降阶段禁用 — 无人机可能快速穿过目标高度,
+             此时精校介入会导致画面剧烈跳动)
           2. 最小下降时间门控: 下降命令发出后前 N 秒禁止停滞判定,
              避免 PX4 启动延迟期的 vd≈0 被误判为"已到位"
           3. 降速停滞检测: 垂直速度持续归零 + 已明显降过一段高度 →
              SITL 稳态偏差导致无法到达绝对高度, 以物理实际到达为准
         """
-        # 快速通道: 绝对高度误差已达标
-        if height_error < self._drop_height_tolerance():
-            self._descend_stall_count = 0
-            return True
+        # 快速通道: 最终下降阶段禁用, 强制走停滞检测确保无人机停稳
+        if not self._final_descent_started:
+            if height_error < self._drop_height_tolerance():
+                self._descend_stall_count = 0
+                return True
 
         # 最小下降时间门控: 0.5m/s 降速下 5m→2m 约 6s,
         # 前 2.5s 内 vd≈0 属于 PX4 启动延迟, 不是停滞
