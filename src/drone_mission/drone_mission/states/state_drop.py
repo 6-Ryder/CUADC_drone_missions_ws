@@ -371,7 +371,7 @@ class DropState:
         now = time.time()
         if now - self._last_descend_log_time >= interval:
             self._last_descend_log_time = now
-            self._fsm.get_logger().warn(message)
+            self._fsm.get_logger().info(message)
 
     def _nudge_to_visible_drop_target(self, drop_h: float) -> bool:
         if self._precision_enabled():
