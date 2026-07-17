@@ -327,7 +327,9 @@ class DropState:
             return False
 
         self._final_descent_started = True
-        self._precision_aligner.reset(self._selected_memory_xy())
+        # 仅重置确认状态 (稳定计数/刹车/投放许可), 保留目标锁和 EMA 平滑值.
+        # 避免冷启动导致低空像素误差放大后精校器来回振荡 (抖动).
+        self._precision_aligner.reset_confirmation()
         self._start_time = time.time()
         self._descend_best_pixel_error = float("inf")
         self._descend_stall_count = 0
@@ -337,7 +339,7 @@ class DropState:
         speed = float(self._fsm.get_param("precision_align_final_descent_speed", 0.25))
         self._fsm.fc.goto_ned(pos.north, pos.east, -final_h, speed=speed)
         self._fsm.get_logger().info(
-            "DESCEND: 初次精校完成, 慢速降至最终投放高度后重新精校 "
+            "DESCEND: 初次精校完成, 定点直降至最终投放高度后复查 "
             f"{align_h:.2f}m → {final_h:.2f}m"
         )
         return True

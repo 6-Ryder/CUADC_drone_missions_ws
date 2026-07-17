@@ -86,6 +86,21 @@ class PrecisionAlignController:
         self._last_log_time = 0.0
         self._last_status = PrecisionAlignStatus(reason="reset")
 
+    def reset_confirmation(self) -> None:
+        """仅重置确认状态 (稳定计数/刹车/投放许可)。
+
+        保留目标像素锁定和 EMA 平滑值, 使高度变化后无需冷启动
+        重新收敛, 仅需在新高度重新确认像素居中。
+        """
+        self._stable_count = 0
+        self._release_ready = False
+        self._brake_until = 0.0
+        self._active_until = 0.0
+        self._hover_until = 0.0
+        self._last_forward = 0.0
+        self._last_right = 0.0
+        self._last_status = PrecisionAlignStatus(reason="altitude_change")
+
     @staticmethod
     def _field(obj: Any, key: str, default=0.0):
         return getattr(obj, key, obj.get(key, default) if isinstance(obj, dict) else default)
