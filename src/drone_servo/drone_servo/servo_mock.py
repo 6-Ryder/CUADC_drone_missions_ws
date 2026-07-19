@@ -1,51 +1,95 @@
 """
-SITL 模拟舵机 — 多位置步进投放.
+SITL 模拟舵机 — 记录投放事件到日志, 发布模拟状态.
 
-与 C++ drone_servo2 逻辑一致:
-  - set_pwm(): 设置 PWM 脉宽 (μs)
-  - 投放序列: [1150, 1700, 2150] → 三次位置, 两次投放
-  - 舵机只进不退
+在 SITL 模式下替代真实 GPIO/PWM 硬件操作,
+所有投放指令仅做日志记录和状态模拟.
 """
 
+import time
 from typing import Optional
 
 
 class ServoMock:
-    """SITL 模拟舵机 — 与 PX4CommandServo 接口对齐."""
+    """
+    SITL 模拟舵机.
 
-    def __init__(self, init_pwm_us: float = 1150.0):
-        self._current_pwm = init_pwm_us
-        self._init_pwm = init_pwm_us
-        self._on_pwm_change: Optional[callable] = None
+    行为:
+      - drop(): 延时 drop_delay_ms 后返回 True (模拟成功)
+      - 记录每条操作的日志
+      - 通过回调向外通知状态变化
+    """
 
-    def set_pwm_change_callback(self, callback):
-        """设置 PWM 变化回调: callback(pwm_us)."""
-        self._on_pwm_change = callback
+    def __init__(self, drop_delay_ms: float = 1000.0, drop_timeout_s: float = 3.0):
+        self._drop_delay = drop_delay_ms / 1000.0  # 转为秒
+        self._drop_timeout = drop_timeout_s
+        self._is_open = False
+        self._last_drop_time: float = 0.0
+        self._drop_count: int = 0
+        self._on_state_change: Optional[callable] = None
 
-    def set_pwm(self, pwm_us: float) -> bool:
-        """设置 PWM 输出."""
-        self._current_pwm = pwm_us
-        if self._on_pwm_change:
-            try:
-                self._on_pwm_change(pwm_us)
-            except Exception:
-                pass
+    def set_state_callback(self, callback):
+        """设置状态变化回调: callback(is_open, drop_count)."""
+        self._on_state_change = callback
+
+    def open(self) -> bool:
+        """打开投放机构."""
+        self._is_open = True
+        self._notify()
+        return True
+
+    def close(self) -> bool:
+        """关闭投放机构."""
+        self._is_open = False
+        self._notify()
+        return True
+
+    def drop(self) -> bool:
+        """
+        执行一次完整投放动作: open → delay → close.
+
+        Returns
+        -------
+        bool: True 表示投放成功 (模拟总是成功)
+        """
+        self._drop_count += 1
+        self._last_drop_time = time.time()
+
+        # 模拟机械动作延迟
+        self.open()
+        time.sleep(self._drop_delay)
+        self.close()
+
         return True
 
     def is_ready(self) -> bool:
+        """检查舵机是否就绪 (SITL 中总是就绪)."""
         return True
 
+    def is_open(self) -> bool:
+        return self._is_open
+
     def reset(self):
-        """回到初始位置."""
-        self._current_pwm = self._init_pwm
+        """重置舵机状态."""
+        self._is_open = False
+        self._drop_count = 0
+        self._notify()
 
     @property
-    def current_pwm(self) -> float:
-        return self._current_pwm
+    def drop_count(self) -> int:
+        return self._drop_count
 
     @property
     def status_dict(self) -> dict:
         return {
-            "pwm_us": self._current_pwm,
-            "ready": 1.0,
+            "is_open": self._is_open,
+            "drop_count": self._drop_count,
+            "last_drop_time": self._last_drop_time,
+            "ready": self.is_ready(),
         }
+
+    def _notify(self):
+        if self._on_state_change:
+            try:
+                self._on_state_change(self._is_open, self._drop_count)
+            except Exception:
+                pass

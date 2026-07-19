@@ -7,13 +7,8 @@
       },
       "includePath": [
         "/opt/ros/humble/include/**",
-        "/usr/include/**",
-        "${workspaceFolder}/install/drone_interfaces/include/**",
-        "${workspaceFolder}/install/px4_msgs/include/**",
-        "${workspaceFolder}/install/drone_servo2/include/**",
-        "${workspaceFolder}/src/drone_servo2/include/**"
+        "/usr/include/**"
       ],
-      "compileCommands": "${workspaceFolder}/build/drone_servo2/compile_commands.json",
       "name": "ros2",
       "intelliSenseMode": "gcc-x64",
       "compilerPath": "/usr/bin/gcc",

@@ -40,6 +40,8 @@ def generate_launch_description():
             {
                 "camera_width": 640,
                 "camera_height": 480,
+                "fx": 400.0,
+                "fy": 400.0,
                 "cx": 320.0,
                 "cy": 240.0,
             },

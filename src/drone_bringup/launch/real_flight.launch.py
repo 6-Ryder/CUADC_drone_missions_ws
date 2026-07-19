@@ -2,9 +2,8 @@
 实飞启动 — Jetson Orin Nano 实飞部署.
 
 与 SITL 的区别:
-  - platform:=jetson (舵机通过 PX4 VehicleCommand 控制 MAIN5)
-  - sim_mode:=false (相机用 GStreamer)
-  - 启动独立 GStreamer 节点
+  - platform:=jetson (舵机用真实 GPIO)
+  - 启动独立 V4L2 相机节点
 
 使用方法:
   ros2 launch drone_bringup real_flight.launch.py
@@ -22,13 +21,19 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_control = get_package_share_directory("px4_control")
     pkg_vision = get_package_share_directory("drone_vision")
-    pkg_servo = get_package_share_directory("drone_servo2")
+    pkg_servo = get_package_share_directory("drone_servo")
     pkg_mission = get_package_share_directory("drone_mission")
 
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
     mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
+
+    camera_device_arg = DeclareLaunchArgument(
+        "camera_device",
+        default_value="/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0",
+        description="任务相机的稳定 V4L2 设备路径",
+    )
 
     # PX4 桥接
     px4_bridge_node = Node(
@@ -40,7 +45,26 @@ def generate_launch_description():
         parameters=[px4_param_file],
     )
 
-    # 视觉 — 实飞模式 (model 路径由 YAML 配置, 命令行可用 --ros-args 覆盖)
+    camera_node = Node(
+        package="drone_vision",
+        executable="camera_node",
+        name="camera_driver",
+        output="screen",
+        emulate_tty=True,
+        parameters=[{
+            "sim_mode": False,
+            "camera_device": LaunchConfiguration("camera_device"),
+            "camera_width": 640,
+            "camera_height": 480,
+            "camera_fps": 30.0,
+            "fx": 400.0,
+            "fy": 400.0,
+            "cx": 320.0,
+            "cy": 240.0,
+        }],
+    )
+
+    # 视觉 — 实飞模式 (ONNX Runtime CUDA)
     vision_node = Node(
         package="drone_vision",
         executable="vision_pipeline",
@@ -49,15 +73,20 @@ def generate_launch_description():
         parameters=[
             vision_param_file,
             {
-                "sim_mode": False,
-                "device": "tensorrt",
+                "camera_width": 640,
+                "camera_height": 480,
+                "fx": 400.0,
+                "fy": 400.0,
+                "cx": 320.0,
+                "cy": 240.0,
+                "device": "cuda",
             },
         ],
     )
 
-    # 舵机 — PX4 VehicleCommand 控制 MAIN5 (C++ 节点)
+    # 舵机 — 真实 GPIO
     servo_node = Node(
-        package="drone_servo2",
+        package="drone_servo",
         executable="servo_controller",
         name="servo_controller",
         output="screen",
@@ -85,6 +114,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         LogInfo(msg="=== 无人机实飞全系统启动 (Jetson) ==="),
+        camera_device_arg,
+        camera_node,
         px4_bridge_node,
         vision_delayed,
         servo_delayed,

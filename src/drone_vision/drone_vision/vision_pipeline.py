@@ -24,6 +24,12 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import Header
@@ -36,7 +42,12 @@ from drone_interfaces.msg import (
 )
 
 from drone_vision.models.yolo_engine import Detection, create_engine, YOLOEngine
-from drone_vision.cylinder_detector import CylinderRefiner, CylinderTracker
+from drone_vision.cylinder_detector import (
+    CylinderRefiner,
+    CylinderTracker,
+    detect_white_cylinders,
+)
+from drone_vision.marker_detector import BlueMarkerRefiner
 from drone_vision.hazard_classifier import ColorVerifier, CLASS_TO_HAZARD
 from drone_vision.landing_detector import LandingPadRefiner
 from drone_vision.coverage_monitor import CoverageMonitor
@@ -45,6 +56,13 @@ from drone_vision.coordinate_transforms import (
 )
 from drone_vision.visual_servoing import (
     VisualServoController, CylinderApproachController, ServoState,
+)
+
+
+CAMERA_INFO_QOS = QoSProfile(
+    depth=1,
+    reliability=QoSReliabilityPolicy.RELIABLE,
+    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
 )
 
 
@@ -78,6 +96,7 @@ class VisionPipelineNode(Node):
         # 后处理器
         self._cyl_refiner: Optional[CylinderRefiner] = None
         self._cyl_tracker: Optional[CylinderTracker] = None
+        self._marker_refiner: Optional[BlueMarkerRefiner] = None
         self._color_verifier: Optional[ColorVerifier] = None
         self._landing_refiner: Optional[LandingPadRefiner] = None
         self._coverage: Optional[CoverageMonitor] = None
@@ -100,10 +119,12 @@ class VisionPipelineNode(Node):
         # ---- 订阅 ----
         # gz_camera_bridge.py (Python) 发布到 /drone/camera/image_raw, QoS 匹配
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb, 10,
+            Image, "/drone/camera/image_raw", self._image_cb,
+            qos_profile_sensor_data,
         )
         self._caminfo_sub = self.create_subscription(
-            CameraInfo, "/drone/camera/camera_info", self._caminfo_cb, 10,
+            CameraInfo, "/drone/camera/camera_info", self._caminfo_cb,
+            CAMERA_INFO_QOS,
         )
         # 订阅无人机位姿 (用于姿态补偿)
         self._pose_sub = self.create_subscription(
@@ -156,6 +177,10 @@ class VisionPipelineNode(Node):
         self.declare_parameter("drop_marker_class_names", ["drop_zone_marker"])
         # 投放区蓝色标识 OpenCV 精修
         self.declare_parameter("drop_marker_refine_enable", True)
+        self.declare_parameter("drop_marker_min_blue_ratio", 0.4)
+        self.declare_parameter("drop_marker_min_area", 80)
+        self.declare_parameter("drop_marker_min_aspect_ratio", 0.4)
+        self.declare_parameter("drop_marker_min_circularity", 0.35)
         # 相机
         self.declare_parameter("fx", 400.0)
         self.declare_parameter("fy", 400.0)
@@ -227,6 +252,20 @@ class VisionPipelineNode(Node):
             max_age=self.get_parameter("cylinder_tracking_max_age").value,
             iou_thresh=self.get_parameter("cylinder_tracking_iou_thresh").value,
             min_hits=self.get_parameter("cylinder_tracking_min_hits").value,
+        )
+        self._marker_refiner = BlueMarkerRefiner(
+            min_component_area=self.get_parameter(
+                "drop_marker_min_area"
+            ).value,
+            min_detection_blue_ratio=self.get_parameter(
+                "drop_marker_min_blue_ratio"
+            ).value,
+            min_aspect_ratio=self.get_parameter(
+                "drop_marker_min_aspect_ratio"
+            ).value,
+            min_circularity=self.get_parameter(
+                "drop_marker_min_circularity"
+            ).value,
         )
         self._color_verifier = ColorVerifier(
             confirm_ratio=self.get_parameter("hazard_color_confirm_ratio").value,
@@ -461,28 +500,32 @@ class VisionPipelineNode(Node):
             all_dets = self._fallback_all(image)
 
         # 收集并处理投放标识模型结果
+        marker_dets: List[Detection] = []
+        marker_source = "none"
         if future_marker is not None:
             marker_dets = future_marker.result()
-            # 发布投放区标识检测
+            marker_source = "yolo"
+            if (
+                self.get_parameter("drop_marker_refine_enable").value
+                and self._marker_refiner
+            ):
+                marker_dets = self._marker_refiner.refine(image, marker_dets)
+                marker_source = "yolo+blue"
+        elif self._marker_refiner:
+            marker_dets = self._marker_refiner.detect(image)
+            marker_source = "opencv"
+
+        # 发布投放区标识检测
+        if self._marker_refiner:
             marker_array = CylinderArray()
             marker_array.header.stamp = self.get_clock().now().to_msg()
             marker_array.header.frame_id = "world"
-            n_refined = 0
             for i, md in enumerate(marker_dets):
-                # --- OpenCV 精修: 蓝色 HSV 分割 → 轮廓矩质心 (替代 YOLO bbox 中心) ---
-                refined_cx, refined_cy, refined_ok = self._refine_marker_center(
-                    image, md.bbox, md.cx, md.cy,
-                )
-                if refined_ok:
-                    n_refined += 1
-                use_cx = refined_cx if refined_ok else md.cx
-                use_cy = refined_cy if refined_ok else md.cy
-
                 det = CylinderDetection()
                 det.id = i
                 det.confidence = float(md.confidence)
-                det.center_u = float(use_cx)
-                det.center_v = float(use_cy)
+                det.center_u = float(md.cx)
+                det.center_v = float(md.cy)
                 det.radius = 0.5  # 蓝色标识固定 1m 直径, 半径 0.5m
                 det.bbox_x1 = int(md.bbox[0])
                 det.bbox_y1 = int(md.bbox[1])
@@ -495,13 +538,13 @@ class VisionPipelineNode(Node):
                 cy = self.get_parameter("cy").value
                 alt = max(self._current_altitude, 0.5)
                 selected_xy = CoordinateTransformer.pixel_to_world_simple(
-                    use_cx, use_cy, alt, fx, fy, cx, cy,
+                    md.cx, md.cy, alt, fx, fy, cx, cy,
                     drone_world_x=self._drone_pose[0],
                     drone_world_y=self._drone_pose[1],
                 )
                 if self._coord_xform:
                     world_xy = self._coord_xform.pixel_to_world(
-                        use_cx, use_cy,
+                        md.cx, md.cy,
                         (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
                         (self._drone_pose[3], self._drone_pose[4],
                          self._drone_pose[5], self._drone_pose[6]),
@@ -522,7 +565,7 @@ class VisionPipelineNode(Node):
                 self.get_logger().info(
                     "DROP_MARKER: "
                     f"n={len(marker_dets)} "
-                    f"refined={n_refined}/{len(marker_dets)} "
+                    f"source={marker_source} "
                     f"conf={marker_dets[0].confidence:.2f}"
                 )
             all_dets.extend(marker_dets)
@@ -586,7 +629,14 @@ class VisionPipelineNode(Node):
             if enable_refine and self._cyl_refiner:
                 result = self._cyl_refiner.refine(image, d.bbox)
                 if result:
-                    refined.append((*result, bbox_px))
+                    refined_cx, refined_cy, radius_px, _ = result
+                    refined.append((
+                        refined_cx,
+                        refined_cy,
+                        radius_px,
+                        d.confidence,
+                        bbox_px,
+                    ))
                 elif d.confidence > 0.7:
                     refined.append((d.cx, d.cy,
                                     min(d.bbox[2] - d.bbox[0], d.bbox[3] - d.bbox[1]) / 4,
@@ -859,113 +909,12 @@ class VisionPipelineNode(Node):
         self._cov_pub.publish(msg)
 
     # ================================================================
-    # 投放区蓝色标识 OpenCV 精修
-    # ================================================================
-
-    @staticmethod
-    def _refine_marker_center(image: np.ndarray, bbox, yolo_cx, yolo_cy):
-        """
-        OpenCV HSV 分割 → 轮廓矩质心, 替代 YOLO bbox 中心.
-
-        蓝色标识是地面上的蓝色圆形, HSV 分割后取最大蓝色轮廓的矩质心,
-        精度远高于 YOLO bbox 中心 (后者每帧可跳动 50-100px)。
-
-        Returns (cx, cy, ok). 调用方负责在 ok=False 时回退到 YOLO 中心.
-        """
-        x1, y1, x2, y2 = [int(v) for v in bbox]
-        margin = 3
-        x1c = max(0, x1 - margin)
-        y1c = max(0, y1 - margin)
-        x2c = min(image.shape[1], x2 + margin)
-        y2c = min(image.shape[0], y2 + margin)
-
-        roi = image[y1c:y2c, x1c:x2c]
-        if roi.size == 0:
-            return yolo_cx, yolo_cy, False
-
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        # 蓝色: H ∈ [95, 135], S > 60, V > 60
-        lower_blue = np.array([95, 60, 60])
-        upper_blue = np.array([135, 255, 255])
-        mask = cv2.inRange(hsv, lower_blue, upper_blue)
-
-        # 形态学清理: 开运算去噪 → 闭运算填孔
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return yolo_cx, yolo_cy, False
-
-        best = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(best)
-        if area < 80:
-            return yolo_cx, yolo_cy, False
-
-        M = cv2.moments(best)
-        if M["m00"] <= 0:
-            return yolo_cx, yolo_cy, False
-
-        return (M["m10"] / M["m00"] + x1c,
-                M["m01"] / M["m00"] + y1c,
-                True)
-
-    # ================================================================
     # OpenCV 回退 (无 YOLO 模型时的全图搜索)
     # ================================================================
 
     def _fallback_all(self, image: np.ndarray) -> List[Detection]:
         """纯 OpenCV 全图搜索, 返回简单 Detection 列表."""
-        detections = []
-
-        # 圆筒: HoughCircles
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
-        circles = cv2.HoughCircles(
-            blurred, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30,
-            param1=100, param2=30, minRadius=10, maxRadius=100,
-        )
-        if circles is not None:
-            for c in circles[0]:
-                cx, cy, r = c
-                bbox = (
-                    max(0, int(cx - r * 1.3)), max(0, int(cy - r * 1.3)),
-                    min(image.shape[1], int(cx + r * 1.3)), min(image.shape[0], int(cy + r * 1.3)),
-                )
-                detections.append(Detection(
-                    class_id=0, class_name="cylinder", confidence=0.5,
-                    bbox=bbox, cx=float(cx), cy=float(cy),
-                ))
-
-        # 危险品: 颜色分割 (简化)
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        color_configs = [
-            (1, [np.array([5, 80, 80]), np.array([25, 255, 255])]),
-            (2, [np.array([100, 80, 80]), np.array([130, 255, 255])]),
-            (3, [np.array([0, 80, 80]), np.array([10, 255, 255])]),
-            (3, [np.array([160, 80, 80]), np.array([180, 255, 255])]),
-        ]
-        class_names = {1: "flammable", 2: "health_hazard", 3: "danger"}
-        for cls_id, (lower, upper) in color_configs:
-            mask = cv2.inRange(hsv, lower, upper)
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if area < 100:
-                    continue
-                x, y, w, h_box = cv2.boundingRect(cnt)
-                detections.append(Detection(
-                    class_id=cls_id,
-                    class_name=class_names.get(cls_id, "unknown"),
-                    confidence=min(area / 500.0, 0.8),
-                    bbox=(x, y, x + w, y + h_box),
-                    cx=float(x + w / 2), cy=float(y + h_box / 2),
-                ))
-
-        return detections
+        return detect_white_cylinders(image)
 
     # ================================================================
     # 外部接口
@@ -980,6 +929,10 @@ class VisionPipelineNode(Node):
         if self._coverage:
             self._coverage.update(world_x, world_y, world_z)
 
+    def destroy_node(self):
+        self._infer_pool.shutdown(wait=True, cancel_futures=True)
+        super().destroy_node()
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -990,7 +943,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

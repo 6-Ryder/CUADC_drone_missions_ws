@@ -14,6 +14,7 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from drone_interfaces.msg import HazardDetection, HazardArray
 from cv_bridge import CvBridge
@@ -128,7 +129,8 @@ class HazardClassifierNode(Node):
 
         # 订阅
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb, 10,
+            Image, "/drone/camera/image_raw", self._image_cb,
+            qos_profile_sensor_data,
         )
 
         # 发布

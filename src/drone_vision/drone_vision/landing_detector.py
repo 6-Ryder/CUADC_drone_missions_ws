@@ -15,6 +15,7 @@ H 降落标识检测节点 — YOLO 粗定位 + OpenCV 精确圆心拟合.
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from drone_interfaces.msg import LandingTarget
 from cv_bridge import CvBridge
@@ -166,7 +167,8 @@ class LandingDetectorNode(Node):
         self._current_altitude = 5.0
 
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb, 10,
+            Image, "/drone/camera/image_raw", self._image_cb,
+            qos_profile_sensor_data,
         )
 
         self._landing_pub = self.create_publisher(

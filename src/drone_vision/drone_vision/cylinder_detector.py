@@ -15,6 +15,12 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import Image, CameraInfo
 from drone_interfaces.msg import CylinderDetection, CylinderArray
 from cv_bridge import CvBridge
@@ -22,6 +28,15 @@ import numpy as np
 import cv2
 from typing import List, Optional, Tuple
 import time
+
+from drone_vision.models.yolo_engine import Detection
+
+
+CAMERA_INFO_QOS = QoSProfile(
+    depth=1,
+    reliability=QoSReliabilityPolicy.RELIABLE,
+    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+)
 
 
 # ============================================================
@@ -92,6 +107,8 @@ class CylinderRefiner:
 
         bbox_w = x2 - x1
         bbox_h = y2 - y1
+        if bbox_w <= 0 or bbox_h <= 0:
+            return None
         half_min = min(bbox_w, bbox_h) * self.min_radius_ratio / 2
         half_max = max(bbox_w, bbox_h) * self.max_radius_ratio / 2
 
@@ -103,6 +120,12 @@ class CylinderRefiner:
                 continue
             ellipse = cv2.fitEllipse(cnt)
             (ecx, ecy), (ea, eb), angle = ellipse
+            if not np.isfinite((ecx, ecy, ea, eb, angle)).all():
+                continue
+            if ea <= 0 or eb <= 0:
+                continue
+            if not (0 <= ecx < roi.shape[1] and 0 <= ecy < roi.shape[0]):
+                continue
             avg_r = (ea + eb) / 4  # 直径→半径 (/2), 椭圆平均 (/2)
             r_min, r_max = min(ea, eb) / 2, max(ea, eb) / 2
 
@@ -250,6 +273,66 @@ class CylinderTracker:
                 if t["age"] == 0 and t.get("hits", 0) < self.min_hits]
 
 
+def detect_white_cylinders(image: np.ndarray) -> List[Detection]:
+    """Detect circular white cylinder openings when no YOLO model is loaded."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+    max_radius = max(20, int(min(image.shape[:2]) * 0.25))
+    circles = cv2.HoughCircles(
+        blurred,
+        cv2.HOUGH_GRADIENT,
+        dp=1.0,
+        minDist=30,
+        param1=100,
+        param2=30,
+        minRadius=10,
+        maxRadius=max_radius,
+    )
+    if circles is None:
+        return []
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    candidates = []
+    yy, xx = np.ogrid[:image.shape[0], :image.shape[1]]
+    for cx, cy, radius in circles[0]:
+        inner = (xx - cx) ** 2 + (yy - cy) ** 2 <= (radius * 0.85) ** 2
+        white = (hsv[:, :, 1] < 100) & (hsv[:, :, 2] > 100) & inner
+        white_ratio = float(np.count_nonzero(white) / max(1, inner.sum()))
+        if white_ratio < 0.25:
+            continue
+        confidence = min(0.9, 0.45 + white_ratio * 0.5)
+        candidates.append((confidence, float(cx), float(cy), float(radius)))
+
+    selected = []
+    for candidate in sorted(candidates, reverse=True):
+        _, cx, cy, radius = candidate
+        duplicate = any(
+            np.hypot(cx - kept[1], cy - kept[2])
+            < max(radius, kept[3]) * 0.8
+            for kept in selected
+        )
+        if not duplicate:
+            selected.append(candidate)
+
+    detections = []
+    height, width = image.shape[:2]
+    for confidence, cx, cy, radius in selected:
+        detections.append(Detection(
+            class_id=0,
+            class_name="cylinder",
+            confidence=confidence,
+            bbox=(
+                max(0, int(round(cx - radius * 1.15))),
+                max(0, int(round(cy - radius * 1.15))),
+                min(width, int(round(cx + radius * 1.15))),
+                min(height, int(round(cy + radius * 1.15))),
+            ),
+            cx=cx,
+            cy=cy,
+        ))
+    return detections
+
+
 # ============================================================
 # ROS2 节点
 # ============================================================
@@ -274,10 +357,12 @@ class CylinderDetectorNode(Node):
 
         # 订阅
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb, 10,
+            Image, "/drone/camera/image_raw", self._image_cb,
+            qos_profile_sensor_data,
         )
         self._caminfo_sub = self.create_subscription(
-            CameraInfo, "/drone/camera/camera_info", self._caminfo_cb, 10,
+            CameraInfo, "/drone/camera/camera_info", self._caminfo_cb,
+            CAMERA_INFO_QOS,
         )
 
         # 发布
@@ -422,7 +507,14 @@ class CylinderDetectorNode(Node):
             if enable_refine and self._refiner:
                 result = self._refiner.refine(image, det.bbox)
                 if result:
-                    refined.append((*result, bbox_px))
+                    refined_cx, refined_cy, radius_px, _ = result
+                    refined.append((
+                        refined_cx,
+                        refined_cy,
+                        radius_px,
+                        det.confidence,
+                        bbox_px,
+                    ))
                 elif det.confidence > 0.7:
                     refined.append((det.cx, det.cy, min(
                         det.bbox[2] - det.bbox[0],
@@ -496,40 +588,7 @@ class CylinderDetectorNode(Node):
 
         返回格式与 YOLO 检测一致的简单对象列表.
         """
-        from drone_vision.models.yolo_engine import Detection
-
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
-
-        circles = cv2.HoughCircles(
-            blurred, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30,
-            param1=100, param2=30, minRadius=10, maxRadius=100,
-        )
-        if circles is None:
-            return []
-
-        detections = []
-        for c in circles[0]:
-            cx, cy, r = c
-            # 白色验证
-            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-            mask_inner = np.zeros_like(gray)
-            cv2.circle(mask_inner, (int(cx), int(cy)), int(r * 0.6), 255, -1)
-            v_mean = cv2.mean(hsv[:, :, 2], mask=mask_inner)[0]
-            if v_mean < 120:
-                continue
-
-            bbox = (
-                max(0, int(cx - r * 1.3)),
-                max(0, int(cy - r * 1.3)),
-                min(image.shape[1], int(cx + r * 1.3)),
-                min(image.shape[0], int(cy + r * 1.3)),
-            )
-            detections.append(Detection(
-                class_id=0, class_name="cylinder", confidence=0.5,
-                bbox=bbox, cx=float(cx), cy=float(cy),
-            ))
-        return detections
+        return detect_white_cylinders(image)
 
     def update_altitude(self, altitude_m: float):
         """由外部调用: 更新当前无人机高度."""

@@ -32,6 +32,10 @@
     drop_marker_class_names:
       - "drop_zone_marker"                 # 0: 蓝色投放区标识
     drop_marker_refine_enable: true        # YOLO bbox 内 HSV 蓝色分割 → 轮廓矩质心
+    drop_marker_min_blue_ratio: 0.4        # YOLO 框内至少 40% 属于同一蓝色连通域
+    drop_marker_min_area: 80               # 蓝色连通域最小像素面积
+    drop_marker_min_aspect_ratio: 0.4       # 过滤过度狭长的蓝色杂物
+    drop_marker_min_circularity: 0.35       # 允许透视椭圆, 拒绝线缆/长条
 
     # ============================================================
     # 圆筒检测精确后处理 (OpenCV)

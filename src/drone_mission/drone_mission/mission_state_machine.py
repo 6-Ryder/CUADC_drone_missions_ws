@@ -942,7 +942,7 @@ class MissionFSM(Node):
             self._drop_pending_cylinder_id = cylinder_id
             self._drop_result_consumed = False
 
-            if not self._drop_client.wait_for_service(timeout_sec=2.0):
+            if not self._drop_client.wait_for_service(timeout_sec=0.1):
                 self.get_logger().warn("舵机服务不可用, 模拟投放")
                 self._drop_future = None
                 return
