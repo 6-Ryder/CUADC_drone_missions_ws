@@ -1,11 +1,16 @@
-# 舵机投放参数
+# 舵机多位置步进投放参数 — drone_servo (Python, 参考)
+#
+# 投放序列:
+#   初始:  1150μs — 闭合 (挂载两枚载荷)
+#   投放1: 1700μs — 释放第一枚
+#   投放2: 2150μs — 释放第二枚
+#
+# 与 C++ drone_servo2 参数完全一致, 仅语法差异 (YAML list).
 /servo_controller:
   ros__parameters:
     platform: "sitl"              # sitl | jetson
-    pwm_pin: 33                   # 舵机PWM引脚号 (Jetson GPIO)
-    pwm_frequency: 50             # PWM 频率 (Hz, 舵机标准 50Hz)
-    open_pulse_us: 1500           # 打开位PWM脉宽 (μs)
-    close_pulse_us: 500           # 关闭位PWM脉宽 (μs)
-    drop_delay_ms: 1000           # 开→关延时 (ms, 机械动作完成时间)
+    pwm_positions: [1150.0, 1700.0, 2150.0]  # 投放位置序列 (μs)
+    actuator_index: 0             # Actuator Set 内的控制索引
+    actuator_set: 1               # PX4 Actuator Set
+    drop_delay_ms: 1000.0         # 投放保持延时 (ms)
     drop_timeout_s: 3.0           # 投放超时 (s)
-    max_drops: 2                  # 最大投放次数

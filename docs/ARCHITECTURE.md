@@ -20,22 +20,22 @@
 │                                                      │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
 │  │ Mission   │  │ Vision   │  │ Servo            │   │
-│  │ Controller│  │ Pipeline │  │ Controller       │   │
-│  │ (Python)  │  │ (C++/Py) │  │ (GPIO/PWM)       │   │
+│  │ Controller│  │ Pipeline │  │ Controller (C++) │   │
+│  │ (Python)  │  │ (C++/Py) │  │ dr-ne_servo2     │   │
 │  └─────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
 │        │              │                │              │
 │        └──────────────┼────────────────┘              │
-│                       │ DDS/RTPS                      │
-│                       │ (micro-XRCE-DDS)               │
-│                       │ via Serial/UART               │
+│                       │ VehicleCommand (DDS/RTPS)     │
+│                       │ via UART → PX4                │
 └───────────────────────┼──────────────────────────────┘
                         │
 ┌───────────────────────┼──────────────────────────────┐
-│                PX4 Flight Controller                  │
-│  uxrce_dds_client ←→ uORB ←→ EKF2/Commander/Control  │
+│                CUAV 7-Nano (PX4)                      │
+│  VehicleCommand → Control Allocation → MAIN5 PWM     │
 │   ⇅                                                  │
-│  IMU / GPS / Baro / Mag (sensors)                     │
-│  Motor PWM outputs                                    │
+│  IMU / GPS / Baro / Mag                              │
+│  Motor: MAIN1-4 (PWM)                                │
+│  Servo: MAIN5 (PWM 50Hz, 1150-2150μs)                │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -52,13 +52,13 @@
 ├─────────────────────────────────────────────────────────┤
 │  Layer 3: Skill Modules                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │ Vision       │  │ Servo        │  │ Path Planner  │  │
-│  │ (drone_vision)│  │ (drone_servo)│  │ (内嵌)        │  │
+│  │ Vision       │  │ Servo (C++)  │  │ Path Planner  │  │
+│  │ (drone_vision)│  │(drone_servo2)│  │ (内嵌)        │  │
 │  │              │  │              │  │              │  │
-│  │ - YOLO检测   │  │ - PWM控制    │  │ - 覆盖路径   │  │
-│  │ - 椭圆精修   │  │ - 投放逻辑   │  │ - 过渡路径   │  │
+│  │ - YOLO检测   │  │ - 多位置步进 │  │ - 覆盖路径   │  │
+│  │ - 椭圆精修   │  │ - VehCmd中继 │  │ - 过渡路径   │  │
 │  │ - 覆盖监控   │  │ - SITL Mock  │  │ - 对心降落   │  │
-│  │ - 姿态补偿   │  │              │  │              │  │
+│  │ - 姿态补偿   │  │ - PWM归一化  │  │              │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
 ├─────────┼─────────────────┼─────────────────┼───────────┤
 │  Layer 2: Flight Control Abstraction (px4_control)      │
@@ -134,12 +134,26 @@ drone_tasks_ws/src/
 │   │   └── vision_params.yaml       # YOLO参数 + OpenCV后处理 + 伺服PID
 │   └── package.xml
 │
-├── drone_servo/                     # 舵机投放控制
+├── drone_servo2/                    # 舵机投放控制 (C++, 主力)
+│   ├── include/drone_servo2/
+│   │   ├── servo_interface.hpp      # IServo 抽象接口: set_pwm()
+│   │   └── drop_manager.hpp         # 多位置步进投放状态机
+│   ├── src/
+│   │   └── servo_controller.cpp     # ServoMock + PX4CommandServo + 节点 (400行)
+│   ├── config/
+│   │   └── servo_params.yaml        # positions=[1150,1700,2150]
+│   ├── scripts/
+│   │   ├── check_servo.sh
+│   │   ├── test_servo_full.sh
+│   │   └── demo.sh
+│   └── CMakeLists.txt
+│
+├── drone_servo/                     # 舵机投放控制 (Python, 参考实现)
 │   ├── drone_servo/
 │   │   ├── __init__.py
-│   │   ├── servo_controller.py      # 舵机控制 (285行, SITL Mock / Jetson GPIO 双模式)
-│   │   ├── drop_manager.py          # 投放逻辑管理 (195行, TriggerDrop 服务)
-│   │   └── servo_mock.py            # SITL 模拟舵机 (95行)
+│   │   ├── servo_controller.py      # 多位置步进 (SITL Mock / PX4 VehicleCommand)
+│   │   ├── drop_manager.py          # 投放管理器 (multi-position)
+│   │   └── servo_mock.py            # SITL 模拟舵机
 │   ├── config/
 │   │   └── servo_params.yaml
 │   └── package.xml
@@ -534,29 +548,59 @@ state = approach.update(cylinder_u, cylinder_v, img_cx, img_cy, altitude, fx, fy
 
 回退模式延迟 ~30ms，精度比 YOLO 低但保证系统可运行。
 
-### 6.3 drone_servo: 舵机控制
+### 6.3 drone_servo2: 舵机多位置步进投放 (C++)
 
-```python
-class ServoController:
-    """舵机投放控制器"""
-    def __init__(self, pwm_pin: int, platform: str = 'jetson'):
-        # Jetson: 使用 Jetson.GPIO 或 PCA9685 PWM驱动板
-        # SITL: 使用 ServoMock (仅记录日志)
-        ...
+舵机物理连接在飞控 CUAV 7-Nano 的 MAIN5 输出口 (PWM 50Hz, 范围 1150-2150μs).
+Jetson 通过 VehicleCommand DO_SET_ACTUATOR 命令控制舵机, 而非直接 GPIO/I2C.
 
-    def configure(self, open_pulse_us: int, close_pulse_us: int): ...
-    def open(self) -> bool: ...       # 打开投放机构
-    def close(self) -> bool: ...      # 关闭投放机构
-    def drop(self) -> bool: ...       # 一次完整投放动作 (open → 延时 → close)
-    def is_ready(self) -> bool: ...   # 检查伺服状态
+```
+Jetson (drone_servo2) → VehicleCommand(187) → /drone/cmd/vehicle_command_relay
+  → px4_bridge 转发 → /fmu/in/vehicle_command (DDS)
+    → PX4 → MAIN5 PWM → 舵机
 ```
 
-**SITL Mock**: 在SITL模式下，`ServoMock` 将所有操作记录到日志，并通过ROS2话题发布投放事件。
+#### 投放序列
 
-**投放确认策略**:
-- 发送投放指令后，等待 1s (机械动作完成)
-- 可选: 通过视觉确认 (投放前后图像对比, 判断圆筒内是否有变化)
-- 投放成功/失败通过 `TriggerDrop.srv` 的服务响应返回
+```
+positions = [1150, 1700, 2150] μs
+  初始:  舵机 = 1150μs → 闭合 (挂载两枚载荷)
+  投放1: 舵机 → 1700μs → 释放第一枚
+  投放2: 舵机 → 2150μs → 释放第二枚
+```
+
+舵机只进不退, 每次投放 step 到下一个 PWM 位置, 保持 1s 后确认完成.
+
+#### 接口
+
+```cpp
+class IServo {
+    virtual bool set_pwm(double pwm_us) = 0;  // 设置 PWM 输出
+    virtual bool is_ready() const = 0;
+    virtual void reset() = 0;                  // 回到初始位置
+};
+
+class DropManager {
+    DropManager(IServo*, std::vector<double> positions, double delay_ms, double timeout_s);
+    bool execute_drop(int cylinder_id);  // 前进到下一个位置
+    bool can_drop() const;               // 是否还有剩余投放
+};
+```
+
+#### 硬件适配
+
+| 模式 | 类 | 行为 |
+|---|---|---|
+| SITL | ServoMock | 记录日志, 模拟位置 |
+| Jetson | PX4CommandServo | 发布 VehicleCommand(DO_SET_ACTUATOR=187) |
+
+#### PWM 归一化
+
+`normalized = (pwm_us - 1650) / 500` — 线性映射 1150→-1.0, 1700→+0.1, 2150→+1.0.
+归一化值通过 DO_SET_ACTUATOR 的 param1 发送, PX4 控制分配系统映射回实际 PWM 输出.
+
+#### Python 参考实现
+
+`drone_servo` (Python) 保持同步逻辑, 作为参考实现保留. 实际部署使用 `drone_servo2` (C++).
 
 ### 6.4 drone_mission: 任务编排
 
@@ -701,7 +745,7 @@ class MissionStateMachine:
 | `/drone/vision/landing_target` | LandingTarget | Vision→Mission | 20Hz | 降落目标定位 |
 | `/drone/vision/coverage` | CoverageStatus | Vision→Mission | 2Hz | 侦察区覆盖进度 |
 | `/drone/servo/velocity_cmd` | TwistStamped | Vision→Ctrl | 20Hz | 视觉伺服速度指令 |
-| `/drone/servo/status` | ServoStatus | Servo→Mission | 1Hz | 舵机状态 |
+| `/drone/cmd/vehicle_command_relay` | VehicleCommand | Servo→PX4 | Event | 舵机 DO_SET_ACTUATOR 指令中继 |
 
 ### 7.2 ROS2 服务
 
@@ -1029,8 +1073,8 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 | `drone_vision/training/export.py` | ✅ 已实现 | ~50 | ONNX/TensorRT 导出 |
 | `drone_vision/scripts/vision_viewer.py` | ✅ 已实现 | ~200 | 实时画面查看器 |
 | `scripts/debug_vision.sh` | ✅ 已实现 | ~65 | 一键视觉调试 (双模型 + 摄像头 + viewer) |
-| `drone_servo/servo_controller.py` | ✅ 已实现 | ~285 | 舵机控制 (SITL Mock / Jetson PCA9685 双模式) |
-| `drone_servo/servo_mock.py` | ✅ 已实现 | ~95 | SITL 模拟投放 |
+| `drone_servo2/servo_controller.cpp` | ✅ 已实现 | ~400 | 舵机多位置步进投放 (SITL Mock / PX4 VehicleCommand) |
+| `drone_servo/servo_controller.py` | ✅ 参考 | ~220 | Python 参考实现, 逻辑同 C++ 版 |
 | `drone_servo/drop_manager.py` | ✅ 已实现 | ~195 | 投放管理 (TriggerDrop 服务) |
 | `drone_mission/mission_state_machine.py` | ✅ 已实现 | ~1381 | FSM核心 + StandaloneBridgeFacade + StandaloneFlightFacade |
 | `drone_mission/states/*.py` | ✅ 已实现 | ~1734 | 11 个状态处理器 (含已废弃的 recon_inspect) |

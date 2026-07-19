@@ -32,7 +32,7 @@ def generate_launch_description():
     # ---- 包路径 ----
     pkg_control = get_package_share_directory("px4_control")
     pkg_vision = get_package_share_directory("drone_vision")
-    pkg_servo = get_package_share_directory("drone_servo")
+    pkg_servo = get_package_share_directory("drone_servo2")
     pkg_mission = get_package_share_directory("drone_mission")
 
     # ---- 参数文件路径 ----
@@ -69,14 +69,18 @@ def generate_launch_description():
         ],
     )
 
-    # 3. 舵机投放控制器 (SITL Mock)
+    # 3. 舵机投放控制器 (SITL Mock — 多位置步进投放)
     servo_node = Node(
-        package="drone_servo",
+        package="drone_servo2",
         executable="servo_controller",
         name="servo_controller",
         output="screen",
         parameters=[servo_param_file],
-        arguments=["--ros-args", "--log-level", "info"],
+        arguments=[
+            "--ros-args",
+            "-p", "platform:=sitl",
+            "--log-level", "info",
+        ],
     )
 
     # 4. 任务状态机 — 最后启动 (依赖以上所有, 内含低空投放视觉校准)

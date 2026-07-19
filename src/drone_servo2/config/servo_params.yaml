@@ -1,0 +1,19 @@
+# 舵机多位置步进投放参数 — drone_servo2 (C++)
+#
+# 投放序列:
+#   初始:  1150μs — 闭合 (挂载两枚载荷)
+#   投放1: 1700μs — 释放第一枚
+#   投放2: 2150μs — 释放第二枚
+#
+# 舵机只进不退, 每次投放移动到下一个 PWM 位置.
+#
+# 架构: Jetson → DO_SET_ACTUATOR → px4_bridge → PX4 → MAIN5 PWM 50Hz → 舵机
+# PX4 侧: MAIN5 = Peripheral via Actuator Set 1, PWM range 1150-2150μs
+/servo_controller:
+  ros__parameters:
+    platform: "sitl"              # sitl | jetson  (真机 launch 会覆盖为 jetson)
+    pwm_positions: [1150.0, 1700.0, 2150.0]  # 投放位置序列 (μs)
+    actuator_index: 0             # Actuator Set 内的控制索引
+    actuator_set: 1               # PX4 Actuator Set (1 = Set 1, MAIN5 所属)
+    drop_delay_ms: 1000.0         # 投放保持延时 (ms)
+    drop_timeout_s: 3.0           # 投放超时 (s)

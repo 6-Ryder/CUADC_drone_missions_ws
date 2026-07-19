@@ -54,7 +54,7 @@ waypoint_timeout: 60.0   # 原 120 → 60 s，超时更快跳过
 | `src/drone_mission/config/mission_params.yaml` | 速度、高度、区域、容差、投放策略 | **最常用** |
 | `src/px4_control/config/px4_params.yaml` | 底层控制频率、加速度 | 偶尔 |
 | `src/drone_vision/config/vision_params.yaml` | YOLO 阈值、相机内参、视觉伺服 PID | 调试视觉 |
-| `src/drone_servo/config/servo_params.yaml` | 舵机 PWM、投放延时 | 实飞前 |
+| `src/drone_servo2/config/servo_params.yaml` | 舵机 PWM 序列、投放延时 | 实飞前 |
 
 ### 参数生效机制
 
@@ -95,7 +95,7 @@ pkill -f "bin/px4"; pkill -f "MicroXRCEAgent"; pkill -f "ros_gz_image"
 ├──────────────────────────────────────────────────────┤
 │  Layer 3: Skill Modules                              │
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ │
-│  │ drone_vision │ │ drone_servo  │ │ px4_control   │ │
+│  │ drone_vision │ │drone_servo2  │ │ px4_control   │ │
 │  │ YOLO+OpenCV  │ │ PWM/投放     │ │ 飞行控制+遥测 │ │
 │  └──────────────┘ └──────────────┘ └──────────────┘ │
 ├──────────────────────────────────────────────────────┤
@@ -140,7 +140,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 | `src/drone_mission/config/mission_params.yaml` | **任务级参数**（主配置文件） |
 | `src/px4_control/config/px4_params.yaml` | 飞行控制基础参数 |
 | `src/drone_vision/config/vision_params.yaml` | 视觉检测参数 |
-| `src/drone_servo/config/servo_params.yaml` | 舵机投放参数 |
+| `src/drone_servo2/config/servo_params.yaml` | 舵机投放参数 |
 
 ---
 
@@ -322,7 +322,8 @@ drone_tasks_ws/
 │   ├── drone_vision/        # YOLO(.pt) + OpenCV 视觉管线 (982行)
 │   │   ├── drone_vision/models/  # YOLO 引擎 + 模型权重 (.pt)
 │   │   └── scripts/vision_viewer.py  # 实时标注查看器
-│   ├── drone_servo/         # 舵机投放控制 (SITL Mock + Jetson GPIO)
+│   ├── drone_servo2/        # 舵机投放控制 (C++, 多位置步进)
+│   ├── drone_servo/         # 舵机投放控制 (Python, 参考)
 │   ├── drone_interfaces/    # 自定义 ROS2 接口 (msg/srv/action)
 │   ├── drone_utils/         # 日志/看门狗/紧急处理/配置加载
 │   ├── drone_bringup/       # 启动脚本 (launch files: SITL + 实飞 + 视觉调试)
@@ -449,9 +450,9 @@ drone_tasks_ws/
 
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
-| 6.1 | `src/drone_servo/drone_servo/servo_controller.py` | ~285 | 舵机控制 (SITL Mock / Jetson GPIO PCA9685 双模式) |
-| 6.2 | `src/drone_servo/drone_servo/servo_mock.py` | ~95 | SITL 模拟投放 |
-| 6.3 | `src/drone_servo/drone_servo/drop_manager.py` | ~195 | 投放逻辑管理 (TriggerDrop 服务) |
+| 6.1 | `src/drone_servo2/src/servo_controller.cpp` | ~400 | 舵机多位置步进投放 (C++ 主力) |
+| 6.2 | `src/drone_servo2/include/drone_servo2/drop_manager.hpp` | ~104 | 投放状态机 (C++) |
+| 6.3 | `src/drone_servo/drone_servo/servo_controller.py` | ~220 | Python 参考实现 |
 | 6.4 | `src/drone_interfaces/msg/` 目录 | — | CylinderDetection、LandingTarget、CoverageStatus 消息定义 |
 | 6.5 | `src/drone_interfaces/srv/` 目录 | — | TriggerDrop 服务定义 |
 | 6.6 | `src/drone_bringup/launch/sitl.launch.py` | ~139 | 4 节点启动顺序 + 延迟 |
@@ -467,7 +468,7 @@ drone_tasks_ws/
 | 7.1 | `src/drone_mission/config/mission_params.yaml` | 速度/高度/区域/容差/投放/降落/异常 — **最常改的文件** |
 | 7.2 | `src/px4_control/config/px4_params.yaml` | 底层控制频率/加速度 |
 | 7.3 | `src/drone_vision/config/vision_params.yaml` | 相机内参、YOLO 阈值、伺服 PID |
-| 7.4 | `src/drone_servo/config/servo_params.yaml` | PWM 参数 |
+| 7.4 | `src/drone_servo2/config/servo_params.yaml` | PWM 位置序列 |
 
 ---
 

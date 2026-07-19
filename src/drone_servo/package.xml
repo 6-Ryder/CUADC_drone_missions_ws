@@ -3,13 +3,14 @@
 <package format="3">
   <name>drone_servo</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Servo multi-position drop controller (Python, reference) — mirrored from C++ drone_servo2</description>
   <maintainer email="ryder@todo.todo">ryder</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
   <depend>drone_interfaces</depend>
   <depend>drone_utils</depend>
+  <depend>px4_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

@@ -350,7 +350,7 @@ class UltralyticsYOLOEngine(YOLOEngine):
         return detections
 
 '''
-#==========TensorRT 引擎类=========================
+#======================TensorRT 引擎类=========================
 class TensorRTYOLOEngine(YOLOEngine):
     
     def _check_backend(self) -> bool:
@@ -358,16 +358,19 @@ class TensorRTYOLOEngine(YOLOEngine):
             import tensorrt
             import ultralytics
             return True
-        excpt ImportError:
+        except ImportError:
             print("[TensorRTYOLOEngine] tensorrt/ultralytics do not installed")
             return False
     
     def _do_load(self) ->None:
         from ultralytics import YOLO
         self._model = YOLO(str(self.model_path), task='detect')
+    
     def _predict_device(self) -> str:
-        return "0
+        return "0"
+    
     def _do_infer(self,image: np.ndarray) -> List[Detection]:
+        import torch
         
         results = self._model.predict(
             image,
@@ -377,6 +380,33 @@ class TensorRTYOLOEngine(YOLOEngine):
             device="0",
             verbose=False,
         )
+        detections: List[Detection] = []
+        for result in results:
+            boxes = getattr(result, "boxes", None)
+            if boxes is None:
+                continue
+            for box in boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                x1,y1,x2,y2 = box.xyxy[0].detach().cpu().numpy()
+                class_name = (
+                    self.class_names[cls_id]
+                    if cls_id < len(self.class_names)
+                    else str(getattr(result, "names", {}).get(cls_id, f"cls_{cls_id}"))
+                )
+                detections.append(Detection(
+                    class_id=cls_id,
+                    class_name=class_name,
+                    confidence=conf,
+                    bbox=(
+                        int(round(x1)),int(round(y1)),
+                        int(round(x2)),int(round(y2)),
+                    ),
+                    cx=float((x1+x2)/2),
+                    cy=float((y1+y2)/2),
+                ))
+            detections.sort(key=lambda d: d.confidence, reverse=True)
+            return detections
 
 '''
 
@@ -424,6 +454,67 @@ def create_engine(
         "无可用的 YOLO 推理后端. 请安装: pip install onnxruntime-gpu"
     )
 
+
+#==========================替换工厂函数============================
+'''
+def create_engine(
+    model_path:str,
+    conf_threshold: float=0.5,
+    nms_iou_threshold: float=0.45,
+    input_size: Tuple[int, int]=(640,640),
+    class_names: Optional[List[str]]=None,
+    device: str="cuda",
+)->YOLOEngine:
+    suffix = Path(model_path).suffix.lower()
+    if suffix == ".engine":
+        engine = TensorRTYOLOEngine(
+            model_path=model_path,
+            conf_threshold=conf_threshold,
+            nms_iou_threshold=nms_iou_threshold,
+            input_size=input_size,
+            class_names=class_names,
+            device="tensorrt",
+        )
+        if engine.is_avilable:
+            return engine
+        raise RuntimeError(
+            "no TensorRT model."
+            "1. tensorrt is already installed.(JetPack)"
+            "2. .engine file is uploaded in the current GPU"
+
+        )
+    if suffix == ".pt":
+        engine = UltralyticsYOLOEngine(
+            model_path=model_path,
+            conf_threshold=conf_threshold,
+            nms_iou_threshold=nms_iou_threshold,
+            input_size=input_size,
+            class_names=class_names,
+            device=device,
+    )
+    if engine.is_avilable:
+        return engine
+    raise RuntimeError(
+        "no available Ultralytics YOLO backend."
+    
+    )
+
+    engine = ONNXYOLOEngine(
+        model_path=model_path,
+        conf_threshold=conf_threshold,
+        nms_iou_threshold=nms_iou_threshold,
+        input_size=input_size,
+        class_names=class_names,
+        device=device,
+    
+    )
+    if engine.is_avilable:
+        return engine
+    raise RuntimeError(
+        "no available YOLO backend."
+    )
+    
+'''
 
 # ============================================================
 # 工具函数

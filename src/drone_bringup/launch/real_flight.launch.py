@@ -22,7 +22,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_control = get_package_share_directory("px4_control")
     pkg_vision = get_package_share_directory("drone_vision")
-    pkg_servo = get_package_share_directory("drone_servo")
+    pkg_servo = get_package_share_directory("drone_servo2")
     pkg_mission = get_package_share_directory("drone_mission")
 
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
@@ -55,9 +55,9 @@ def generate_launch_description():
         ],
     )
 
-    # 舵机 — 真实 GPIO
+    # 舵机 — 真实 GPIO (C++ 节点)
     servo_node = Node(
-        package="drone_servo",
+        package="drone_servo2",
         executable="servo_controller",
         name="servo_controller",
         output="screen",
