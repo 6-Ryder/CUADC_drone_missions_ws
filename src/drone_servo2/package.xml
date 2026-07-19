@@ -3,7 +3,7 @@
 <package format="3">
   <name>drone_servo2</name>
   <version>0.0.0</version>
-  <description>Servo drop controller (C++) — GPIO/PCA9685 servo control for real hardware, with SITL mock fallback</description>
+  <description>Servo multi-position drop controller (C++) — VehicleCommand DO_SET_ACTUATOR via px4_bridge to PX4 MAIN5, with SITL mock fallback</description>
   <maintainer email="ryder@todo.todo">ryder</maintainer>
   <license>Apache-2.0</license>
 

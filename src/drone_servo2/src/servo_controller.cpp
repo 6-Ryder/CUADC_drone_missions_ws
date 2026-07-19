@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <drone_interfaces/srv/trigger_drop.hpp>
 #include <px4_msgs/msg/vehicle_command.hpp>
 
@@ -75,7 +76,7 @@ private:
 };
 
 // ============================================================================
-// PX4CommandServo — 通过 DDS VehicleCommand 控制飞控 AUX/MAIN 输出
+// PX4CommandServo — 通过 DDS VehicleCommand 控制飞控 MAIN 输出
 // ============================================================================
 
 class PX4CommandServo : public IServo
@@ -325,7 +326,9 @@ public:
              TriggerDrop::Response::SharedPtr res)
       { handle_drop_request(req, res); });
 
-    // 状态定时器 1Hz
+    // 状态发布 (供 watchdog / 监控使用)
+    status_pub_ = create_publisher<std_msgs::msg::String>(
+      "/drone/servo/status", 10);
     status_timer_ = create_wall_timer(1s, [this]{ publish_status(); });
 
     // 打印投放序列
@@ -393,13 +396,22 @@ private:
     RCLCPP_DEBUG(get_logger(),
       "舵机状态: pwm=%.0fμs ready=%.0f",
       st["pwm_us"], st["ready"]);
+
+    // 发布状态话题 (供 FSM watchdog 等消费)
+    auto msg = std_msgs::msg::String();
+    msg.data = "pwm=" + std::to_string(static_cast<int>(st["pwm_us"]))
+             + " ready=" + std::to_string(static_cast<int>(st["ready"]))
+             + " drops=" + std::to_string(drop_mgr_->drop_count())
+             + "/" + std::to_string(drop_mgr_->max_drops());
+    status_pub_->publish(msg);
   }
 
   std::unique_ptr<IServo>      servo_;
   std::unique_ptr<DropManager> drop_mgr_;
 
-  rclcpp::Service<TriggerDrop>::SharedPtr  drop_srv_;
-  rclcpp::TimerBase::SharedPtr             status_timer_;
+  rclcpp::Service<TriggerDrop>::SharedPtr    drop_srv_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+  rclcpp::TimerBase::SharedPtr               status_timer_;
 };
 
 }  // namespace drone_servo2

@@ -2,7 +2,7 @@
 实飞启动 — Jetson Orin Nano 实飞部署.
 
 与 SITL 的区别:
-  - platform:=jetson (舵机用真实 GPIO)
+  - platform:=jetson (舵机通过 PX4 VehicleCommand 控制 MAIN5)
   - sim_mode:=false (相机用 GStreamer)
   - 启动独立 GStreamer 节点
 
@@ -55,7 +55,7 @@ def generate_launch_description():
         ],
     )
 
-    # 舵机 — 真实 GPIO (C++ 节点)
+    # 舵机 — PX4 VehicleCommand 控制 MAIN5 (C++ 节点)
     servo_node = Node(
         package="drone_servo2",
         executable="servo_controller",
