@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'mission_fsm = drone_mission.mission_state_machine:main',
+            'simple_mission = drone_mission.simple_mission:main',
         ],
     },
 )

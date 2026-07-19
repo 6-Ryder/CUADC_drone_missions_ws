@@ -318,6 +318,7 @@ CUADC_drone_missions_ws/
 │   │   ├── drone_mission/path_planner.py            # 弓字形路径规划
 │   │   ├── drone_mission/cylinder_selector.py       # 圆筒选择策略
 │   │   └── drone_mission/states/        # 11 个任务状态处理器
+│   │   ├── drone_mission/simple_mission.py         # 简化航点测试 (自包含, 不依赖其他模块)
 │   ├── px4_control/         # PX4 DDS 通信桥接 (657行) + 飞行控制 API (328行)
 │   ├── drone_vision/        # YOLO(.pt) + OpenCV 视觉管线 (982行)
 │   │   ├── drone_vision/models/  # YOLO 引擎 + 模型权重 (.pt)
@@ -325,13 +326,14 @@ CUADC_drone_missions_ws/
 │   ├── drone_servo/         # 舵机投放控制 (SITL Mock + Jetson GPIO)
 │   ├── drone_interfaces/    # 自定义 ROS2 接口 (msg/srv/action)
 │   ├── drone_utils/         # 日志/看门狗/紧急处理/配置加载
-│   ├── drone_bringup/       # 启动脚本 (launch files: SITL + 实飞 + 视觉调试)
+│   ├── drone_bringup/       # 启动脚本 (launch: SITL + 实飞 + 视觉调试 + 简化航点)
 │   └── px4_msgs/            # PX4 uORB → ROS2 消息定义
 ├── field/                   # Gazebo 场地描述 + 随机场地生成器
 ├── PX4-Autopilot -> /home/bridge/PX4-Autopilot
 ├── scripts/
 │   ├── start_full_simulation.sh  # 一键 SITL 启动
 │   └── debug_vision.sh           # 一键视觉调试 (摄像头 + 双YOLO模型 + viewer)
+│   │   ├── simple_mission.sh         # 一键 SITL 启动 (简化航点测试)
 ├── cv_trainer -> /home/bridge/cv_trainer  # 模型训练来源
 ├── docs/                    # 架构文档 + 工作日志
 └── log/                     # 构建/仿真/视觉截图日志
@@ -537,3 +539,115 @@ SITL 仿真已跑通。真机通过独立 launch/config 覆盖差异, 核心代�
 > 审计报告: `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`
 > 关键发现: `precision_align_drop_height_tolerance: 0.30→0.40` 修复 SITL 稳态高度偏差 (PX4 MPC_THR_HOVER 估计偏差)
 > 真机 ARM force-magic (21196) 在 SITL 侧保留, 真机侧需新建标准解锁流程
+
+---
+
+## 简化航点飞行测试 (`simple_mission`)
+
+全任务 FSM 涉及 14 个状态、视觉检测、舵机投放等模块，首次在真机上调试时变量太多。`simple_mission` 是一个**自包含的单文件简化任务节点**，只做最基础的飞行：
+
+```
+INIT → ARM → TAKEOFF → TRANSIT_TO_DROP → LOITER → RETURN → LAND → COMPLETE
+```
+
+### 编译
+
+```bash
+cd ~/CUADC_drone_missions_ws
+colcon build --symlink-install
+source install/setup.bash
+```
+
+### 启动
+
+**仿真环境**（需先启动 PX4 SITL + Gazebo + MicroXRCEAgent）：
+
+```bash
+# 使用默认参数：飞往投放区 (42.5, 4.0)，高度 5m，悬停 5s
+ros2 launch drone_bringup simple_mission.launch.py
+
+# 自定义航点和高度
+ros2 launch drone_bringup simple_mission.launch.py \
+    drop_x:=42.5 drop_y:=4.0 \
+    cruise_altitude:=5.0 \
+    loiter_time:=3.0
+```
+
+**真机环境**（仅需 MicroXRCEAgent + px4_bridge + simple_mission）：
+
+```bash
+ros2 launch drone_bringup simple_mission.launch.py \
+    home_x:=<实际起飞点X> home_y:=<实际起飞点Y> \
+    drop_x:=<目标点X> drop_y:=<目标点Y> \
+    cruise_altitude:=5.0
+```
+
+### 可配置参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `cruise_altitude` | 5.0 | 巡航飞行高度 (m) |
+| `drop_x` | 42.5 | 目标航点 World X |
+| `drop_y` | 4.0 | 目标航点 World Y |
+| `home_x` | 10.0 | 起飞点 World X |
+| `home_y` | 4.0 | 起飞点 World Y |
+| `loiter_time` | 5.0 | 目标点上空悬停时间 (s) |
+
+### 与全任务代码的对应关系
+
+`simple_mission` 没有引用项目内任何自定义模块（坐标变换和 PX4 指令都在自身内部重新实现），但通过**完全相同的话题和通信路径**控制无人机：
+
+```
+simple_mission ──→ /drone/cmd_setpoint_ned            ←── 与全任务 FSM 完全相同
+              ──→ /drone/cmd/vehicle_command_relay    ←── 与全任务 FSM 完全相同
+              ←── /fmu/out/vehicle_odometry           ←── 与全任务 FSM 完全相同
+              ←── /fmu/out/vehicle_status_v4          ←── 与全任务 FSM 完全相同
+              ←── /fmu/out/vehicle_land_detected      ←── 与全任务 FSM 完全相同
+```
+
+各阶段与全任务 FSM 的异同：
+
+| 阶段 | 与全任务对比 | 说明 |
+|------|:-----------:|------|
+| 解锁 (ARM) | **完全相同** | `VehicleCommand(400, 1.0, 21196)` → 同一 relay 话题 |
+| Offboard 切换 | **完全相同** | `VehicleCommand(176, 1.0, 6.0)` → 同一 relay 话题 |
+| 起飞 (TAKEOFF) | **完全相同** | `Point` → `/drone/cmd_setpoint_ned`，到达判定逻辑一致 |
+| 航点飞行 (TRANSIT) | **完全相同** | `world_to_ned(drop_x, drop_y, alt)` → 同一 setpoint 话题 |
+| 返航 (RETURN) | **完全相同** | `world_to_ned(home_x, home_y, alt)` → 同一 setpoint 话题 |
+| 降落 (LAND) | **策略不同** | simple 托管给 PX4 (`DO_LAND_START`)；全任务自己控制下降速率以配合视觉精准降落 |
+
+### 这个测试能验证什么
+
+**能验证（与全任务共享的底层链路）：**
+
+| 验证项 | 对应全任务代码 |
+|--------|--------------|
+| PX4 DDS ↔ ROS2 通信链路 | `px4_bridge.py` — DDS 订阅/发布 + Offboard 心跳 |
+| 解锁 → Offboard 模式切换 | `_StandaloneBridgeFacade.arm()` / `set_offboard_mode()` |
+| 位置控制指令 → 飞控执行 | `/drone/cmd_setpoint_ned` → `px4_bridge._cmd_setpoint_cb()` → PX4 |
+| 遥测采集（里程计/状态/着陆检测） | `/fmu/out/vehicle_odometry` / `vehicle_status_v4` / `vehicle_land_detected` |
+| 坐标变换 (World ↔ NED) | `telemetry.py` — `world_to_ned()` / `ned_to_world()` |
+| 起飞/航点/返航的到达判定逻辑 | `TakeoffState` / `TransitState` / `ReturnState` |
+| 真机 GPS/里程计定位精度 | 全任务所有依赖位置的状态 |
+
+**不能验证（视觉和投放模块需单独测试）：**
+
+| 模块 | 涉及文件 | 为何不覆盖 |
+|------|---------|-----------|
+| 视觉检测管线 | `vision_pipeline.py`, `cylinder_detector.py`, YOLO 模型 | simple_mission 不启动 vision 节点 |
+| 精准投放对准 | `precision_align_controller.py`, `drop_visual_aligner.py` | 需要视觉输入 |
+| 舵机投放控制 | `servo_controller.py`, `drop_manager.py` | 不启动 servo 节点 |
+| 精准视觉降落 | `state_precision_land.py`, `landing_detector.py` | 需要视觉 + H 标识检测 |
+| 侦察巡逻 | `state_recon_patrol.py`, `path_planner.py` | 不涉及 |
+
+### 建议的测试顺序
+
+```
+1. SITL 仿真跑通 simple_mission     ← 验证代码本身正确
+2. 真机跑通 simple_mission           ← 验证 PX4 通信 + 飞行控制链路
+3. 真机跑全任务（不加视觉）          ← 验证完整 FSM 编排（舵机用 mock）
+4. 真机加视觉（先调试 YOLO 模型）   ← 逐步集成感知模块
+5. 真机全任务联调                     ← 完整系统验证
+```
+
+这一步一步来，每一步出问题都能精确定位到新增的模块，而不是在 14 个状态中猜测根因。
