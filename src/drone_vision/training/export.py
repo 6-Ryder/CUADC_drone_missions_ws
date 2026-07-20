@@ -14,7 +14,6 @@ FP16 ONNX (更小更快):
 
 import argparse
 import sys
-from pathlib import Path
 
 
 def main():
@@ -54,7 +53,7 @@ def main():
     path = model.export(**export_kwargs)
 
     print(f"\n导出完成: {path}")
-    print(f"复制到 drone_vision/models/:")
+    print("复制到 drone_vision/models/:")
     print(f"  cp {path} ../../models/")
 
 

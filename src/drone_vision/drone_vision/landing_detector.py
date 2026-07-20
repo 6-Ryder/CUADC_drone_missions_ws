@@ -15,6 +15,7 @@ H 降落标识检测节点 — YOLO 粗定位 + OpenCV 精确圆心拟合.
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from drone_interfaces.msg import LandingTarget
 from cv_bridge import CvBridge
@@ -29,10 +30,65 @@ class LandingPadRefiner:
     def __init__(
         self,
         adaptive_thresh_block: int = 11,
-        circle_min_area: int = 300,
+        circle_min_area: int = 80,
     ):
         self.adaptive_thresh_block = adaptive_thresh_block | 1  # 必须为奇数
         self.circle_min_area = circle_min_area
+
+    def detect(
+        self, image: np.ndarray,
+    ) -> Optional[Tuple[float, float, float, float]]:
+        """Find a white H enclosed by the landing pad's circular white ring."""
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(
+            gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+        )
+        contours, _ = cv2.findContours(
+            binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE,
+        )
+
+        h_candidates = []
+        ring_candidates = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < self.circle_min_area:
+                continue
+            x, y, width, height = cv2.boundingRect(contour)
+            if width == 0 or height == 0:
+                continue
+            (cx, cy), radius = cv2.minEnclosingCircle(contour)
+            fill = area / float(width * height)
+            hull_area = cv2.contourArea(cv2.convexHull(contour))
+            solidity = area / max(hull_area, 1.0)
+            aspect = min(width, height) / max(width, height)
+            circularity = area / max(np.pi * radius * radius, 1.0)
+
+            if aspect > 0.75 and circularity > 0.72:
+                ring_candidates.append((cx, cy, radius, circularity))
+            elif aspect > 0.55 and 0.20 < fill < 0.62 and solidity < 0.70:
+                moments = cv2.moments(contour)
+                if moments["m00"] <= 0:
+                    continue
+                h_cx = moments["m10"] / moments["m00"]
+                h_cy = moments["m01"] / moments["m00"]
+                angle = cv2.minAreaRect(contour)[2]
+                h_candidates.append((h_cx, h_cy, max(width, height), solidity, angle))
+
+        best = None
+        for h_cx, h_cy, h_size, solidity, angle in h_candidates:
+            for ring_cx, ring_cy, radius, circularity in ring_candidates:
+                center_error = np.hypot(h_cx - ring_cx, h_cy - ring_cy)
+                size_ratio = (2.0 * radius) / max(h_size, 1.0)
+                if center_error > radius * 0.25 or not 1.4 < size_ratio < 4.0:
+                    continue
+                confidence = min(
+                    0.99,
+                    0.55 + 0.25 * circularity + 0.20 * (1.0 - solidity),
+                )
+                candidate = (h_cx, h_cy, confidence, float(angle))
+                if best is None or confidence > best[2]:
+                    best = candidate
+        return best
 
     def refine(
         self, image: np.ndarray, bbox: Tuple[int, int, int, int],
@@ -43,6 +99,7 @@ class LandingPadRefiner:
         Returns
         -------
         (cx_px, cy_px, confidence, yaw_offset_deg) 或 None
+
         """
         x1, y1, x2, y2 = bbox
         margin = 10
@@ -166,7 +223,8 @@ class LandingDetectorNode(Node):
         self._current_altitude = 5.0
 
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb, 10,
+            Image, "/drone/camera/image_raw", self._image_cb,
+            qos_profile_sensor_data,
         )
 
         self._landing_pub = self.create_publisher(
@@ -192,7 +250,7 @@ class LandingDetectorNode(Node):
 
         self.declare_parameter("landing_refine_enable", True)
         self.declare_parameter("landing_adaptive_thresh_block", 11)
-        self.declare_parameter("landing_circle_min_area", 300)
+        self.declare_parameter("landing_circle_min_area", 80)
         self.declare_parameter("landing_H_orientation_enable", True)
 
         self.declare_parameter("fx", 400.0)
@@ -215,7 +273,9 @@ class LandingDetectorNode(Node):
             else:
                 self.get_logger().warn("无 YOLO 模型, 使用纯 OpenCV 回退")
                 self._refiner = LandingPadRefiner(
-                    adaptive_thresh_block=self.get_parameter("landing_adaptive_thresh_block").value,
+                    adaptive_thresh_block=self.get_parameter(
+                        "landing_adaptive_thresh_block"
+                    ).value,
                     circle_min_area=self.get_parameter("landing_circle_min_area").value,
                 )
                 self._initialized = True
@@ -225,7 +285,10 @@ class LandingDetectorNode(Node):
         try:
             from drone_vision.models.yolo_engine import create_engine
 
-            class_names = self.get_parameter("class_names").get_parameter_value().string_array_value
+            class_names = (
+                self.get_parameter("class_names")
+                .get_parameter_value().string_array_value
+            )
             self._engine = create_engine(
                 model_path=model_path,
                 conf_threshold=self.get_parameter("conf_threshold").value,
@@ -306,9 +369,7 @@ class LandingDetectorNode(Node):
         self._landing_pub.publish(target)
 
     def _fallback_detect(self, image: np.ndarray) -> LandingTarget:
-        """
-        纯 OpenCV 回退: 自适应阈值 → 圆形检测 → H 形状验证.
-        """
+        """使用 OpenCV 自适应阈值、圆形检测和 H 形状验证."""
         target = LandingTarget()
         target.confidence = 0.0
 

@@ -375,7 +375,7 @@ drone_tasks_ws/
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
 | 2.1 | `src/px4_control/px4_control/telemetry.py` | ~150 | **核心**：`Position`/`Attitude`/`Telemetry` 数据类；`world_to_ned()` 和 `ned_to_world()` 变换公式；H 点偏移常量 (10, 4, 0) |
-| 2.2 | `src/drone_vision/drone_vision/coordinate_transforms.py` | ~330 | **核心**：`CoordinateTransformer.pixel_to_world()` 6-DoF 射线求交；`pixel_to_world_simple()` 简化回退；`AltitudeAdaptiveParams` 高度自适应；`R_cam_to_body` 旋转矩阵 |
+| 2.2 | `src/drone_vision/drone_vision/coordinate_transforms.py` | ~330 | **核心**：`CoordinateTransformer.pixel_to_world()` 6-DoF 射线求交；`R_cam_to_body` 旋转矩阵；运行管线不接受简化投影替代无效姿态 |
 | 2.3 | `src/drone_utils/drone_utils/config_loader.py` | ~40 | 统一参数加载模式 |
 | 2.4 | `src/drone_utils/drone_utils/logger.py` | ~40 | TaskLogger 接口 |
 | 2.5 | `src/drone_utils/drone_utils/watchdog.py` | ~40 | Watchdog 心跳/超时机制 |
@@ -391,7 +391,7 @@ drone_tasks_ws/
 
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
-| 3.1 | `src/px4_control/px4_control/px4_bridge.py` | ~657 | **全系统最关键的单文件**。4 步注册握手；QoS 配置；`_odom_cb` 中 NED→World 变换 + `/drone/pose` 发布；`_offboard_heartbeat` 10Hz Offboard 模式声明；`_control_loop` 20Hz 斜坡平滑；位置/速度双模式切换；VehicleCommand 中继 |
+| 3.1 | `src/px4_control/px4_control/px4_bridge.py` | ~657 | **全系统最关键的单文件**。PX4 DDS QoS；里程计/状态/电池/着陆遥测；NED→World + `/drone/pose`；10Hz Offboard 心跳；20Hz 位置/速度控制；视觉速度和 VehicleCommand 中继 |
 | 3.2 | `src/px4_control/px4_control/flight_controller.py` | ~300 | `takeoff()`/`goto_ned()`/`goto_world()`/`land()`/`set_velocity_ned()` 高级 API；`reached()` 航点到达判断；超时保护 |
 | 3.3 | `src/drone_bringup/scripts/gz_camera_bridge.py` | ~100 | Gazebo 相机的实际分辨率（`gz topic --json-output`）——直接决定了 cx/cy 参数对不对 |
 
@@ -405,17 +405,17 @@ drone_tasks_ws/
 
 | 顺序 | 文件 | 行数 | 重点关注 |
 |------|------|------|---------|
-| 4.1 | `src/drone_vision/drone_vision/models/yolo_engine.py` | ~450 | YOLO ONNX/TensorRT/PyTorch 推理引擎；letterbox→推理→`_rescale_bbox()` 回原图（**关键修复点**）；`Detection` 数据类；自动按后缀选后端 |
-| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~982 | **全系统第二关键的单文件**。`_lazy_init` 加载双模型 (V2 圆筒 `.pt` + V1 投放区标识 `.pt`)；`_image_cb` 主回调（帧率自适应→双模型推理→三路后处理）；`_process_cylinders_v2` 姿态补偿坐标变换链；`_process_landing_v2` H 标识+视觉伺服；`/drone/vision/markers` 投放区标识发布（含 OpenCV HSV 精修）；`_refine_marker_center` 蓝色分割+轮廓矩质心 |
+| 4.1 | `src/drone_vision/drone_vision/models/yolo_engine.py` | ~420 | ONNX Runtime CUDA/CPU 和 PyTorch 推理；严格验证请求的 provider；letterbox→推理→bbox 回原图；显式释放模型资源 |
+| 4.2 | `src/drone_vision/drone_vision/vision_pipeline.py` | ~900 | **全系统第二关键的单文件**。强制加载圆筒与蓝色标识 ONNX 模型；20FPS 上限下串行推理；蓝色 HSV/形状/物理尺寸验证；H 几何检测和 NED 视觉伺服；进入侦察后释放两套模型 |
 | 4.3 | `src/drone_vision/drone_vision/cylinder_detector.py` | ~530 | `CylinderRefiner.refine()`: YOLO bbox→ROI→Canny→椭圆拟合→白度评分；`CylinderTracker`: IoU 多帧匹配→min_hits过滤闪烁→稳定ID (支持 bbox) |
 | 4.4 | `src/drone_vision/drone_vision/landing_detector.py` | ~250 | `LandingPadRefiner.refine()`: 自适应阈值→圆形检测→PCA 方向估计 |
 | 4.5 | `src/drone_vision/drone_vision/coverage_monitor.py` | ~180 | 网格离散化 + FOV 投影覆盖标记 + 覆盖率计算 |
 | 4.6 | `src/drone_vision/drone_vision/visual_servoing.py` | ~280 | `VisualServoController` 降落模式 PID；`CylinderApproachController` 圆筒逼近 PID |
-| 4.7 | `src/drone_vision/drone_vision/camera.py` | ~200 | SITL/GStreamer 双模式；`camera_device` 可切换；grab/retrieve 消除帧缓冲延迟 |
+| 4.7 | `src/drone_vision/drone_vision/camera.py` | ~200 | SITL/V4L2 双模式；稳定设备路径；强制校验实际协商的分辨率；每发布周期只读取一帧 |
 | 4.8 | `src/drone_vision/scripts/vision_viewer.py` | ~200 | 实时标注画面：绿色YOLO框+红点精修圆心+橙色投放区标识；按 q 退出 / s 截图 |
 | 4.9 | `scripts/debug_vision.sh` | ~70 | 一键视觉调试：摄像头 + 双模型 + 标注画面 |
 
-**读完应能回答**：一个 1280×960 图像中的圆筒经过了哪些处理才变成 `CylinderDetection(center_x, center_y, confidence)`？姿态补偿和简化投影的区别在哪里？YOLO 模型不可用时系统如何回退？
+**读完应能回答**：实飞 640×480 图像中的圆筒怎样变成 `CylinderDetection`？姿态补偿为什么是硬要求？模型或 CUDA provider 不可用时节点为什么必须启动失败？
 
 ---
 
@@ -533,9 +533,9 @@ Gazebo 相机 (分辨率取决于 PX4 模型)
 
 SITL 仿真已跑通。真机通过独立 launch/config 覆盖差异, 核心代码共用。
 
-> **最新修复 (2026-07-15)**: `setup.py` 添加 `package_data={'drone_vision': ['models/*.pt']}` + `zip_safe=False`，确保 YOLO 模型文件随 `colcon build` 安装到 `install/`，修复真机和仿真中视觉管线降级到纯 OpenCV 回退的问题。
+> **当前状态 (2026-07-20)**: ONNX 模型随包安装；视觉节点同时验证两套模型和指定执行 provider，任一失败都会终止启动，不再静默进入慢速回退模式。
 >
 > 审计报告: `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`
 > 关键发现: `precision_align_drop_height_tolerance: 0.30→0.40` 修复 SITL 稳态高度偏差 (PX4 MPC_THR_HOVER 估计偏差)
-> 真机 ARM force-magic (21196) 在 SITL 侧保留, 真机侧需新建标准解锁流程
+> 任务解锁使用标准 `param2=0`；`21196` 仅保留在显式紧急强制上锁接口，不参与正常任务流程。
 > **真机开发方案**: `docs/2026-07-17-real-hardware-workspace-plan.md` — 工作空间布局、4 阶段开发顺序、文件改动清单

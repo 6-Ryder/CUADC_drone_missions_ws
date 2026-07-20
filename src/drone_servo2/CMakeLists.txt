@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(drone_interfaces REQUIRED)
 find_package(px4_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 # ---- 舵机控制器可执行文件 ----
 add_executable(servo_controller
@@ -28,6 +29,7 @@ ament_target_dependencies(
   rclcpp
   drone_interfaces
   px4_msgs
+  std_msgs
 )
 
 # ---- 安装 ----
@@ -42,9 +44,14 @@ install(DIRECTORY config/
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+  ament_add_pytest_test(
+    servo_source_contract
+    test/test_servo_source_contract.py
+  )
 endif()
 
 ament_package()

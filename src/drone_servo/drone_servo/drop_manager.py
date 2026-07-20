@@ -35,6 +35,8 @@ class DropManager:
     def __init__(self, servo, positions: List[float],
                  delay_ms: float = 1000.0, timeout_s: float = 3.0):
         """
+        初始化多位置投放管理器.
+
         Parameters
         ----------
         servo : ServoMock or PX4CommandServo
@@ -45,6 +47,7 @@ class DropManager:
             投放后保持延时 (ms)
         timeout_s : float
             单次投放超时 (s)
+
         """
         if len(positions) < 2:
             raise ValueError("positions 至少需要 2 个值")
@@ -72,6 +75,7 @@ class DropManager:
         Returns
         -------
         bool: 投放是否成功
+
         """
         if self._drop_count >= self._max_drops:
             self._state = DropState.FAILED

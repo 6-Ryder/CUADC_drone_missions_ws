@@ -58,7 +58,11 @@ except Exception:
     VisionPipelineNode = None
 
 try:
-    from drone_vision.cylinder_detector import CylinderDetectorNode, CylinderRefiner, CylinderTracker
+    from drone_vision.cylinder_detector import (
+        CylinderDetectorNode,
+        CylinderRefiner,
+        CylinderTracker,
+    )
 except Exception:
     CylinderDetectorNode = CylinderRefiner = CylinderTracker = None
 

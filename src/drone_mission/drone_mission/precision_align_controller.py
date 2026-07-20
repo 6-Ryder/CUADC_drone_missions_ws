@@ -1,4 +1,5 @@
-"""CUADC-style low-altitude precision alignment.
+"""
+CUADC-style low-altitude precision alignment.
 
 This controller is only for the final drop alignment after world-coordinate
 coarse positioning has already brought the drone near the selected target.
@@ -38,7 +39,8 @@ class PrecisionAlignStatus:
 
 
 class PrecisionAlignController:
-    """Low-altitude visual alignment controller.
+    """
+    Low-altitude visual alignment controller.
 
     The caller provides current marker/cylinder detections each control tick.
     The controller chooses and tracks one target, computes a smoothed normalized
@@ -87,7 +89,8 @@ class PrecisionAlignController:
         self._last_status = PrecisionAlignStatus(reason="reset")
 
     def reset_confirmation(self) -> None:
-        """仅重置确认状态 (稳定计数/刹车/投放许可)。
+        """
+        仅重置确认状态 (稳定计数/刹车/投放许可).
 
         保留目标像素锁定和 EMA 平滑值, 使高度变化后无需冷启动
         重新收敛, 仅需在新高度重新确认像素居中。
@@ -135,7 +138,7 @@ class PrecisionAlignController:
         if self._active_until > 0.0:
             self._fsm.fc.stop_velocity()
             self._active_until = 0.0
-            self._hover_until = now + float(self._param("precision_align_hover_s", 0.08))
+            self._hover_until = now + float(self._param("precision_align_hover_s", 0.04))
             return PrecisionAlignResult.CONTINUE
 
         if now < self._hover_until:
@@ -183,7 +186,7 @@ class PrecisionAlignController:
         raw_dy = (v - cy) / height
         pixel_error = math.hypot(u - cx, v - cy)
 
-        alpha = max(0.01, min(float(self._param("precision_align_alpha", 0.24)), 1.0))
+        alpha = max(0.01, min(float(self._param("precision_align_alpha", 0.55)), 1.0))
         if self._smooth_dx is None or self._smooth_dy is None:
             self._smooth_dx = raw_dx
             self._smooth_dy = raw_dy
@@ -215,11 +218,11 @@ class PrecisionAlignController:
             reason=reason,
         )
 
-        stable_frames = int(self._param("precision_align_stable_frames", 4))
+        stable_frames = int(self._param("precision_align_stable_frames", 5))
         if self._stable_count >= stable_frames:
             self._fsm.fc.stop_velocity()
             if not self._release_ready and self._brake_until <= 0.0:
-                brake_s = float(self._param("precision_align_final_brake_s", 0.8))
+                brake_s = float(self._param("precision_align_final_brake_s", 0.5))
                 self._brake_until = now + max(brake_s, 0.0)
                 self._last_status.reason = "final_brake"
                 self._fsm.get_logger().info(
@@ -249,7 +252,7 @@ class PrecisionAlignController:
             self._last_status.reason = "collecting_stable_frames"
             return PrecisionAlignResult.CONTINUE
 
-        gain = float(self._param("precision_align_gain", 0.65))
+        gain = float(self._param("precision_align_gain", 1.25))
         x_to_right_sign = float(self._param("precision_align_image_x_to_right_sign", 1.0))
         y_to_forward_sign = float(self._param("precision_align_image_y_to_forward_sign", -1.0))
         forward = y_to_forward_sign * gain * float(self._smooth_dy)
@@ -262,10 +265,10 @@ class PrecisionAlignController:
         self._last_status.command_right = right
         self._maybe_log_tracking()
 
-        if pixel_error <= float(self._param("precision_align_fine_pixel_error", 80.0)):
-            step_s = float(self._param("precision_align_fine_step_s", 0.08))
+        if pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
+            step_s = float(self._param("precision_align_fine_step_s", 0.12))
         else:
-            step_s = float(self._param("precision_align_step_s", 0.12))
+            step_s = float(self._param("precision_align_step_s", 0.18))
         self._fsm.fc.set_velocity_body(forward, right, 0.0)
         self._active_until = now + step_s
         return PrecisionAlignResult.CONTINUE
@@ -277,10 +280,10 @@ class PrecisionAlignController:
         raw_dx: float,
         raw_dy: float,
     ) -> bool:
-        raw_tol = float(self._param("precision_align_raw_pixel_tolerance", 6.0))
-        smooth_tol = float(self._param("precision_align_smooth_pixel_tolerance", 5.0))
-        threshold_x = float(self._param("precision_align_threshold_norm_x", 0.006))
-        threshold_y = float(self._param("precision_align_threshold_norm_y", 0.006))
+        raw_tol = float(self._param("precision_align_raw_pixel_tolerance", 9.0))
+        smooth_tol = float(self._param("precision_align_smooth_pixel_tolerance", 7.0))
+        threshold_x = float(self._param("precision_align_threshold_norm_x", 0.008))
+        threshold_y = float(self._param("precision_align_threshold_norm_y", 0.008))
         return (
             raw_pixel_error <= raw_tol
             and smooth_pixel_error <= smooth_tol
@@ -294,23 +297,23 @@ class PrecisionAlignController:
         right: float,
         pixel_error: float,
     ) -> Tuple[float, float]:
-        if pixel_error <= float(self._param("precision_align_fine_pixel_error", 80.0)):
-            max_speed = float(self._param("precision_align_fine_max_speed", 0.022))
+        if pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
+            max_speed = float(self._param("precision_align_fine_max_speed", 0.065))
         else:
-            max_speed = float(self._param("precision_align_max_speed", 0.075))
+            max_speed = float(self._param("precision_align_max_speed", 0.25))
         norm = math.hypot(forward, right)
         if norm > max_speed > 0.0:
             scale = max_speed / norm
             return forward * scale, right * scale
-        min_speed = float(self._param("precision_align_min_correction_speed", 0.006))
-        raw_tol = float(self._param("precision_align_raw_pixel_tolerance", 6.0))
+        min_speed = float(self._param("precision_align_min_correction_speed", 0.012))
+        raw_tol = float(self._param("precision_align_raw_pixel_tolerance", 9.0))
         if 0.0 < norm < min_speed and pixel_error > raw_tol:
             scale = min_speed / norm
             return forward * scale, right * scale
         return forward, right
 
     def _horizontal_speed_ok(self) -> bool:
-        max_speed = float(self._param("precision_align_release_max_horizontal_speed", 0.02))
+        max_speed = float(self._param("precision_align_release_max_horizontal_speed", 0.04))
         bridge = getattr(self._fsm, "bridge", None)
         get_telemetry = getattr(bridge, "get_telemetry", None)
         if not callable(get_telemetry):

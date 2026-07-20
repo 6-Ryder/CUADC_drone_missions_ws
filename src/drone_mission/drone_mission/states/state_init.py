@@ -37,23 +37,16 @@ class InitState:
 
     def execute(self) -> Optional[str]:
         """返回下一状态名称, 或 None 保持当前状态."""
-
-        # 检查遥测数据是否有意义 (位置非零或时间足够)
-        telem = self._fsm.bridge.get_telemetry()
-        pos = telem.position
-
-        # PX4 可能初始发送位置 (0,0,0) - 需要确认数据在更新
-        if pos.norm_xy() > 0.01 or abs(pos.down) > 0.01:
+        # 原点是合法位置；必须以真实 /drone/pose 回调作为就绪依据。
+        if self._fsm.odom_ready:
             self._odom_ready_count += 1
         else:
-            # 初始位置可能为零, 等待即可
-            elapsed = time.time() - self._start_time
-            if elapsed > self._min_wait_time:
-                self._odom_ready_count += 1
+            self._odom_ready_count = 0
 
         # 视觉/舵机节点检查
         vision_alive = self._fsm.watchdog.is_alive("vision")
         servo_alive = self._fsm.watchdog.is_alive("servo")
+        battery_ready = self._fsm.battery_ready
 
         elapsed = time.time() - self._start_time
 
@@ -63,18 +56,25 @@ class InitState:
                 f"INIT: odom={self._odom_ready_count}, "
                 f"vision={'OK' if vision_alive else 'WAIT'}, "
                 f"servo={'OK' if servo_alive else 'WAIT'}, "
+                f"battery={'OK' if battery_ready else 'WAIT'}, "
                 f"elapsed={elapsed:.0f}s"
             )
 
         # 就绪条件
-        if self._odom_ready_count >= self._odom_stable_threshold:
+        if (
+            self._odom_ready_count >= self._odom_stable_threshold
+            and vision_alive
+            and servo_alive
+            and self._fsm.servo_ready
+            and battery_ready
+        ):
             self._fsm.get_logger().info("INIT: 系统就绪, 进入 ARM")
             return "ARM"
 
-        # 超时保护 (30s 后强制进入)
+        # 关键节点未就绪时禁止解锁飞行.
         if elapsed > 30.0:
-            self._fsm.get_logger().warn("INIT: 超时, 强制进入 ARM")
-            return "ARM"
+            self._fsm.get_logger().error("INIT: 视觉或舵机未就绪, 中止任务")
+            return "ERROR"
 
         return None
 

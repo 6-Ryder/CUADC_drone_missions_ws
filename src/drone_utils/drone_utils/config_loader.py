@@ -6,7 +6,7 @@
 """
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import yaml
 
@@ -23,6 +23,7 @@ def load_yaml_file(yaml_path: str) -> Dict[str, Any]:
     Returns
     -------
     dict: {key: value, ...}  或 {} 如果文件不存在/解析失败
+
     """
     if not yaml_path or not os.path.isfile(yaml_path):
         return {}
@@ -64,6 +65,7 @@ def load_config(node, yaml_path: str) -> Dict[str, Any]:
     Returns
     -------
     dict: 最终生效的 {key: value} 映射
+
     """
     params = load_yaml_file(yaml_path)
     result = {}

@@ -13,7 +13,5 @@
   ros__parameters:
     platform: "sitl"              # sitl | jetson  (真机 launch 会覆盖为 jetson)
     pwm_positions: [1150.0, 1700.0, 2150.0]  # 投放位置序列 (μs)
-    actuator_index: 0             # Actuator Set 内的控制索引
-    actuator_set: 1               # PX4 Actuator Set (1 = Set 1, MAIN5 所属)
     drop_delay_ms: 1000.0         # 投放保持延时 (ms)
-    drop_timeout_s: 3.0           # 投放超时 (s)
+    drop_timeout_s: 3.0           # ACK + 舵机保持的总时间预算 (s)

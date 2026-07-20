@@ -131,6 +131,7 @@ class EmergencyHandler:
         Returns
         -------
         EmergencyLevel: 当前紧急等级
+
         """
         now = time.time()
 

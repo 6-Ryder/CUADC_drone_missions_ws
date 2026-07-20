@@ -6,9 +6,8 @@ PX4 DDS 通信桥接 — PX4 ↔ ROS2 核心层.
   2. 订阅 /fmu/out/* 话题 (VehicleOdometry, VehicleStatus, VehicleAttitude, VehicleLandDetected)
   3. 发布 /fmu/in/* 话题 (OffboardControlMode, TrajectorySetpoint, VehicleCommand)
   4. 转换 NED → World 坐标, 发布 /drone/pose (供 vision_pipeline 使用)
-  5. 4 步外部组件注册握手
-  6. 10Hz Offboard 心跳 + 20Hz 控制循环
-  7. 斜坡 Setpoint 平滑 (ramped setpoint)
+  5. 10Hz Offboard 心跳 + 20Hz 控制循环
+  6. 斜坡 Setpoint 平滑 (ramped setpoint)
 
 参考: Task_flight_ws/src/px4_control_dds/px4_control_dds/mission_control_node_v2.py
 """
@@ -16,13 +15,12 @@ PX4 DDS 通信桥接 — PX4 ↔ ROS2 核心层.
 import math
 import time
 import threading
-from typing import Optional, Tuple
+from typing import Optional
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import Point, PoseStamped, TwistStamped
-from std_msgs.msg import Header
 
 from px4_msgs.msg import (
     OffboardControlMode,
@@ -32,11 +30,11 @@ from px4_msgs.msg import (
     VehicleStatus,
     VehicleAttitude,
     VehicleLandDetected,
+    BatteryStatus,
 )
 
 from px4_control.telemetry import (
-    Position, Attitude, Velocity, DroneStatus, Telemetry,
-    world_to_ned, ned_to_world_pose,
+    Position, Attitude, Velocity, Telemetry, ned_to_world_pose,
 )
 from drone_utils.logger import TaskLogger
 from drone_utils.watchdog import Watchdog
@@ -93,9 +91,8 @@ class PX4Bridge(Node):
     # VehicleCommand 常量
     VEHICLE_CMD_DO_SET_MODE = 176
     VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
-    VEHICLE_CMD_REQUEST_MESSAGE = 512
-    VEHICLE_CMD_DO_LAND_START = 189
-    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 93
+    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 20
+    VEHICLE_CMD_NAV_LAND = 21
 
     def __init__(self):
         super().__init__("px4_bridge")
@@ -119,6 +116,9 @@ class PX4Bridge(Node):
         self._land_sub = self.create_subscription(
             VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, qos,
         )
+        self._battery_sub = self.create_subscription(
+            BatteryStatus, "/fmu/out/battery_status_v1", self._battery_cb, qos,
+        )
 
         # ---- 发布 ROS2 → PX4 ----
         self._offboard_mode_pub = self.create_publisher(
@@ -133,7 +133,6 @@ class PX4Bridge(Node):
 
         # ---- 发布 PX4 → ROS2 (处理后) ----
         # 使用 VOLATILE QoS 避免 DURABILITY 不兼容
-        from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
         ros_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
@@ -180,6 +179,9 @@ class PX4Bridge(Node):
         self._cmd_vel_sub = self.create_subscription(
             Twist, "/drone/cmd_velocity_ned", self._cmd_velocity_cb, 10,
         )
+        self._vision_vel_sub = self.create_subscription(
+            TwistStamped, "/drone/vision/servo_cmd", self._vision_velocity_cb, 10,
+        )
         # 订阅 VehicleCommand 中继 — FSM 等节点通过此话题发送命令,
         # px4_bridge 转发到 /fmu/in/vehicle_command (已验证的 DDS 路径)
         self._cmd_relay_sub = self.create_subscription(
@@ -190,12 +192,6 @@ class PX4Bridge(Node):
         # ---- 定时器 ----
         self._offboard_timer = self.create_timer(0.1, self._offboard_heartbeat)   # 10Hz
         self._control_timer = self.create_timer(0.05, self._control_loop)         # 20Hz
-        self._registration_timer = self.create_timer(1.0, self._registration_step) # 1Hz 注册
-
-        # ---- 注册状态机 ----
-        self._reg_step = 0
-        self._reg_done = False
-
         # ---- 工具 ----
         self._task_logger = TaskLogger(node_name="px4_bridge")
         self._watchdog = Watchdog()
@@ -249,7 +245,6 @@ class PX4Bridge(Node):
         self._current_telemetry.status.offboard_mode = (msg.nav_state == self.NAV_STATE_OFFBOARD)
         self._current_telemetry.status.navigation_state = msg.nav_state
         # battery_remaining/gps no longer in VehicleStatus (use dedicated topics)
-        self._current_telemetry.status.battery_remaining = 1.0
         self._current_telemetry.status.gps_fix_type = 0
         self._current_telemetry.status.gps_satellites = 0
 
@@ -275,6 +270,11 @@ class PX4Bridge(Node):
         self._land_detected = msg
         self._current_telemetry.status.landed = msg.landed
 
+    def _battery_cb(self, msg: BatteryStatus):
+        """Update telemetry from a connected battery with a valid state of charge."""
+        if msg.connected and 0.0 <= msg.remaining <= 1.0:
+            self._current_telemetry.status.battery_remaining = float(msg.remaining)
+
     def _cmd_relay_cb(self, msg: VehicleCommand):
         """中继 VehicleCommand — 从 /drone/cmd/vehicle_command_relay 转发到 PX4."""
         self._cmd_pub.publish(msg)
@@ -296,7 +296,6 @@ class PX4Bridge(Node):
 
     def _cmd_velocity_cb(self, msg):
         """接收 Mission FSM 的速度指令 (NED velocity)."""
-        from geometry_msgs.msg import Twist
         with self._setpoint_lock:
             self._velocity_mode = True
         self.publish_velocity_cmd(
@@ -304,6 +303,15 @@ class PX4Bridge(Node):
             float(msg.linear.y),   # ve
             float(msg.linear.z),   # vd
             float(msg.angular.z),  # yaw_rate
+        )
+
+    def _vision_velocity_cb(self, msg: TwistStamped):
+        """Forward visual-servo velocity, which is expressed in NED."""
+        self.publish_velocity_cmd(
+            float(msg.twist.linear.x),
+            float(msg.twist.linear.y),
+            float(msg.twist.linear.z),
+            float(msg.twist.angular.z),
         )
 
     # ================================================================
@@ -352,7 +360,7 @@ class PX4Bridge(Node):
         # 发布到 ROS2 话题 (供监控/日志)
         vel = TwistStamped()
         vel.header.stamp = self.get_clock().now().to_msg()
-        vel.header.frame_id = "base_link"
+        vel.header.frame_id = "ned"
         vel.twist.linear.x = vn
         vel.twist.linear.y = ve
         vel.twist.linear.z = vd
@@ -367,62 +375,6 @@ class PX4Bridge(Node):
         setpoint.velocity = [float(vn), float(ve), float(vd)]
         setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
         self._trajectory_pub.publish(setpoint)
-
-    # ================================================================
-    # 注册握手
-    # ================================================================
-
-    def _registration_step(self):
-        """
-        4 步外部组件注册握手.
-
-        Step 0: 请求 VehicleStatus 消息
-        Step 1: 请求 VehicleOdometry 消息
-        Step 2: 设置组件 ID
-        Step 3: 完成
-        """
-        if self._reg_done:
-            self._registration_timer.cancel()
-            return
-
-        if self._reg_step == 0:
-            self.get_logger().info("注册 Step 0: 请求 VehicleStatus...")
-            self._send_request_message(0)  # VehicleStatus
-            self._reg_step = 1
-
-        elif self._reg_step == 1:
-            self.get_logger().info("注册 Step 1: 请求 VehicleOdometry...")
-            self._send_request_message(1)  # VehicleOdometry
-            self._reg_step = 2
-
-        elif self._reg_step == 2:
-            self.get_logger().info("注册 Step 2: 设置组件 ID...")
-            self._set_component_id()
-            self._reg_step = 3
-
-        elif self._reg_step == 3:
-            self.get_logger().info("注册 Step 3: 完成!")
-            self._reg_done = True
-            self._registration_timer.cancel()
-
-    def _send_request_message(self, msg_id: int):
-        """请求 PX4 发布指定类型的 uORB 消息."""
-        cmd = VehicleCommand()
-        cmd.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        cmd.param1 = float(msg_id)
-        cmd.param2 = 50.0   # 请求频率 Hz
-        cmd.command = self.VEHICLE_CMD_REQUEST_MESSAGE
-        cmd.target_system = 1
-        cmd.target_component = 1
-        cmd.source_system = 1
-        cmd.source_component = self._component_id
-        cmd.from_external = True
-        self._cmd_pub.publish(cmd)
-
-    def _set_component_id(self):
-        """设置外部组件的 component ID."""
-        # 在某些 PX4 版本中, 通过 VehicleCommand 设置
-        pass
 
     # ================================================================
     # 心跳 + 控制循环
@@ -524,6 +476,7 @@ class PX4Bridge(Node):
             NED 位置 (m). down 为正值=下降, 负值=上升.
         yaw : float
             目标偏航角 (rad).
+
         """
         with self._setpoint_lock:
             self._velocity_mode = False
@@ -540,6 +493,7 @@ class PX4Bridge(Node):
             NED 速度 (m/s). vd 正值=下降.
         yaw_rate : float
             偏航速率 (rad/s).
+
         """
         with self._setpoint_lock:
             self._velocity_mode = True
@@ -629,7 +583,7 @@ class PX4Bridge(Node):
     def land_at_current(self):
         """原地降落."""
         self.get_logger().info("请求着陆...")
-        self.send_command(self.VEHICLE_CMD_DO_LAND_START)
+        self.send_command(self.VEHICLE_CMD_NAV_LAND)
 
     def return_to_launch(self):
         """RTL 返航."""

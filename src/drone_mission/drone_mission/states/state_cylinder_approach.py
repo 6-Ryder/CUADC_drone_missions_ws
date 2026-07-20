@@ -37,7 +37,10 @@ class CylinderApproachState:
         self._memory_arrival_count = 0
 
         # 从 SELECT_TARGET 已选中的目标获取世界坐标
-        targets = self._fsm.get_known_drop_targets() if hasattr(self._fsm, "get_known_drop_targets") else self._fsm.get_cylinders()
+        if hasattr(self._fsm, "get_known_drop_targets"):
+            targets = self._fsm.get_known_drop_targets()
+        else:
+            targets = self._fsm.get_cylinders()
         if not targets:
             self._fsm.get_logger().warn("APPROACH: 无可用目标")
             return
@@ -158,7 +161,8 @@ class CylinderApproachState:
 
     def execute(self) -> Optional[str]:
         if self._target_world_xy is None:
-            return "ASCEND"
+            self._fsm.get_logger().error("APPROACH: 没有有效投放目标")
+            return "ERROR"
 
         cylinders = self._fsm.get_cylinders()
         markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
@@ -174,10 +178,8 @@ class CylinderApproachState:
             )
             error = self._goto_target_xy(speed=speed)
         except ValueError as exc:
-            self._fsm.get_logger().error(f"APPROACH: {exc}, 放弃当前目标")
-            if hasattr(self._fsm, "release_current_drop_target"):
-                self._fsm.release_current_drop_target()
-            return "ASCEND"
+            self._fsm.get_logger().error(f"APPROACH: {exc}")
+            return "ERROR"
 
         tolerance_px = float(self._fsm.get_param("drop_align_pixel_tolerance", 35.0))
         pixel_error = float("inf")
@@ -217,10 +219,8 @@ class CylinderApproachState:
             return "DESCEND_TO_DROP"
 
         if elapsed > 30.0:
-            self._fsm.get_logger().warn("APPROACH: 逼近超时, 释放当前目标并重新搜索")
-            if hasattr(self._fsm, "release_current_drop_target"):
-                self._fsm.release_current_drop_target()
-            return "ASCEND"
+            self._fsm.get_logger().error("APPROACH: 逼近超时")
+            return "ERROR"
 
         return None
 

@@ -68,19 +68,10 @@ ros2 service call /drone/servo/trigger_drop drone_interfaces/srv/TriggerDrop "cy
 
 观察舵机是否从 1150 → 1700μs.
 
-**不动 → 调试 actuator_set:**
+**不动时检查 QGC 输出映射:**
 
-```bash
-# 杀掉 servo_controller (Ctrl+C)
-
-# 试 0:
-ros2 run drone_servo2 servo_controller --ros-args -p platform:=jetson -p actuator_set:=0
-ros2 service call /drone/servo/trigger_drop drone_interfaces/srv/TriggerDrop "cylinder_id: 1"
-
-# 试 2:
-ros2 run drone_servo2 servo_controller --ros-args -p platform:=jetson -p actuator_set:=2
-ros2 service call /drone/servo/trigger_drop drone_interfaces/srv/TriggerDrop "cylinder_id: 1"
-```
+MAIN5 必须配置为 `Peripheral via Actuator Set 1`。控制器固定发送
+`DO_SET_ACTUATOR.param1`，并将 `param7` 设为 0；不要通过尝试其他索引绕过映射错误。
 
 ---
 
@@ -114,7 +105,7 @@ ros2 service call /mavros/cmd/arming mavros_msgs/srv/CommandBool "value: true"
 
 | 现象 | 原因 | 动作 |
 |---|---|---|
-| 舵机不动, VehicleCommand 有输出 | actuator_set 不对 | 换 0/1/2 |
+| 舵机不动, VehicleCommand 有输出 | MAIN5 功能或 PWM 范围错误 | QGC 设置 MAIN5 为 Peripheral via Actuator Set 1, 范围 1150-2150μs |
 | 舵机不动, VehicleCommand 无输出 | servo_controller 没发布 | 检查节点日志 |
 | 舵机动了但角度不对 | PWM 范围不匹配 | QGC 调 PWM Min/Max |
 | 飞控不响应 VehicleCommand | 未解锁或 PX4 配置锁 | 解锁后重试 |

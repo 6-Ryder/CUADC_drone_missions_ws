@@ -48,10 +48,11 @@ class Watchdog:
             超时秒数, 超过则认为异常
         on_timeout : callable or None
             超时回调, 参数为通道名称
+
         """
         self._channels[name] = {
             "timeout": timeout,
-            "last_feed": time.time(),
+            "last_feed": None,
             "on_timeout": on_timeout,
             "alert_active": False,
         }
@@ -74,12 +75,13 @@ class Watchdog:
         Returns
         -------
         dict: {channel_name: is_alive}
+
         """
         now = time.time()
         status = {}
         for name, ch in self._channels.items():
-            elapsed = now - ch["last_feed"]
-            alive = elapsed < ch["timeout"]
+            last_feed = ch["last_feed"]
+            alive = last_feed is not None and now - last_feed < ch["timeout"]
             status[name] = alive
 
             if not alive and not ch["alert_active"]:
@@ -97,7 +99,8 @@ class Watchdog:
         ch = self._channels.get(name)
         if not ch:
             return False
-        return (time.time() - ch["last_feed"]) < ch["timeout"]
+        last_feed = ch["last_feed"]
+        return last_feed is not None and time.time() - last_feed < ch["timeout"]
 
     def all_alive(self) -> bool:
         """所有注册通道是否都存活."""

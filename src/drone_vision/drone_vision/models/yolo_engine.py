@@ -16,7 +16,6 @@ YOLO 推理引擎 — 支持 ONNX Runtime / TensorRT 后端.
 from __future__ import annotations
 
 import dataclasses
-import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -31,6 +30,7 @@ import numpy as np
 @dataclasses.dataclass
 class Detection:
     """单个检测结果."""
+
     class_id: int
     class_name: str
     confidence: float
@@ -62,6 +62,7 @@ class YOLOEngine:
         类别名称列表.
     device : str
         "cuda", "cpu", 或 "tensorrt".
+
     """
 
     def __init__(
@@ -119,12 +120,20 @@ class YOLOEngine:
 
     def infer(self, image: np.ndarray) -> List[Detection]:
         """
-        对 BGR uint8 图像 (H, W, 3) 执行推理,
-        返回 Detection 列表 (已按置信度降序排列).
+        对 BGR uint8 图像执行推理.
+
+        输入 shape 为 (H, W, 3), 返回的 Detection 列表已按置信度降序排列.
         """
         if not self._is_loaded:
             return []
         return self._do_infer(image)
+
+    def close(self) -> None:
+        """Release model and runtime resources."""
+        self._session = None
+        if hasattr(self, "_model"):
+            self._model = None
+        self._is_loaded = False
 
     # ----------------------------------------------------------
     # 子类实现
@@ -150,6 +159,7 @@ class YOLOEngine:
         返回形状 (1, 3, H, W) 的 float32 张量.
         """
         img = _letterbox_resize(image, (self.input_width, self.input_height))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255.0
         img = np.transpose(img, (2, 0, 1))  # HWC → CHW
         img = np.expand_dims(img, axis=0)    # → (1, 3, H, W)
@@ -197,14 +207,41 @@ class ONNXYOLOEngine(YOLOEngine):
     def _do_load(self) -> None:
         import onnxruntime as ort
 
-        providers = []
+        if self.device in ("cuda", "tensorrt"):
+            preload_dlls = getattr(ort, "preload_dlls", None)
+            if preload_dlls is None:
+                raise RuntimeError(
+                    "GPU inference requires onnxruntime-gpu>=1.21"
+                )
+            preload_dlls(directory="")
+
         if self.device == "cuda":
-            providers.append(("CUDAExecutionProvider", {"cudnn_conv_algo_search": "DEFAULT"}))
-        providers.append("CPUExecutionProvider")
+            expected_provider = "CUDAExecutionProvider"
+            providers = [
+                (expected_provider, {"cudnn_conv_algo_search": "HEURISTIC"}),
+                "CPUExecutionProvider",
+            ]
+        elif self.device == "tensorrt":
+            expected_provider = "TensorrtExecutionProvider"
+            providers = [expected_provider, "CUDAExecutionProvider"]
+        elif self.device == "cpu":
+            expected_provider = "CPUExecutionProvider"
+            providers = [expected_provider]
+        else:
+            raise ValueError(
+                f"Unsupported inference device: {self.device!r}; "
+                "expected cuda, tensorrt, or cpu"
+            )
 
         self._session = ort.InferenceSession(
             str(self.model_path), providers=providers,
         )
+        active_providers = self._session.get_providers()
+        if not active_providers or active_providers[0] != expected_provider:
+            raise RuntimeError(
+                f"Requested {expected_provider}, active providers: "
+                f"{active_providers}"
+            )
         self._input_name = self._session.get_inputs()[0].name
         self._input_shape = self._session.get_inputs()[0].shape
         self._output_names = [o.name for o in self._session.get_outputs()]
@@ -218,7 +255,9 @@ class ONNXYOLOEngine(YOLOEngine):
         self, raw: np.ndarray, orig_shape: Tuple[int, int],
     ) -> List[Detection]:
         """
-        解析 YOLOv8 ONNX 输出: shape (1, 84, 8400) 或 (1, 6+num_classes, N).
+        解析 YOLOv8 ONNX 输出.
+
+        shape 为 (1, 84, 8400) 或 (1, 6+num_classes, N).
         84 = 4 (bbox cxcywh) + 80 (COCO) 或 4 + num_classes.
         """
         if raw.ndim == 3:
@@ -258,7 +297,11 @@ class ONNXYOLOEngine(YOLOEngine):
             for idx in keep:
                 detections.append(Detection(
                     class_id=cls_id,
-                    class_name=self.class_names[cls_id] if cls_id < len(self.class_names) else f"cls_{cls_id}",
+                    class_name=(
+                        self.class_names[cls_id]
+                        if cls_id < len(self.class_names)
+                        else f"cls_{cls_id}"
+                    ),
                     confidence=float(cls_conf[idx]),
                     bbox=(
                         int(round(cls_boxes[idx, 0])),
@@ -349,70 +392,10 @@ class UltralyticsYOLOEngine(YOLOEngine):
         detections.sort(key=lambda d: d.confidence, reverse=True)
         return detections
 
-'''
-#======================TensorRT 引擎类=========================
-class TensorRTYOLOEngine(YOLOEngine):
-    
-    def _check_backend(self) -> bool:
-        try:
-            import tensorrt
-            import ultralytics
-            return True
-        except ImportError:
-            print("[TensorRTYOLOEngine] tensorrt/ultralytics do not installed")
-            return False
-    
-    def _do_load(self) ->None:
-        from ultralytics import YOLO
-        self._model = YOLO(str(self.model_path), task='detect')
-    
-    def _predict_device(self) -> str:
-        return "0"
-    
-    def _do_infer(self,image: np.ndarray) -> List[Detection]:
-        import torch
-        
-        results = self._model.predict(
-            image,
-            imgsz=(self.input_height, self.input_width),
-            conf=self.conf_threshold,
-            iou=self.nms_iou_threshold,
-            device="0",
-            verbose=False,
-        )
-        detections: List[Detection] = []
-        for result in results:
-            boxes = getattr(result, "boxes", None)
-            if boxes is None:
-                continue
-            for box in boxes:
-                cls_id = int(box.cls[0])
-                conf = float(box.conf[0])
-                x1,y1,x2,y2 = box.xyxy[0].detach().cpu().numpy()
-                class_name = (
-                    self.class_names[cls_id]
-                    if cls_id < len(self.class_names)
-                    else str(getattr(result, "names", {}).get(cls_id, f"cls_{cls_id}"))
-                )
-                detections.append(Detection(
-                    class_id=cls_id,
-                    class_name=class_name,
-                    confidence=conf,
-                    bbox=(
-                        int(round(x1)),int(round(y1)),
-                        int(round(x2)),int(round(y2)),
-                    ),
-                    cx=float((x1+x2)/2),
-                    cy=float((y1+y2)/2),
-                ))
-            detections.sort(key=lambda d: d.confidence, reverse=True)
-            return detections
-
-'''
-
 # ============================================================
 # 工厂函数
 # ============================================================
+
 
 def create_engine(
     model_path: str,
@@ -454,67 +437,6 @@ def create_engine(
         "无可用的 YOLO 推理后端. 请安装: pip install onnxruntime-gpu"
     )
 
-
-#==========================替换工厂函数============================
-'''
-def create_engine(
-    model_path:str,
-    conf_threshold: float=0.5,
-    nms_iou_threshold: float=0.45,
-    input_size: Tuple[int, int]=(640,640),
-    class_names: Optional[List[str]]=None,
-    device: str="cuda",
-)->YOLOEngine:
-    suffix = Path(model_path).suffix.lower()
-    if suffix == ".engine":
-        engine = TensorRTYOLOEngine(
-            model_path=model_path,
-            conf_threshold=conf_threshold,
-            nms_iou_threshold=nms_iou_threshold,
-            input_size=input_size,
-            class_names=class_names,
-            device="tensorrt",
-        )
-        if engine.is_avilable:
-            return engine
-        raise RuntimeError(
-            "no TensorRT model."
-            "1. tensorrt is already installed.(JetPack)"
-            "2. .engine file is uploaded in the current GPU"
-
-        )
-    if suffix == ".pt":
-        engine = UltralyticsYOLOEngine(
-            model_path=model_path,
-            conf_threshold=conf_threshold,
-            nms_iou_threshold=nms_iou_threshold,
-            input_size=input_size,
-            class_names=class_names,
-            device=device,
-    )
-    if engine.is_avilable:
-        return engine
-    raise RuntimeError(
-        "no available Ultralytics YOLO backend."
-    
-    )
-
-    engine = ONNXYOLOEngine(
-        model_path=model_path,
-        conf_threshold=conf_threshold,
-        nms_iou_threshold=nms_iou_threshold,
-        input_size=input_size,
-        class_names=class_names,
-        device=device,
-    
-    )
-    if engine.is_avilable:
-        return engine
-    raise RuntimeError(
-        "no available YOLO backend."
-    )
-    
-'''
 
 # ============================================================
 # 工具函数

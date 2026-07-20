@@ -71,7 +71,11 @@ class CylinderSearchState:
         else:
             known_cylinders = valid
 
-        if allow_marker_fallback and not known_cylinders and hasattr(self._fsm, "get_known_drop_targets"):
+        if (
+            allow_marker_fallback
+            and not known_cylinders
+            and hasattr(self._fsm, "get_known_drop_targets")
+        ):
             known = self._fsm.get_known_drop_targets()
         else:
             known = known_cylinders
@@ -113,12 +117,10 @@ class CylinderSearchState:
         # 超时
         timeout = self._fsm.get_param("state_max_duration", 180.0)
         if elapsed > timeout:
-            self._fsm.get_logger().warn("CYL_SEARCH: 超时, 使用当前候选或继续等待")
+            self._fsm.get_logger().error("CYL_SEARCH: 搜索超时")
             if known_count > 0 or cyl_count > 0 or (allow_marker_fallback and marker_count > 0):
                 return "SELECT_TARGET"
-            self._start_time = time.time()
-            self._scan_phase = 0
-            return None
+            return "ERROR"
 
         return None
 

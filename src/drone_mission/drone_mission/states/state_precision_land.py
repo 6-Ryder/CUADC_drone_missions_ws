@@ -4,12 +4,12 @@ PRECISION_LAND 状态 — 视觉伺服 + H 标识检测 + 对心降落.
 三阶段:
   Phase 1: 粗定位 (5m 高度, 搜索 H 标识)
   Phase 2: 视觉伺服对心下降 (5m → 0.5m)
-  Phase 3: 盲降 (< 0.5m, 视觉可能失效, 惯性下降)
+  Phase 3: 近地下降 (< 0.5m, 由 PX4 着陆检测确认)
 
 退出条件:
   - land_detected: 已着陆 → COMPLETE
-  - vision lost > 3s: 盲降模式 (保持水平, 持续下降)
-  - timeout: 强制 Land 模式
+  - vision lost > 3s: 请求 PX4 LAND 并报告任务失败
+  - timeout: 请求 PX4 LAND, 等待真实着陆反馈
 """
 
 import time
@@ -30,6 +30,7 @@ class PrecisionLandState:
         self._vision_lost_start: float = 0.0
         self._has_landing_target: bool = False
         self._landing_done: bool = False
+        self._land_command_sent: bool = False
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -39,10 +40,9 @@ class PrecisionLandState:
         self._vision_lost_start = 0.0
         self._has_landing_target = False
         self._landing_done = False
+        self._land_command_sent = False
 
-        # 激活视觉伺服: landing 模式
-        if self._fsm.vision_node:
-            self._fsm.vision_node.set_servo_mode("landing")
+        self._fsm.set_vision_mode("landing")
 
         self._fsm.get_logger().info("PRECISION_LAND: Phase 1 - 搜索 H 标识")
 
@@ -70,12 +70,14 @@ class PrecisionLandState:
                 if self._vision_lost_start == 0.0:
                     self._vision_lost_start = time.time()
 
-        # 视觉丢失超时 → 盲降
+        # 视觉丢失超时后交给 PX4 LAND，不能从高空继续无目标下降。
         vision_lost_to = self._fsm.get_param("vision_loss_timeout", 3.0)
         if self._has_landing_target and self._vision_lost_start > 0:
             lost_duration = time.time() - self._vision_lost_start
             if lost_duration > vision_lost_to:
-                self._switch_to_blind()
+                self._fsm.get_logger().error("PRECISION_LAND: H 目标持续丢失")
+                self._request_px4_land()
+                return "ERROR"
 
         # 阶段逻辑
         if self._phase == self.PHASE_SEARCH:
@@ -94,11 +96,12 @@ class PrecisionLandState:
             self._phase = self.PHASE_SERVO
             return None
 
-        # 搜索超时 → 盲降
+        # 没有 H 目标时不得从搜索高度盲降。
         elapsed = time.time() - self._start_time
         if elapsed > 15.0:
-            self._fsm.get_logger().warn("PRECISION_LAND: H 标识搜索超时, 切换到盲降")
-            self._switch_to_blind()
+            self._fsm.get_logger().error("PRECISION_LAND: H 标识搜索超时")
+            self._request_px4_land()
+            return "ERROR"
         return None
 
     def _execute_servo(self, has_target: bool) -> Optional[str]:
@@ -107,16 +110,12 @@ class PrecisionLandState:
         altitude = abs(pos.down)  # NED z 的绝对值 = 高度
 
         if not has_target:
-            # 视觉丢失, 保持水平继续下降
-            self._fsm.fc.set_velocity_ned(0.0, 0.0, 0.2)  # 缓慢下降
+            # 短时丢失先保持当前位置，禁止无目标继续下降。
+            self._fsm.fc.set_velocity_ned(0.0, 0.0, 0.0)
         else:
-            # 视觉伺服会通过 vision_pipeline 计算速度
-            # 同时飞行控制也缓慢下降
+            # vision_pipeline 发布完整 NED 水平修正和下降速度。
             target = self._fsm.get_landing_target()
             conf = target.get("confidence", 0)
-
-            landing_speed = self._fsm.get_param("landing_approach_speed", 0.5)
-            self._fsm.fc.set_velocity_ned(0.0, 0.0, landing_speed)
 
             if altitude < 2.0:
                 self._fsm.get_logger().info(
@@ -134,43 +133,27 @@ class PrecisionLandState:
         return None
 
     def _execute_blind(self) -> Optional[str]:
-        """Phase 3: 盲降."""
-        pos = self._fsm.bridge.get_current_position()
-        altitude = abs(pos.down)
-
-        # 最低下降速率
+        """Phase 3: near-ground descent while waiting for PX4 land detection."""
         self._fsm.fc.set_velocity_ned(0.0, 0.0, 0.15)
 
-        if altitude < 0.15:
-            self._fsm.get_logger().info("PRECISION_LAND: 着陆确认")
-            self._fsm.bridge.disarm()
-            self._landing_done = True
-            return "COMPLETE"
-
-        # 超时保护
         elapsed = time.time() - self._start_time
         if elapsed > 60.0:
-            self._fsm.get_logger().warn("PRECISION_LAND: 超时, 强制着陆")
-            self._fsm.bridge.force_disarm()
-            self._landing_done = True
-            return "COMPLETE"
+            self._request_px4_land()
 
         return None
+
+    def _request_px4_land(self):
+        if not self._land_command_sent:
+            self._fsm.get_logger().warn("PRECISION_LAND: 请求 PX4 自主着陆")
+            self._fsm.bridge.land_at_current()
+            self._land_command_sent = True
 
     def _switch_to_blind(self):
         """切换到盲降模式."""
         self._phase = self.PHASE_BLIND
         self._fsm.get_logger().info("PRECISION_LAND: Phase 3 - 盲降模式")
-        # 停用视觉伺服
-        if self._fsm.vision_node:
-            self._fsm.vision_node.set_servo_mode("none")
+        self._fsm.set_vision_mode("none")
 
     def exit(self):
-        if self._fsm.vision_node:
-            self._fsm.vision_node.set_servo_mode("none")
-        # 确保上锁
-        try:
-            self._fsm.bridge.disarm()
-        except Exception:
-            pass
+        self._fsm.set_vision_mode("none")
         self._fsm.logger.log_state("PRECISION_LAND", "COMPLETE", "降落完成")

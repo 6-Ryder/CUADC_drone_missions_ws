@@ -80,6 +80,7 @@ class TaskLogger:
             事件类型, e.g. "state_transition", "cylinder_detected", "drop_executed"
         data : dict or None
             事件负载
+
         """
         self._write_event(event, data or {})
 
@@ -135,6 +136,7 @@ class TaskLogger:
         summary : dict
             包含: success, total_duration, drops_completed, hazards_classified,
                   landing_precision, coverage_ratio, error_count, ...
+
         """
         summary["mission_id"] = self._mission_id
         summary["total_duration_s"] = time.time() - self._start_time

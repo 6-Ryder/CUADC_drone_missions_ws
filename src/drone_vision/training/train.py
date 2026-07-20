@@ -46,7 +46,7 @@ def main():
 
     model = YOLO(args.model)
 
-    results = model.train(
+    model.train(
         data=args.data,
         epochs=args.epochs,
         imgsz=args.imgsz,
@@ -76,7 +76,7 @@ def main():
 
     best = Path(args.project) / args.name / "weights" / "best.pt"
     print(f"\n训练完成! 最佳模型: {best}")
-    print(f"复制到 drone_vision/models/:")
+    print("复制到 drone_vision/models/:")
     print(f"  cp {best} ../../models/drone_yolo.pt")
 
 

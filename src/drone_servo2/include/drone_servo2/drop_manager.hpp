@@ -44,14 +44,12 @@ constexpr const char * drop_state_str(DropState s)
 class DropManager
 {
 public:
-  using DropDoneCb = std::function<void(bool success, int cylinder_id)>;
+  using DropDoneCb = std::function<void (bool success, int cylinder_id)>;
 
   /// @param servo       舵机实例
   /// @param positions   PWM 位置序列 (μs), 长度 = max_drops + 1
   /// @param delay_ms    投放后保持延时 (ms)
-  /// @param timeout_s   投放超时 (s)
-  DropManager(IServo * servo, std::vector<double> positions,
-              double delay_ms, double timeout_s);
+  DropManager(IServo * servo, std::vector<double> positions, double delay_ms);
 
   /// 执行一次投放: 舵机移动到 positions[drop_count + 1]
   bool execute_drop(int cylinder_id);
@@ -63,31 +61,30 @@ public:
   void reset();
 
   /// 注册投放完成回调
-  void set_on_drop_done(DropDoneCb cb) { on_drop_done_ = std::move(cb); }
+  void set_on_drop_done(DropDoneCb cb) {on_drop_done_ = std::move(cb);}
 
   // ---- 只读属性 ----
-  DropState         state()          const { return state_; }
-  int               drop_count()     const { return drop_count_; }
-  int               drops_remaining() const { return max_drops_ - drop_count_; }
-  int               max_drops()      const { return max_drops_; }
-  bool              last_result()    const { return last_result_; }
-  double            current_pwm()    const { return positions_[drop_count_]; }
-  const std::vector<double> & positions() const { return positions_; }
+  DropState         state()          const {return state_;}
+  int               drop_count()     const {return drop_count_;}
+  int               drops_remaining() const {return max_drops_ - drop_count_;}
+  int               max_drops()      const {return max_drops_;}
+  bool              last_result()    const {return last_result_;}
+  double            current_pwm()    const {return positions_[drop_count_];}
+  const std::vector<double> & positions() const {return positions_;}
 
 private:
   void notify_done(bool success, int cylinder_id);
 
-  IServo *     servo_;
+  IServo * servo_;
   std::vector<double> positions_;
-  int          max_drops_;
-  double       delay_ms_;
-  double       timeout_s_;
+  int max_drops_;
+  double delay_ms_;
 
-  DropState    state_{DropState::IDLE};
-  int          drop_count_{0};
-  bool         last_result_{false};
+  DropState state_{DropState::IDLE};
+  int drop_count_{0};
+  bool last_result_{false};
 
-  DropDoneCb   on_drop_done_;
+  DropDoneCb on_drop_done_;
 };
 
 }  // namespace drone_servo2

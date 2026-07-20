@@ -11,7 +11,7 @@
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 # ============================================================
@@ -21,6 +21,7 @@ from typing import Optional, Tuple
 @dataclass
 class Position:
     """无人机位置 (NED 坐标系)."""
+
     north: float = 0.0   # NED x (前)
     east: float = 0.0    # NED y (右)
     down: float = 0.0    # NED z (下, 负值=向上)
@@ -45,6 +46,7 @@ class Position:
 @dataclass
 class Attitude:
     """无人机姿态."""
+
     q_w: float = 1.0
     q_x: float = 0.0
     q_y: float = 0.0
@@ -61,6 +63,7 @@ class Attitude:
 @dataclass
 class Velocity:
     """无人机速度 (NED 坐标系, m/s)."""
+
     vn: float = 0.0  # north
     ve: float = 0.0  # east
     vd: float = 0.0  # down
@@ -69,6 +72,7 @@ class Velocity:
 @dataclass
 class DroneStatus:
     """无人机综合状态."""
+
     armed: bool = False
     in_air: bool = False
     landed: bool = True
@@ -82,6 +86,7 @@ class DroneStatus:
 @dataclass
 class Telemetry:
     """一次遥测快照."""
+
     timestamp: float = 0.0
     position: Position = field(default_factory=Position)
     attitude: Attitude = field(default_factory=Attitude)

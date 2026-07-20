@@ -1,5 +1,5 @@
 """
-SITL 全系统启动 — 一键启动仿真环境中所有节点
+SITL 全系统启动 — 一键启动仿真环境中所有节点.
 
 启动节点:
   1. px4_bridge       — PX4 DDS 通信桥接 (订阅/发布 /fmu/* 话题)
@@ -21,14 +21,12 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
-from launch.substitutions import LaunchConfiguration
+from launch.actions import LogInfo, TimerAction
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     """生成 SITL 全系统启动配置."""
-
     # ---- 包路径 ----
     pkg_control = get_package_share_directory("px4_control")
     pkg_vision = get_package_share_directory("drone_vision")

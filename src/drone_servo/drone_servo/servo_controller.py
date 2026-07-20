@@ -13,16 +13,13 @@
 与 C++ drone_servo2 逻辑完全一致, 仅语言不同.
 """
 
-import math
-import time
-
 import rclpy
 from rclpy.node import Node
 from px4_msgs.msg import VehicleCommand
 
 from drone_interfaces.srv import TriggerDrop
 from drone_servo.servo_mock import ServoMock
-from drone_servo.drop_manager import DropManager, DropState
+from drone_servo.drop_manager import DropManager
 from drone_utils.logger import TaskLogger
 
 

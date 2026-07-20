@@ -25,19 +25,20 @@
 """
 
 import numpy as np
-from typing import Optional, Tuple, Union
-from dataclasses import dataclass, field
+from typing import Optional, Tuple
+from dataclasses import dataclass
 from collections import deque
 
 
 @dataclass
 class ServoState:
     """视觉伺服状态."""
+
     velocity_north: float = 0.0   # NED north 速度 (m/s)
     velocity_east: float = 0.0    # NED east 速度 (m/s)
     velocity_down: float = 0.0    # NED down 速度 (m/s, 正=下降)
     yaw_rate: float = 0.0         # 偏航速率 (rad/s)
-    horizontal_error: float = 0.0 # 当前水平误差 (m)
+    horizontal_error: float = 0.0  # 当前水平误差 (m)
     is_converged: bool = False    # 是否已收敛到目标
 
 
@@ -60,6 +61,7 @@ class VisualServoController:
         积分项限幅.
     deadzone : float
         目标死区 (m), 进入后停止水平修正.
+
     """
 
     def __init__(
@@ -108,7 +110,7 @@ class VisualServoController:
         focal_length_u: float,     # 焦距 fx (px)
         focal_length_v: float,     # 焦距 fy (px)
         current_yaw: float = 0.0,  # 当前偏航角 (rad)
-        target_yaw: float = 0.0,   # 目标偏航角 (rad)
+        target_yaw: Optional[float] = None,  # None=保持当前偏航
     ) -> ServoState:
         """
         更新伺服控制.
@@ -116,15 +118,23 @@ class VisualServoController:
         Returns
         -------
         ServoState: 计算出的速度指令和状态.
+
         """
         # 像素误差
         du = target_u - image_center_u
         dv = target_v - image_center_v
 
-        # 像素误差 → 世界误差 (相机垂直向下)
-        # 相机 x→east, y→north (取决于安装方向)
-        error_east = -dv * altitude / focal_length_v    # 像素 y → world east
-        error_north = -du * altitude / focal_length_u   # 像素 x → world north
+        # 下视相机: +u 是机体右侧, +v 是机体后方。
+        body_forward = -dv * altitude / focal_length_v
+        body_right = du * altitude / focal_length_u
+        error_north = (
+            body_forward * np.cos(current_yaw)
+            - body_right * np.sin(current_yaw)
+        )
+        error_east = (
+            body_forward * np.sin(current_yaw)
+            + body_right * np.cos(current_yaw)
+        )
 
         horizontal_error = np.hypot(error_north, error_east)
 
@@ -132,22 +142,21 @@ class VisualServoController:
         in_deadzone = horizontal_error < self.deadzone
 
         # PID 计算
-        # 误差反向: 要把 error 归零, 所以速度指向负误差方向
-        p_north = self.kp * (-error_north)
-        p_east = self.kp * (-error_east)
+        p_north = self.kp * error_north
+        p_east = self.kp * error_east
 
         # 积分 (仅在非死区累加)
         if not in_deadzone:
-            self._integral_north += self.ki * (-error_north) * self._dt
-            self._integral_east += self.ki * (-error_east) * self._dt
+            self._integral_north += self.ki * error_north * self._dt
+            self._integral_east += self.ki * error_east * self._dt
 
         # 积分限幅
         self._integral_north = np.clip(self._integral_north, -self.integral_max, self.integral_max)
         self._integral_east = np.clip(self._integral_east, -self.integral_max, self.integral_max)
 
         # 微分
-        d_north = self.kd * (-error_north - self._prev_error_north) / max(self._dt, 0.01)
-        d_east = self.kd * (-error_east - self._prev_error_east) / max(self._dt, 0.01)
+        d_north = self.kd * (error_north - self._prev_error_north) / max(self._dt, 0.01)
+        d_east = self.kd * (error_east - self._prev_error_east) / max(self._dt, 0.01)
 
         vel_north = p_north + self._integral_north + d_north
         vel_east = p_east + self._integral_east + d_east
@@ -157,13 +166,15 @@ class VisualServoController:
         vel_east = np.clip(vel_east, -self.max_horizontal_vel, self.max_horizontal_vel)
 
         # 偏航修正
-        yaw_error = target_yaw - current_yaw
-        yaw_error = np.arctan2(np.sin(yaw_error), np.cos(yaw_error))  # 归一化到 [-π, π]
-        yaw_rate = np.clip(yaw_error * 0.5, -0.5, 0.5)  # P 控制
+        yaw_rate = 0.0
+        if target_yaw is not None:
+            yaw_error = target_yaw - current_yaw
+            yaw_error = np.arctan2(np.sin(yaw_error), np.cos(yaw_error))
+            yaw_rate = np.clip(yaw_error * 0.5, -0.5, 0.5)
 
         # 保存状态
-        self._prev_error_north = -error_north
-        self._prev_error_east = -error_east
+        self._prev_error_north = error_north
+        self._prev_error_east = error_east
         self._error_history.append(horizontal_error)
 
         return ServoState(
@@ -437,7 +448,6 @@ if HAS_ROS2:
         def deactivate(self):
             self._landing_active = False
             self._controller.reset()
-
 
     def servo_main(args=None):
         rclpy.init(args=args)

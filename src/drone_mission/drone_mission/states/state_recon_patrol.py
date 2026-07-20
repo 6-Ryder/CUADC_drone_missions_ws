@@ -33,6 +33,9 @@ class ReconPatrolState:
         self._coverage_complete = False
         self._last_progress_log = 0.0
 
+        # 侦察阶段只记录覆盖率，不需要运行两套目标检测模型。
+        self._fsm.set_vision_mode("none")
+
         # 生成低空弓字形覆盖路径 (NED 坐标系)
         area2_n_min = self._fsm.get_param("area2_north_min", -4.0)
         area2_n_max = self._fsm.get_param("area2_north_max", 4.0)
@@ -102,23 +105,23 @@ class ReconPatrolState:
 
         # 航点超时保护
         if self._fsm.fc.is_waypoint_timed_out():
-            self._fsm.get_logger().warn(
-                f"RECON_PATROL: 航点超时 wp={self._wp_idx}, 跳过"
+            self._fsm.get_logger().error(
+                f"RECON_PATROL: 航点超时 wp={self._wp_idx}"
             )
-            self._wp_idx += 1
-            if self._wp_idx < len(self._waypoints):
-                self._fly_to_wp(self._wp_idx)
+            self._fsm.bridge.return_to_launch()
+            return "ERROR"
 
         # 全局超时
         elapsed = time.time() - self._start_time
         max_duration = self._fsm.get_param("state_max_duration", 180.0)
         if elapsed > max_duration:
             cov_ratio = coverage.get("coverage_ratio", 0) if coverage else 0
-            self._fsm.get_logger().warn(
+            self._fsm.get_logger().error(
                 f"RECON_PATROL: 超时 ({elapsed:.0f}s), "
-                f"coverage={cov_ratio:.1%}, 强制返航"
+                f"coverage={cov_ratio:.1%}, 请求 PX4 RTL"
             )
-            return "RETURN_TO_HOME"
+            self._fsm.bridge.return_to_launch()
+            return "ERROR"
 
         # 每 10s 输出进度
         if elapsed - self._last_progress_log > 10.0:
