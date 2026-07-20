@@ -560,6 +560,11 @@ source install/setup.bash
 
 ### 启动
 
+**快速启动**
+```bash
+./scripts/simple_mission.sh
+```
+
 **仿真环境**（需先启动 PX4 SITL + Gazebo + MicroXRCEAgent）：
 
 ```bash

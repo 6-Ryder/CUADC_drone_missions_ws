@@ -93,36 +93,60 @@ class Telemetry:
 # 坐标变换
 # ============================================================
 
-# 场地 World 原点 → 起飞点 H 的偏移
-# H 在 Gazebo World 中的位置: (x=10, y=4, z=0)
-H_WORLD_X = 10.0   # east
-H_WORLD_Y = 4.0    # north
-H_WORLD_Z = 0.0    # up
+# World(ENU) 原点在 NED 坐标系中的偏移.
+# 仿真默认: H 在 Gazebo World 中位于 (10, 4, 0).
+# 真机部署: Home=解锁点, World(ENU) 以 Home 为原点 → 偏移 (0, 0, 0).
+_home_world_x: float = 10.0
+_home_world_y: float = 4.0
+_home_world_z: float = 0.0
+
+# 保留旧名称作为兼容别名 (deprecated, 请用 configure_home)
+H_WORLD_X = 10.0
+H_WORLD_Y = 4.0
+H_WORLD_Z = 0.0
+
+
+def configure_home(world_x: float = 0.0, world_y: float = 0.0, world_z: float = 0.0) -> None:
+    """
+    设置 World(ENU) 原点对应的 NED 偏移.
+
+    仿真调用: configure_home(10.0, 4.0, 0.0)
+    真机调用: configure_home(0.0, 0.0, 0.0)  # Home=原点
+
+    会影响 world_to_ned / ned_to_world / ned_to_world_pose 的行为.
+    """
+    global _home_world_x, _home_world_y, _home_world_z, H_WORLD_X, H_WORLD_Y, H_WORLD_Z
+    _home_world_x = H_WORLD_X = float(world_x)
+    _home_world_y = H_WORLD_Y = float(world_y)
+    _home_world_z = H_WORLD_Z = float(world_z)
 
 
 def world_to_ned(world_x: float, world_y: float, world_z: float) -> Tuple[float, float, float]:
     """
-    Gazebo World → PX4 NED (相对起飞点 H).
+    World(ENU) → PX4 NED (相对 Home 点).
 
     World: x=east, y=north, z=up
-    NED:   x=north=World_y - 4, y=east=World_x - 10, z=down=-World_z
+    NED:   x=north, y=east, z=down
+
+    仿真:  Home 在 Gazebo (10,4,0) → north=world_y-4, east=world_x-10
+    真机:  Home=原点(0,0,0) → north=world_y, east=world_x
     """
-    north = world_y - H_WORLD_Y
-    east = world_x - H_WORLD_X
+    north = world_y - _home_world_y
+    east = world_x - _home_world_x
     down = -world_z
     return (north, east, down)
 
 
 def ned_to_world(north: float, east: float, down: float) -> Tuple[float, float, float]:
     """
-    PX4 NED (相对起飞点 H) → Gazebo World.
+    PX4 NED (相对 Home 点) → World(ENU).
 
-    World_x = east + H_WORLD_X
-    World_y = north + H_WORLD_Y
+    World_x = east + home_x
+    World_y = north + home_y
     World_z = -down
     """
-    world_x = east + H_WORLD_X
-    world_y = north + H_WORLD_Y
+    world_x = east + _home_world_x
+    world_y = north + _home_world_y
     world_z = -down
     return (world_x, world_y, world_z)
 
