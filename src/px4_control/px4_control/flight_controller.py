@@ -31,10 +31,13 @@ class FlightController:
 
     def __init__(self, bridge: PX4Bridge):
         """
+        初始化飞行控制接口.
+
         Parameters
         ----------
         bridge : PX4Bridge
             PX4 通信桥接实例
+
         """
         self._bridge = bridge
         self._node = bridge  # PX4Bridge 本身是 Node
@@ -52,6 +55,7 @@ class FlightController:
 
         self._landing = False
         self._land_start_time: float = 0.0
+        self._land_mode_requested = False
 
     # ================================================================
     # 起飞
@@ -75,6 +79,7 @@ class FlightController:
         Returns
         -------
         bool: 是否已到达目标高度
+
         """
         if altitude is None:
             altitude = self._takeoff_height
@@ -113,6 +118,7 @@ class FlightController:
             目标偏航角 (rad)
         speed : float
             飞行速度 (m/s)
+
         """
         self._target_speed = speed
         self._bridge.set_position_target(north, east, down, yaw)
@@ -132,6 +138,7 @@ class FlightController:
             目标偏航角 (rad)
         speed : float
             飞行速度 (m/s)
+
         """
         from px4_control.telemetry import world_to_ned
         north, east, down = world_to_ned(x, y, z)
@@ -145,6 +152,7 @@ class FlightController:
         ----------
         duration : float
             悬停时间 (s). 0 表示无限 (由外部停止).
+
         """
         pos = self._bridge.get_current_position()
         self._bridge.set_position_target(pos.north, pos.east, pos.down)
@@ -162,6 +170,7 @@ class FlightController:
             NED 速度 (m/s). vd 正值=下降.
         yaw_rate : float
             偏航速率 (rad/s).
+
         """
         self._bridge.set_velocity_target(vn, ve, vd, yaw_rate)
 
@@ -208,6 +217,7 @@ class FlightController:
         Returns
         -------
         bool: 是否已着陆
+
         """
         if self._bridge.is_landed():
             self._landing = False
@@ -216,8 +226,8 @@ class FlightController:
         if not self._landing:
             self._landing = True
             self._land_start_time = time.time()
+            self._land_mode_requested = False
             # 水平悬停, 缓慢下降
-            pos = self._bridge.get_current_position()
             self._bridge.set_velocity_target(0.0, 0.0, 0.3)  # 0.3 m/s 下降
             return False
 
@@ -230,9 +240,9 @@ class FlightController:
 
         # 超时保护
         if time.time() - self._land_start_time > 30.0:
-            self._bridge.force_disarm()
-            self._landing = False
-            return True
+            if not self._land_mode_requested:
+                self._bridge.land_at_current()
+                self._land_mode_requested = True
 
         return False
 
@@ -259,6 +269,7 @@ class FlightController:
         Returns
         -------
         bool
+
         """
         if tolerance <= 0:
             tolerance = self._waypoint_tolerance
@@ -278,7 +289,10 @@ class FlightController:
         Parameters
         ----------
         target : (north, east)
+            目标水平位置 (NED).
         tolerance : float
+            水平距离容差 (m).
+
         """
         if tolerance <= 0:
             tolerance = self._waypoint_tolerance
@@ -296,6 +310,8 @@ class FlightController:
         target_down : float
             NED z (负=上)
         tolerance : float
+            高度容差 (m).
+
         """
         if tolerance <= 0:
             tolerance = self._takeoff_tolerance

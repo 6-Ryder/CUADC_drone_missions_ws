@@ -28,6 +28,7 @@ from typing import Tuple, Optional
 def _quat_to_matrix(q_xyzw: np.ndarray) -> np.ndarray:
     """
     Convert quaternion (w, x, y, z) to 3×3 rotation matrix.
+
     (调用方 pixel_to_world 已转换为 wxyz 格式)
 
     This replaces scipy.spatial.transform.Rotation.from_quat().
@@ -56,6 +57,7 @@ class CoordinateTransformer:
     ----------
     K : np.ndarray
         相机内参矩阵 (3×3): [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
+
     """
 
     def __init__(self, K: np.ndarray):
@@ -90,15 +92,23 @@ class CoordinateTransformer:
 
         Parameters
         ----------
-        u, v : 像素坐标.
-        drone_position : (x, y, z) 无人机世界坐标 (z 向上为正).
-        drone_attitude_q : 无人机姿态四元数.
-        ground_z : 地面高度 (默认 0).
-        q_convention : "xyzw" (PX4/ROS) 或 "wxyz" (scipy).
+        u : float
+            像素横坐标.
+        v : float
+            像素纵坐标.
+        drone_position : tuple
+            (x, y, z) 无人机世界坐标 (z 向上为正).
+        drone_attitude_q : tuple
+            无人机姿态四元数.
+        ground_z : float
+            地面高度 (默认 0).
+        q_convention : str
+            "xyzw" (PX4/ROS) 或 "wxyz" (scipy).
 
         Returns
         -------
         (world_x, world_y) 或 None (射线向上不与地面相交).
+
         """
         # 1. 像素 → 归一化相机坐标 (z_cam = 1)
         pixel = np.array([u, v, 1.0])

@@ -36,12 +36,21 @@ mkdir -p "$ROS_LOG_DIR"
 # ============================================================================
 PX4_DIR="/home/bridge/PX4-Autopilot"
 PX4_BLD="$PX4_DIR/build/px4_sitl_default"
+PX4_WORLD="$PX4_DIR/Tools/simulation/gz/worlds/drone_field.sdf"
 
 if [ ! -f "$PX4_BLD/bin/px4" ]; then
     error "PX4 SITL 未编译: $PX4_BLD/bin/px4"
     error "请先编译: cd $PX4_DIR && make px4_sitl_default"
     exit 1
 fi
+
+if [ ! -d "$(dirname "$PX4_WORLD")" ]; then
+    error "PX4 Gazebo 世界目录不存在: $(dirname "$PX4_WORLD")"
+    exit 1
+fi
+
+# 工作区场景是唯一来源，避免 PX4 继续加载过期副本。
+cp "$PROJ/field/drone_field.sdf" "$PX4_WORLD"
 
 # 清理 PX4 持久化参数 (避免旧参数覆盖启动设置)
 rm -f "$PX4_BLD/rootfs/0/parameters.bson" "$PX4_BLD/rootfs/0/parameters_backup.bson"
@@ -93,7 +102,8 @@ sleep 2
 if kill -0 "$AGENT_PID" 2>/dev/null; then
     info "MicroXRCEAgent 已启动 (PID: $AGENT_PID, UDP:8888)"
 else
-    warn "MicroXRCEAgent 可能未正常启动, 检查: $LOG_DIR/agent.log"
+    error "MicroXRCEAgent 启动失败, 检查: $LOG_DIR/agent.log"
+    exit 1
 fi
 
 # ============================================================================
@@ -107,8 +117,9 @@ export PX4_GZ_WORLD="drone_field"
 export PX4_GZ_MODEL_POSE="10,4,0.3,0,0,0"
 export GZ_IP="127.0.0.1"
 export ROS_DOMAIN_ID=0
+export HEADLESS=1
 
-./bin/px4 -i 0 > "$LOG_DIR/px4.log" 2>&1 &
+./bin/px4 -d -i 0 > "$LOG_DIR/px4.log" 2>&1 &
 PX4_PID=$!
 echo "$PX4_PID" > "$LOG_DIR/px4.pid"
 info "PX4 已启动 (PID: $PX4_PID)"
@@ -134,14 +145,15 @@ for i in $(seq 1 90); do
 done
 
 if [ "$WORLD_READY" = false ]; then
-    warn "Gazebo world 超时未就绪 (90s), 尝试继续..."
+    error "Gazebo world 超时未就绪 (90s)"
+    exit 1
 fi
 
 # 等待 DDS 话题
 info "等待 PX4 DDS 话题..."
 DDS_READY=false
 for i in $(seq 1 30); do
-    if ros2 topic list 2>/dev/null | grep -q "/fmu/out/vehicle_status"; then
+    if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v4"; then
         info "PX4 DDS 话题就绪 (${i}s)"
         DDS_READY=true
         break
@@ -150,10 +162,11 @@ for i in $(seq 1 30); do
 done
 
 if [ "$DDS_READY" = false ]; then
-    warn "DDS 话题未就绪 (30s), 检查 MicroXRCEAgent 连接"
+    error "DDS 话题未就绪 (30s), 检查 MicroXRCEAgent 连接"
+    exit 1
 fi
 
-# 初始化 PX4 参数并解锁 (绕过 preflight 检查)
+# 初始化 SITL 参数；解锁和 Offboard 切换由任务状态机统一负责。
 info "初始化 PX4 参数..."
 for i in $(seq 1 10); do
     if "$PX4_BLD/bin/px4-param" --instance 0 set CBRK_SUPPLY_CHK 894281 2>/dev/null; then
@@ -161,32 +174,11 @@ for i in $(seq 1 10); do
     fi
     sleep 1
 done
-"$PX4_BLD/bin/px4-param" --instance 0 set COM_ARM_WO_GPS 1 2>/dev/null || true
-"$PX4_BLD/bin/px4-param" --instance 0 set COM_DISARM_PRFLT -1 2>/dev/null || true
-"$PX4_BLD/bin/px4-param" --instance 0 set NAV_RCL_ACT 0 2>/dev/null || true
+"$PX4_BLD/bin/px4-param" --instance 0 set COM_ARM_WO_GPS 1
+"$PX4_BLD/bin/px4-param" --instance 0 set COM_DISARM_PRFLT -1
+"$PX4_BLD/bin/px4-param" --instance 0 set NAV_RCL_ACT 0
+"$PX4_BLD/bin/px4-param" --instance 0 set NAV_DLL_ACT 0
 info "PX4 参数已初始化"
-
-# 解锁 + 切换到 Offboard 模式 (通过 PX4 commander IPC)
-info "解锁..."
-sleep 5
-for i in $(seq 1 15); do
-    "$PX4_BLD/bin/px4-commander" --instance 0 disarm 2>/dev/null || true
-    sleep 1
-    if "$PX4_BLD/bin/px4-commander" --instance 0 arm -f 2>/dev/null; then
-        sleep 3
-        ARM_STATE=$("$PX4_BLD/bin/px4-listener" --instance 0 vehicle_status 2>/dev/null | grep "arming_state:" | head -1 | tr -dc '0-9')
-        if [ "$ARM_STATE" = "2" ]; then
-            info "解锁成功, 切换 Offboard..."
-            sleep 1
-            "$PX4_BLD/bin/px4-commander" --instance 0 mode offboard 2>/dev/null || true
-            sleep 2
-            MODE=$("$PX4_BLD/bin/px4-listener" --instance 0 vehicle_status 2>/dev/null | grep "nav_state:" | head -1 | tr -dc '0-9')
-            info "nav_state=$MODE (14=OFFBOARD)"
-            break
-        fi
-    fi
-    sleep 2
-done
 
 # ============================================================================
 # Step 3: ros_gz_image bridge
@@ -204,7 +196,8 @@ sleep 2
 if kill -0 "$BRIDGE_PID" 2>/dev/null; then
     info "ros_gz_image bridge 已启动 (PID: $BRIDGE_PID)"
 else
-    warn "ros_gz_image bridge 启动失败, 检查: $LOG_DIR/image_bridge.log"
+    error "ros_gz_image bridge 启动失败, 检查: $LOG_DIR/image_bridge.log"
+    exit 1
 fi
 
 # ============================================================================
@@ -214,7 +207,7 @@ step "Step 4/4 — 启动 ROS2 全系统节点"
 
 echo ""
 echo "┌──────────────────────────────────────────────────────────────────┐"
-echo "│                    全仿真系统已启动                               │"
+echo "│                    无画面全仿真系统已启动                         │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  场地:      drone_field (70m × 8m)                              │"
 echo "│  无人机:    gz_x500 @ H起降点 (10, 4, 0.3)                      │"
@@ -224,7 +217,7 @@ echo "│  起降点:    (10, 4) — 含 H 标识                               
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  组件状态:                                                       │"
 echo "│    ✓ MicroXRCEAgent    UDP:8888  (PID: $AGENT_PID)              │"
-echo "│    ✓ PX4 SITL + Gazebo drone_field  (PID: $PX4_PID)             │"
+echo "│    ✓ PX4 SITL + Gazebo server      (PID: $PX4_PID)             │"
 echo "│    ✓ ros_gz_image bridge          (PID: $BRIDGE_PID)            │"
 echo "│    → 正在启动 ROS2 节点...                                       │"
 echo "├──────────────────────────────────────────────────────────────────┤"

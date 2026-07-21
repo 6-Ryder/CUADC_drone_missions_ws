@@ -17,21 +17,29 @@
     # YOLO 模型参数
     # ============================================================
     # ---- YOLO 主模型 (白色圆筒检测, 单类) ----
-    model_path: "cylinder_yolo.pt"         # .pt 或 .onnx; 相对 models/ 或绝对路径
+    model_path: "cylinder_yolo.onnx"       # .pt/.onnx/.engine; 相对 models/ 或绝对路径
     model_width: 640                       # 模型输入宽
     model_height: 640                      # 模型输入高
     conf_threshold: 0.35                   # YOLO 置信度阈值 (匹配 cv_trainer 推理脚本)
     nms_iou_threshold: 0.45               # NMS IoU 阈值
     device: "cuda"                         # cuda / cpu / tensorrt
+    max_inference_fps: 20.0                # 匹配任务控制频率，限制 GPU 压力
     # 主模型类别映射: ID → 名称 (必须与模型输出类别数一致)
     class_names:
       - "cylinder"                         # 0: 白色圆筒
 
     # ---- 投放区蓝色标识模型 (单类, 可选) ----
-    drop_marker_model_path: "drop_marker_yolo.pt"
+    drop_marker_model_path: "drop_marker_yolo.onnx"
     drop_marker_class_names:
       - "drop_zone_marker"                 # 0: 蓝色投放区标识
     drop_marker_refine_enable: true        # YOLO bbox 内 HSV 蓝色分割 → 轮廓矩质心
+    drop_marker_min_blue_ratio: 0.4        # YOLO 框内至少 40% 属于同一蓝色连通域
+    drop_marker_min_area: 80               # 蓝色连通域最小像素面积
+    drop_marker_min_aspect_ratio: 0.4       # 过滤过度狭长的蓝色杂物
+    drop_marker_min_circularity: 0.35       # 允许透视椭圆, 拒绝线缆/长条
+    drop_marker_min_diameter: 30            # 过滤远小于 1m 标识投影的蓝色杂物
+    drop_marker_min_scale_ratio: 0.45       # 实测直径/1m理论投影下限
+    drop_marker_max_scale_ratio: 1.8        # 实测直径/1m理论投影上限
 
     # ============================================================
     # 圆筒检测精确后处理 (OpenCV)
@@ -48,17 +56,11 @@
     cylinder_tracking_min_hits: 3       # 多帧追踪: 连续命中N帧后才输出 (过滤闪烁假目标)
 
     # ============================================================
-    # 危险品分类参数
-    # ============================================================
-    hazard_enable_color_fallback: true  # YOLO 低置信度时回退颜色验证
-    hazard_color_confirm_ratio: 0.3     # 颜色验证: 目标像素占比阈值
-
-    # ============================================================
     # H 降落标识精确后处理 (OpenCV)
     # ============================================================
     landing_refine_enable: true         # 启用 YOLO 框内 OpenCV 精修
     landing_adaptive_thresh_block: 11   # 自适应阈值块大小
-    landing_circle_min_area: 300        # 最小圆形面积 (px²)
+    landing_circle_min_area: 80         # 5m高度下 H 笔画最小面积 (px²)
     landing_H_orientation_enable: true  # 估计 H 的偏航方向
 
     # ============================================================

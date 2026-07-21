@@ -27,6 +27,11 @@ def generate_launch_description():
         "start_camera", default_value="false",
         description="是否同时启动摄像头 (true/false)",
     )
+    camera_device_arg = DeclareLaunchArgument(
+        "camera_device",
+        default_value="/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0",
+        description="外接任务相机的稳定 V4L2 路径",
+    )
 
     # 调试用摄像头为 640x480; 覆盖 YAML 中 SITL 的 1280x960 内参
     vision_node = Node(
@@ -40,6 +45,8 @@ def generate_launch_description():
             {
                 "camera_width": 640,
                 "camera_height": 480,
+                "fx": 400.0,
+                "fy": 400.0,
                 "cx": 320.0,
                 "cy": 240.0,
             },
@@ -55,6 +62,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("start_camera")),
         parameters=[{
             "sim_mode": False,
+            "camera_device": LaunchConfiguration("camera_device"),
             "camera_width": 640,
             "camera_height": 480,
             "camera_fps": 30.0,
@@ -63,6 +71,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         start_camera_arg,
+        camera_device_arg,
         LogInfo(msg="=== 视觉模块独立调试模式 ==="),
         vision_node,
         camera_node,

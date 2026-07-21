@@ -31,6 +31,7 @@ class CoverageMonitor:
         相机 FOV 半角 (度).
     complete_ratio : float
         全覆盖判定阈值.
+
     """
 
     def __init__(
@@ -70,12 +71,17 @@ class CoverageMonitor:
 
         Parameters
         ----------
-        drone_x, drone_y : 无人机 World 坐标.
-        drone_z : 无人机高度 (m, 正值).
+        drone_x : float
+            无人机 World x 坐标.
+        drone_y : float
+            无人机 World y 坐标.
+        drone_z : float
+            无人机高度 (m, 正值).
 
         Returns
         -------
         coverage_ratio : 当前覆盖率 [0, 1].
+
         """
         altitude = drone_z
         if altitude <= 0.1:
@@ -85,10 +91,18 @@ class CoverageMonitor:
         ground_radius = altitude * np.tan(self.fov_half_angle)
 
         # 覆盖的网格范围
-        x_min_idx = int(np.floor((drone_x - ground_radius - self.zone_x_min) / self.grid_resolution))
-        x_max_idx = int(np.ceil((drone_x + ground_radius - self.zone_x_min) / self.grid_resolution))
-        y_min_idx = int(np.floor((drone_y - ground_radius - self.zone_y_min) / self.grid_resolution))
-        y_max_idx = int(np.ceil((drone_y + ground_radius - self.zone_y_min) / self.grid_resolution))
+        x_min_idx = int(np.floor(
+            (drone_x - ground_radius - self.zone_x_min) / self.grid_resolution
+        ))
+        x_max_idx = int(np.ceil(
+            (drone_x + ground_radius - self.zone_x_min) / self.grid_resolution
+        ))
+        y_min_idx = int(np.floor(
+            (drone_y - ground_radius - self.zone_y_min) / self.grid_resolution
+        ))
+        y_max_idx = int(np.ceil(
+            (drone_y + ground_radius - self.zone_y_min) / self.grid_resolution
+        ))
 
         # Clamp
         x_min_idx = max(0, x_min_idx)

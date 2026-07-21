@@ -1,72 +1,68 @@
 """
-投放逻辑管理 — 单投/连投/状态监测.
+投放逻辑管理 — 多位置步进投放.
 
-管理投放全流程:
-  - 投放前: 检查舵机就绪 + 无人机位置确认
-  - 投放中: 触发舵机动作 + 等待完成
-  - 投放后: 确认投放结果 + 更新内部状态
+投放序列:
+  positions = [1150, 1700, 2150]  (μs)
+  初始:    舵机 = 1150μs (闭合)
+  投放 #1: 舵机 → 1700μs → 等待 drop_delay_ms
+  投放 #2: 舵机 → 2150μs → 等待 drop_delay_ms
 
-支持:
-  - 单次投放 (execute_drop)
-  - 多次投放 (execute_sequential_drops, 用于两轮投放任务)
-  - 投放计数与限制
+与 C++ DropManager 逻辑完全一致.
 """
 
 import time
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 
 class DropState(Enum):
     IDLE = "idle"
-    OPENING = "opening"
-    HOLDING = "holding"
-    CLOSING = "closing"
+    MOVING = "moving"
     DONE = "done"
     FAILED = "failed"
 
 
 class DropManager:
     """
-    投放逻辑管理器.
+    多位置步进投放管理器.
 
     使用方式:
-      mgr = DropManager(servo, max_drops=2)
-      mgr.set_confirm_callback(lambda: vision_confirm_drop())
+      mgr = DropManager(servo, positions=[1150, 1700, 2150], delay_ms=1000)
+      mgr.set_on_drop_done(lambda success, cyl_id: print(f"drop={success}"))
       success = mgr.execute_drop(cylinder_id=1)
     """
 
-    def __init__(self, servo, max_drops: int = 2, drop_timeout_s: float = 3.0):
+    def __init__(self, servo, positions: List[float],
+                 delay_ms: float = 1000.0, timeout_s: float = 3.0):
         """
+        初始化多位置投放管理器.
+
         Parameters
         ----------
-        servo : ServoController or ServoMock
-            舵机控制实例
-        max_drops : int
-            最大投放次数
-        drop_timeout_s : float
+        servo : ServoMock or PX4CommandServo
+            舵机控制实例 (必须有 set_pwm(pwm_us) 方法)
+        positions : list[float]
+            PWM 位置序列 (μs), 长度 = 投放次数 + 1
+        delay_ms : float
+            投放后保持延时 (ms)
+        timeout_s : float
             单次投放超时 (s)
+
         """
+        if len(positions) < 2:
+            raise ValueError("positions 至少需要 2 个值")
+
         self._servo = servo
-        self._max_drops = max_drops
-        self._drop_timeout = drop_timeout_s
+        self._positions = list(positions)
+        self._max_drops = len(positions) - 1
+        self._delay_s = delay_ms / 1000.0
+        self._timeout = timeout_s
 
         self._state = DropState.IDLE
         self._drop_count: int = 0
         self._last_result: Optional[bool] = None
 
-        # 可选回调
-        self._on_drop_start: Optional[Callable] = None
-        self._on_drop_done: Optional[Callable[[bool, int], None]] = None  # (success, cyl_id)
-        self._confirm_callback: Optional[Callable[[], bool]] = None
-
-    def set_confirm_callback(self, cb: Callable[[], bool]):
-        """
-        设置视觉确认回调.
-
-        cb 应返回 True(确认投放成功) 或 False(投放失败/无法确认).
-        """
-        self._confirm_callback = cb
+        self._on_drop_done: Optional[Callable[[bool, int], None]] = None
 
     def set_on_drop_done(self, cb: Callable[[bool, int], None]):
         """设置投放完成回调."""
@@ -74,16 +70,12 @@ class DropManager:
 
     def execute_drop(self, cylinder_id: int = -1) -> bool:
         """
-        执行一次投放.
-
-        Parameters
-        ----------
-        cylinder_id : int
-            目标圆筒 ID (用于日志)
+        执行一次投放: 舵机移动到 positions[drop_count + 1].
 
         Returns
         -------
         bool: 投放是否成功
+
         """
         if self._drop_count >= self._max_drops:
             self._state = DropState.FAILED
@@ -95,16 +87,13 @@ class DropManager:
             self._notify_done(False, cylinder_id)
             return False
 
-        # 投放
-        self._state = DropState.OPENING
-        if self._on_drop_start:
-            try:
-                self._on_drop_start()
-            except Exception:
-                pass
+        self._state = DropState.MOVING
+        target_pwm = self._positions[self._drop_count + 1]
 
         try:
-            success = self._servo.drop()
+            success = self._servo.set_pwm(target_pwm)
+            if success:
+                time.sleep(self._delay_s)
         except Exception:
             success = False
 
@@ -115,57 +104,23 @@ class DropManager:
             self._state = DropState.FAILED
 
         self._last_result = success
-
-        # 视觉确认 (可选)
-        if success and self._confirm_callback:
-            try:
-                confirmed = self._confirm_callback()
-                if not confirmed:
-                    # 视觉确认失败, 但舵机已动作, 仍标记为成功
-                    # (真正方案应该有更多重试逻辑)
-                    pass
-            except Exception:
-                pass
-
         self._notify_done(success, cylinder_id)
         return success
-
-    def execute_sequential_drops(self, cylinder_ids: list) -> dict:
-        """
-        对多个圆筒依次执行投放.
-
-        Parameters
-        ----------
-        cylinder_ids : list[int]
-            目标圆筒 ID 列表
-
-        Returns
-        -------
-        dict: {cylinder_id: success}
-        """
-        results = {}
-        for cyl_id in cylinder_ids:
-            if self._drop_count >= self._max_drops:
-                results[cyl_id] = False
-                continue
-            results[cyl_id] = self.execute_drop(cyl_id)
-        return results
 
     def can_drop(self) -> bool:
         """是否还可以执行投放."""
         return (
             self._drop_count < self._max_drops
             and self._servo.is_ready()
-            and self._state != DropState.OPENING
+            and self._state != DropState.MOVING
         )
 
     def reset(self):
-        """重置投放管理器."""
+        """重置投放管理器, 舵机回到初始位置."""
         self._state = DropState.IDLE
         self._drop_count = 0
         self._last_result = None
-        if hasattr(self._servo, "reset"):
-            self._servo.reset()
+        self._servo.set_pwm(self._positions[0])
 
     # ---- 属性 ----
 
@@ -178,12 +133,24 @@ class DropManager:
         return self._drop_count
 
     @property
+    def max_drops(self) -> int:
+        return self._max_drops
+
+    @property
     def drops_remaining(self) -> int:
         return max(0, self._max_drops - self._drop_count)
 
     @property
     def last_result(self) -> Optional[bool]:
         return self._last_result
+
+    @property
+    def current_pwm(self) -> float:
+        return self._positions[self._drop_count]
+
+    @property
+    def positions(self) -> List[float]:
+        return list(self._positions)
 
     # ---- 内部 ----
 

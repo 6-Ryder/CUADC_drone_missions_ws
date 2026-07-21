@@ -28,10 +28,20 @@ from rclpy.qos import (
     QoSReliabilityPolicy,
 )
 from geometry_msgs.msg import Point, Twist
-from px4_msgs.msg import VehicleCommand, VehicleOdometry, VehicleStatus, VehicleLandDetected, VehicleAttitude
+from px4_msgs.msg import (
+    BatteryStatus,
+    VehicleAttitude,
+    VehicleCommand,
+    VehicleLandDetected,
+    VehicleOdometry,
+    VehicleStatus,
+)
 
 from px4_control.telemetry import (
-    Position, Attitude, Velocity, DroneStatus, Telemetry,
+    Attitude,
+    Position,
+    Telemetry,
+    Velocity,
 )
 
 
@@ -49,41 +59,44 @@ def _px4_qos() -> QoSProfile:
 # StandaloneBridge
 # ============================================================
 
+
 class StandaloneBridge:
     """
-    PX4Bridge-compatible interface for nodes that communicate through
-    px4_bridge relay topics.
+    PX4Bridge-compatible interface over px4_bridge relay topics.
 
     Implements the same interface as PX4Bridge so FlightController can
     work transparently in both standalone and direct-DDS modes.
-
+    ...
     Publishers:
-      /drone/cmd_setpoint_ned       (Point)  — position setpoints
-      /drone/cmd_velocity_ned       (Twist)  — velocity setpoints
-      /drone/cmd/vehicle_command_relay (VehicleCommand) — mode/arm
+      /drone/cmd_setpoint_ned           (Point)   — position setpoints
+      /drone/cmd_velocity_ned           (Twist)   — velocity setpoints
+      /drone/cmd/vehicle_command_relay  (VehicleCommand) — mode/arm/land
 
     Subscriptions:
       /fmu/out/vehicle_odometry
       /fmu/out/vehicle_status_v4
       /fmu/out/vehicle_land_detected
       /fmu/out/vehicle_attitude
+      /fmu/out/battery_status_v1
     """
 
     NAV_STATE_OFFBOARD = 14
     VEHICLE_CMD_DO_SET_MODE = 176
     VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
+    VEHICLE_CMD_NAV_LAND = 21
+    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 20
 
-    def __init__(self, node: Node, sim_mode: bool = True):
+    def __init__(self, node: Node):
         """
+        Create a standalone bridge for the given ROS2 node.
+
         Parameters
         ----------
         node : rclpy.node.Node
             The ROS2 node that owns publishers/subscriptions/timers.
-        sim_mode : bool
-            True=SITL (force arm with magic number), False=真机 (标准解锁).
+
         """
         self._node = node
-        self._sim_mode = sim_mode
         qos = _px4_qos()
 
         # ---- Telemetry state ----
@@ -94,6 +107,8 @@ class StandaloneBridge:
         self._offboard: bool = False
         self._landed: bool = True
         self._current_yaw: float = 0.0
+        self._battery_remaining: float = 1.0
+        self._battery_ready: bool = False
 
         # ---- Setpoint state ----
         self._target_ned: Optional[Tuple[float, float, float]] = None
@@ -119,6 +134,9 @@ class StandaloneBridge:
         )
         node.create_subscription(
             VehicleAttitude, "/fmu/out/vehicle_attitude", self._attitude_cb, qos,
+        )
+        node.create_subscription(
+            BatteryStatus, "/fmu/out/battery_status_v1", self._battery_cb, qos,
         )
 
         # ---- Heartbeat timer (10Hz) ----
@@ -176,6 +194,11 @@ class StandaloneBridge:
                 1.0 - 2.0 * (y * y + z * z),
             )
 
+    def _battery_cb(self, msg: BatteryStatus) -> None:
+        if msg.connected and 0.0 <= msg.remaining <= 1.0:
+            self._battery_remaining = float(msg.remaining)
+            self._battery_ready = True
+
     # ----------------------------------------------------------------
     # PX4Bridge-compatible interface
     # ----------------------------------------------------------------
@@ -195,6 +218,7 @@ class StandaloneBridge:
         t.status.armed = self._armed
         t.status.offboard_mode = self._offboard
         t.status.landed = self._landed
+        t.status.battery_remaining = self._battery_remaining
         return t
 
     def is_armed(self) -> bool:
@@ -205,6 +229,14 @@ class StandaloneBridge:
 
     def is_landed(self) -> bool:
         return self._landed
+
+    @property
+    def battery_remaining(self) -> float:
+        return self._battery_remaining
+
+    @property
+    def battery_ready(self) -> bool:
+        return self._battery_ready
 
     # -- Setpoints --
 
@@ -227,34 +259,30 @@ class StandaloneBridge:
         self._send_command(self.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
 
     def arm(self) -> None:
-        if self._sim_mode:
-            self._node.get_logger().info("[StandaloneBridge] 解锁请求 (SITL force)")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
-        else:
-            self._node.get_logger().info("[StandaloneBridge] 解锁请求 (标准)")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 0.0)
+        self._node.get_logger().info("[StandaloneBridge] 解锁请求 (SITL force)")
+        self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
 
     def disarm(self) -> None:
         self._node.get_logger().info("[StandaloneBridge] 上锁请求")
         self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
 
     def force_disarm(self) -> None:
-        if self._sim_mode:
-            self._node.get_logger().warn("[StandaloneBridge] 强制上锁! (SITL force)")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
-        else:
-            self._node.get_logger().warn("[StandaloneBridge] 强制上锁!")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
+        self._node.get_logger().warn("[StandaloneBridge] 强制上锁!")
+        self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
 
     def land_at_current(self) -> None:
-        """原地降落 (MAV_CMD_NAV_LAND = 189)."""
+        """原地降落 (MAV_CMD_NAV_LAND = 21)."""
         self._node.get_logger().info("[StandaloneBridge] 请求着陆")
-        self._send_command(189, 0.0, 0.0)
+        self._send_command(self.VEHICLE_CMD_NAV_LAND, 0.0, 0.0)
 
     def return_to_launch(self) -> None:
         """RTL 返航."""
         self._node.get_logger().info("[StandaloneBridge] 请求 RTL")
-        self._send_command(93, 0.0, 0.0)
+        self._send_command(self.VEHICLE_CMD_NAV_RETURN_TO_LAUNCH, 0.0, 0.0)
+
+    # ----------------------------------------------------------------
+    # Internal
+    # ----------------------------------------------------------------
 
     def _send_command(self, command: int, param1: float = 0.0,
                       param2: float = 0.0) -> None:

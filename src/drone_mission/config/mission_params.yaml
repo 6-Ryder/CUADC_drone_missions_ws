@@ -18,6 +18,9 @@
     return_speed: 3.0             # 返航速度 (m/s)
     max_acceleration: 2.0         # setpoint 斜坡速率 (m/步 @20Hz), 0.2→0.2m/s, 2.0→2m/s
 
+    # --- 投放控制 ---
+    max_drops: 2                  # 最大投放次数 (需与 servo pwm_positions 长度-1 一致)
+
     # --- Area 1: 投放区 ---
     # Gazebo x:40~45, y:0~8 → NED: north=[-4,4], east=[30,35]
     area1_north_min: -4.0
@@ -50,9 +53,9 @@
     drop_marker_min_confidence: 0.35      # 圆筒检测不稳时蓝色投放标识兜底阈值
     drop_marker_fallback_delay: 15.0      # 搜索圆筒失败后才允许使用蓝色标识候选
     marker_memory_merge_distance: 0.75    # 同一蓝色标识世界坐标合并距离 (m)
-    marker_memory_min_observations: 1     # 蓝色标识进入候选库所需观测次数
+    marker_memory_min_observations: 3     # 蓝色标识进入候选库所需观测次数
     drop_descend_height: 2.0      # 投放降高高度 (m)
-    drop_confirmation_timeout: 3.0  # 投放确认超时 (s)
+    drop_confirmation_timeout: 5.0  # 必须大于舵机层 3s 总预算 (s)
     drop_align_pixel_tolerance: 35.0 # 投放前圆筒中心允许像素误差
     # ── 低空视觉校准: 梯度下降探测 ──
     drop_visual_align_probe_step: 0.40 # 单次探测步长 (m), 信号大于噪声(~30px)
@@ -70,26 +73,26 @@
     precision_align_target_source: "cylinder" # cylinder=最终投放追选中圆筒, marker 仅兜底
     precision_align_image_width: 1280.0
     precision_align_image_height: 960.0
-    precision_align_alpha: 0.45           # EMA 平滑系数, 提高响应避免 smooth 滞后放行
-    precision_align_gain: 0.65            # 归一化像素误差 → 机体系速度比例
-    precision_align_max_speed: 0.075      # 粗微调水平合速度上限 (m/s)
-    precision_align_fine_pixel_error: 80.0 # 进入精微调速度限制的像素误差
-    precision_align_fine_max_speed: 0.022 # 精微调水平合速度上限 (m/s)
-    precision_align_min_correction_speed: 0.006 # 防止极小误差修正低于飞控响应
-    precision_align_step_s: 0.12          # 每次速度步进持续时间 (s)
-    precision_align_fine_step_s: 0.08     # 精微调短脉冲, 降低越过中心
-    precision_align_hover_s: 0.08         # 每步后归零观察时间 (s)
-    precision_align_timeout: 40.0         # 低空精校最长等待时间 (s)
-    precision_align_max_retries: 3        # 精校超时/丢失后低空原地重置次数
+    precision_align_alpha: 0.55           # EMA 平滑系数, 兼顾检测抖动和闭环响应
+    precision_align_gain: 1.25            # 归一化像素误差 → 机体系速度比例
+    precision_align_max_speed: 0.25       # 粗调水平合速度上限 (m/s)
+    precision_align_fine_pixel_error: 90.0 # 进入精调速度限制的像素误差
+    precision_align_fine_max_speed: 0.065 # 精调水平合速度上限 (m/s)
+    precision_align_min_correction_speed: 0.012 # 保证小误差修正高于飞控响应死区
+    precision_align_step_s: 0.18          # 粗调速度脉冲持续时间 (s)
+    precision_align_fine_step_s: 0.12     # 精调短脉冲, 避免越过中心
+    precision_align_hover_s: 0.04         # 每步后短暂停稳并获取新观测 (s)
+    precision_align_timeout: 25.0         # 单阶段低空精校最长等待时间 (s)
+    precision_align_max_retries: 2        # 精校超时/丢失后低空原地重置次数
     precision_align_image_x_to_right_sign: 1.0   # +1: 图像右侧目标 → 机体右移
     precision_align_image_y_to_forward_sign: -1.0 # CUADC 标定: 图像下侧目标 → 机体后退
-    precision_align_threshold_norm_x: 0.006 # 归一化水平误差阈值 (约 7.7px)
-    precision_align_threshold_norm_y: 0.006 # 归一化垂直误差阈值 (约 5.8px)
-    precision_align_raw_pixel_tolerance: 6.0 # 当前帧必须进入厘米级像素误差
-    precision_align_smooth_pixel_tolerance: 5.0 # 平滑误差也必须进入厘米级
-    precision_align_stable_frames: 8      # 连续稳定帧数后进入最终刹车复查
-    precision_align_final_brake_s: 0.8    # 投放前零速度悬停复查时间 (s)
-    precision_align_release_max_horizontal_speed: 0.02 # 释放时最大水平速度 (m/s)
+    precision_align_threshold_norm_x: 0.008 # 归一化水平误差阈值 (约 10.2px)
+    precision_align_threshold_norm_y: 0.008 # 归一化垂直误差阈值 (约 7.7px)
+    precision_align_raw_pixel_tolerance: 9.0 # 当前帧必须保持厘米级像素误差
+    precision_align_smooth_pixel_tolerance: 7.0 # 平滑误差必须保持在中心附近
+    precision_align_stable_frames: 5      # 连续稳定帧后进入最终刹车复查
+    precision_align_final_brake_s: 0.5    # 投放前零速度悬停复查时间 (s)
+    precision_align_release_max_horizontal_speed: 0.04 # 释放时最大水平速度 (m/s)
     precision_align_min_confidence: 0.25
     precision_align_target_world_gate: 1.5  # 初次锁定与粗定位记忆目标匹配的世界坐标门限 (m)
     precision_align_max_jump_diag_ratio: 0.55 # CUADC 像素跳变拒绝阈值 (占图像对角线)
@@ -100,7 +103,7 @@
     precision_align_final_descent_enable: true  # 先在2m捕获, 再降至最终高度重精校
     precision_align_final_drop_height: 1.25     # 最终投放高度, 降低落体漂移和像素厘米换算
     precision_align_final_descent_speed: 0.25   # 最终降高速度 (m/s)
-    precision_align_log_interval: 0.5
+    precision_align_log_interval: 0.75
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
     cylinder_approach_slow_speed: 0.15   # 接近对心后慢速微调
     cylinder_approach_memory_speed: 0.25 # 丢帧时向记忆圆心粗靠近速度

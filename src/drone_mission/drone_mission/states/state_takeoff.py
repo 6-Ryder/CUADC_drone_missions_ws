@@ -67,9 +67,8 @@ class TakeoffState:
                 self._sub_phase = self.SUB_OFFBOARD
                 self._sub_phase_start = time.time()
             elif sub_elapsed > 15.0:
-                self._fsm.get_logger().warn("TAKEOFF: 解锁超时, 重试")
-                self._arm_cmd_sent = False  # 重新发送
-                self._sub_phase_start = time.time()
+                self._fsm.get_logger().error("TAKEOFF: 解锁超时")
+                return "ERROR"
             return None
 
         # === SUB_OFFBOARD: 切换 Offboard 模式 ===
@@ -78,10 +77,10 @@ class TakeoffState:
                 self._fsm.bridge.set_offboard_mode()
                 self._offboard_cmd_sent = True
                 self._sub_phase_start = time.time()
+                return None
 
-            # 给 PX4 一点时间切换模式, 然后开始爬升
-            if sub_elapsed > 1.5:
-                self._fsm.get_logger().info("TAKEOFF: Offboard 模式已设置, 开始爬升")
+            if self._fsm.bridge.is_offboard():
+                self._fsm.get_logger().info("TAKEOFF: PX4 已确认 Offboard, 开始爬升")
                 self._sub_phase = self.SUB_CLIMB
                 self._sub_phase_start = time.time()
                 # 发布起飞 setpoint
@@ -89,6 +88,9 @@ class TakeoffState:
                 self._fsm.get_logger().info(
                     f"[PX4] takeoff → NED(0.0, 0.0, {-takeoff_h})"
                 )
+            elif sub_elapsed > 15.0:
+                self._fsm.get_logger().error("TAKEOFF: Offboard 切换超时")
+                return "ERROR"
             return None
 
         # === SUB_CLIMB: 等待到达巡航高度 ===
@@ -117,8 +119,8 @@ class TakeoffState:
             return "TRANSIT_TO_DROP_ZONE"
 
         if sub_elapsed > 30.0:
-            self._fsm.get_logger().warn("TAKEOFF: 爬升超时, 强制进入下一状态")
-            return "TRANSIT_TO_DROP_ZONE"
+            self._fsm.get_logger().error("TAKEOFF: 爬升超时")
+            return "ERROR"
 
         return None
 

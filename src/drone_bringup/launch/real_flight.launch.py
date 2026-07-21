@@ -2,9 +2,8 @@
 实飞启动 — Jetson Orin Nano 实飞部署.
 
 与 SITL 的区别:
-  - platform:=jetson (舵机用真实 GPIO)
-  - sim_mode:=false (相机用 GStreamer)
-  - 启动独立 GStreamer 节点
+  - platform:=jetson (舵机通过 PX4 VehicleCommand 控制 MAIN5)
+  - 启动独立 V4L2 相机节点
 
 使用方法:
   ros2 launch drone_bringup real_flight.launch.py
@@ -14,7 +13,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -22,13 +21,37 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_control = get_package_share_directory("px4_control")
     pkg_vision = get_package_share_directory("drone_vision")
-    pkg_servo = get_package_share_directory("drone_servo")
+    pkg_servo = get_package_share_directory("drone_servo2")
     pkg_mission = get_package_share_directory("drone_mission")
 
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
     mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
+
+    camera_device_arg = DeclareLaunchArgument(
+        "camera_device",
+        default_value="/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0",
+        description="任务相机的稳定 V4L2 设备路径",
+    )
+    serial_device_arg = DeclareLaunchArgument(
+        "serial_device",
+        default_value="/dev/ttyTHS1",
+        description="CUAV 7-Nano uXRCE-DDS 串口",
+    )
+    serial_baud_arg = DeclareLaunchArgument(
+        "serial_baud", default_value="921600",
+        description="uXRCE-DDS 串口波特率",
+    )
+
+    xrce_agent = ExecuteProcess(
+        cmd=[
+            "MicroXRCEAgent", "serial", "--dev",
+            LaunchConfiguration("serial_device"), "--baudrate",
+            LaunchConfiguration("serial_baud"),
+        ],
+        output="screen",
+    )
 
     # PX4 桥接
     px4_bridge_node = Node(
@@ -40,7 +63,26 @@ def generate_launch_description():
         parameters=[px4_param_file],
     )
 
-    # 视觉 — 实飞模式 (model 路径由 YAML 配置, 命令行可用 --ros-args 覆盖)
+    camera_node = Node(
+        package="drone_vision",
+        executable="camera_node",
+        name="camera_driver",
+        output="screen",
+        emulate_tty=True,
+        parameters=[{
+            "sim_mode": False,
+            "camera_device": LaunchConfiguration("camera_device"),
+            "camera_width": 640,
+            "camera_height": 480,
+            "camera_fps": 30.0,
+            "fx": 400.0,
+            "fy": 400.0,
+            "cx": 320.0,
+            "cy": 240.0,
+        }],
+    )
+
+    # 视觉 — 实飞模式 (ONNX Runtime CUDA)
     vision_node = Node(
         package="drone_vision",
         executable="vision_pipeline",
@@ -49,23 +91,24 @@ def generate_launch_description():
         parameters=[
             vision_param_file,
             {
-                "sim_mode": False,
-                "device": "tensorrt",
+                "camera_width": 640,
+                "camera_height": 480,
+                "fx": 400.0,
+                "fy": 400.0,
+                "cx": 320.0,
+                "cy": 240.0,
+                "device": "cuda",
             },
         ],
     )
 
-    # 舵机 — 真实 GPIO
+    # 舵机 — CUAV 7-Nano MAIN5, PX4 PWM 50Hz
     servo_node = Node(
-        package="drone_servo",
+        package="drone_servo2",
         executable="servo_controller",
         name="servo_controller",
         output="screen",
-        parameters=[servo_param_file],
-        arguments=[
-            "--ros-args",
-            "-p", "platform:=jetson",
-        ],
+        parameters=[servo_param_file, {"platform": "jetson"}],
     )
 
     # 任务状态机
@@ -75,7 +118,18 @@ def generate_launch_description():
         name="mission_state_machine",
         output="screen",
         emulate_tty=True,
-        parameters=[mission_param_file],
+        parameters=[
+            mission_param_file,
+            {
+                "precision_align_image_width": 640.0,
+                "precision_align_image_height": 480.0,
+                "camera_fx": 400.0,
+                "camera_fy": 400.0,
+                "camera_cx": 320.0,
+                "camera_cy": 240.0,
+            },
+        ],
+        additional_env={"RCUTILS_COLORIZED_OUTPUT": "1"},
     )
 
     # 顺序启动
@@ -85,6 +139,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         LogInfo(msg="=== 无人机实飞全系统启动 (Jetson) ==="),
+        camera_device_arg,
+        serial_device_arg,
+        serial_baud_arg,
+        xrce_agent,
+        camera_node,
         px4_bridge_node,
         vision_delayed,
         servo_delayed,

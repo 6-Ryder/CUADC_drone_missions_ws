@@ -11,7 +11,7 @@
   <depend>drone_interfaces</depend>
   <depend>px4_control</depend>
   <depend>drone_vision</depend>
-  <depend>drone_servo</depend>
+  <depend>drone_servo2</depend>
   <depend>drone_utils</depend>
 
   <test_depend>ament_copyright</test_depend>

@@ -46,6 +46,7 @@ class DropState:
         self._descend_best_pixel_error: float = float("inf")
         self._precision_align_failed: bool = False
         self._final_descent_started: bool = False
+        self._descent_ready_latched: bool = False
         self._descend_stall_count: int = 0
         self._descent_initial_error: float = 0.0
 
@@ -71,6 +72,7 @@ class DropState:
         self._descend_best_pixel_error = float("inf")
         self._precision_align_failed = False
         self._final_descent_started = False
+        self._descent_ready_latched = False
         self._descend_stall_count = 0
         self._descent_initial_error = 0.0
         self._visual_aligner.reset()
@@ -103,13 +105,9 @@ class DropState:
             if hasattr(self._fsm, "_current_drop_cyl_id")
             else -1
         )
-        if hasattr(self._fsm, "start_drop_service"):
-            self._fsm.start_drop_service(cyl_id)
-            self._drop_executed = True
-            self._fsm.get_logger().info(f"DROP: 已发送投放请求 cyl={cyl_id}")
-        else:
-            self._drop_success = self._fsm.call_drop_service(cyl_id)
-            self._drop_executed = True
+        self._fsm.start_drop_service(cyl_id)
+        self._drop_executed = True
+        self._fsm.get_logger().info(f"DROP: 已发送投放请求 cyl={cyl_id}")
 
     def _enter_ascend(self):
         self._fsm.logger.log_state("EXECUTE_DROP", "ASCEND", "回升")
@@ -160,24 +158,20 @@ class DropState:
                 if self._retry_precision_align_in_place(drop_h, "低空精校超时"):
                     return None
 
-                if hasattr(self._fsm, "release_current_drop_target"):
-                    self._fsm.release_current_drop_target()
-                self._fsm.get_logger().warn(
-                    "DESCEND: 低空精校重试耗尽, 放弃当前目标并回升 "
+                self._fsm.get_logger().error(
+                    "DESCEND: 低空精校重试耗尽 "
                     f"source={status.source} pixel_error={status.pixel_error:.1f}px "
                     f"smooth=({status.smooth_dx_norm:+.4f},{status.smooth_dy_norm:+.4f}) "
                     f"retries={self._descend_retry_count}"
                 )
-                return "ASCEND"
+                return "ERROR"
 
             if self._nudge_to_visible_drop_target(drop_h):
                 return None
             if self._precision_align_failed:
                 self._precision_align_failed = False
-                if hasattr(self._fsm, "release_current_drop_target"):
-                    self._fsm.release_current_drop_target()
-                self._fsm.get_logger().warn("DESCEND: 精校目标丢失重试耗尽, 放弃当前目标并回升")
-                return "ASCEND"
+                self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
+                return "ERROR"
             self._warn_descend_throttled("DESCEND: 低空精校未取得可用目标, 继续等待复查")
 
         if descent_ready:
@@ -205,23 +199,19 @@ class DropState:
                     )
                     return None
 
-                self._fsm.get_logger().warn(
-                    "DESCEND: 低空视觉校准超时, 放弃当前目标并回升 "
+                self._fsm.get_logger().error(
+                    "DESCEND: 低空视觉校准超时 "
                     f"source={status.source} pixel_error={status.pixel_error:.1f}px "
                     f"retries={self._descend_retry_count}"
                 )
-                if hasattr(self._fsm, "release_current_drop_target"):
-                    self._fsm.release_current_drop_target()
-                return "ASCEND"
+                return "ERROR"
 
             if self._nudge_to_visible_drop_target(drop_h):
                 return None
             if self._precision_align_failed:
                 self._precision_align_failed = False
-                if hasattr(self._fsm, "release_current_drop_target"):
-                    self._fsm.release_current_drop_target()
-                self._fsm.get_logger().warn("DESCEND: 精校目标丢失重试耗尽, 放弃当前目标并回升")
-                return "ASCEND"
+                self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
+                return "ERROR"
             self._warn_descend_throttled("DESCEND: 到达投放高度但目标未居中/不可见, 继续等待复查")
 
         legacy_recheck_timeout = 15.0
@@ -229,10 +219,8 @@ class DropState:
             if self._drop_target_is_centered():
                 self._fsm.get_logger().warn("DESCEND: 复查超时但投放许可通过, 执行投放")
                 return "EXECUTE_DROP"
-            self._fsm.get_logger().warn("DESCEND: 复查超时且投放许可失败, 放弃本次投放")
-            if hasattr(self._fsm, "release_current_drop_target"):
-                self._fsm.release_current_drop_target()
-            return "ASCEND"
+            self._fsm.get_logger().error("DESCEND: 复查超时且投放许可失败")
+            return "ERROR"
 
         return None
 
@@ -254,19 +242,27 @@ class DropState:
         return float(self._fsm.get_param("precision_align_drop_height_tolerance", 0.30))
 
     def _check_descent_ready(self, height_error: float) -> bool:
-        """检查是否已满足开始精校的条件.
+        """
+        检查是否已满足开始精校的条件.
 
         三阶段判断:
           1. 快速通道: height_error < tolerance → 立即通过
+             (最终下降阶段禁用 — 无人机可能快速穿过目标高度,
+             此时精校介入会导致画面剧烈跳动)
           2. 最小下降时间门控: 下降命令发出后前 N 秒禁止停滞判定,
              避免 PX4 启动延迟期的 vd≈0 被误判为"已到位"
           3. 降速停滞检测: 垂直速度持续归零 + 已明显降过一段高度 →
              SITL 稳态偏差导致无法到达绝对高度, 以物理实际到达为准
         """
-        # 快速通道: 绝对高度误差已达标
-        if height_error < self._drop_height_tolerance():
-            self._descend_stall_count = 0
+        if self._descent_ready_latched:
             return True
+
+        # 快速通道: 最终下降阶段禁用, 强制走停滞检测确保无人机停稳
+        if not self._final_descent_started:
+            if height_error < self._drop_height_tolerance():
+                self._descend_stall_count = 0
+                self._descent_ready_latched = True
+                return True
 
         # 最小下降时间门控: 0.5m/s 降速下 5m→2m 约 6s,
         # 前 2.5s 内 vd≈0 属于 PX4 启动延迟, 不是停滞
@@ -306,6 +302,7 @@ class DropState:
                     f"height_error={height_error:.2f}m "
                     f"vd={vd:.3f}m/s"
                 )
+            self._descent_ready_latched = True
             return True
 
         return False
@@ -327,7 +324,10 @@ class DropState:
             return False
 
         self._final_descent_started = True
-        self._precision_aligner.reset(self._selected_memory_xy())
+        self._descent_ready_latched = False
+        # 仅重置确认状态 (稳定计数/刹车/投放许可), 保留目标锁和 EMA 平滑值.
+        # 避免冷启动导致低空像素误差放大后精校器来回振荡 (抖动).
+        self._precision_aligner.reset_confirmation()
         self._start_time = time.time()
         self._descend_best_pixel_error = float("inf")
         self._descend_stall_count = 0
@@ -337,7 +337,7 @@ class DropState:
         speed = float(self._fsm.get_param("precision_align_final_descent_speed", 0.25))
         self._fsm.fc.goto_ned(pos.north, pos.east, -final_h, speed=speed)
         self._fsm.get_logger().info(
-            "DESCEND: 初次精校完成, 慢速降至最终投放高度后重新精校 "
+            "DESCEND: 初次精校完成, 定点直降至最终投放高度后复查 "
             f"{align_h:.2f}m → {final_h:.2f}m"
         )
         return True
@@ -371,7 +371,7 @@ class DropState:
         now = time.time()
         if now - self._last_descend_log_time >= interval:
             self._last_descend_log_time = now
-            self._fsm.get_logger().warn(message)
+            self._fsm.get_logger().info(message)
 
     def _nudge_to_visible_drop_target(self, drop_h: float) -> bool:
         if self._precision_enabled():
@@ -419,24 +419,20 @@ class DropState:
 
     def _execute_drop(self) -> Optional[str]:
         # 等待投放确认
-        timeout = self._fsm.get_param("drop_confirmation_timeout", 3.0)
-        if hasattr(self._fsm, "check_drop_service_result"):
-            result = self._fsm.check_drop_service_result()
-            if result is not None:
-                self._drop_success = result
-                if self._drop_success:
-                    self._fsm.get_logger().info("DROP: 投放成功")
-                else:
-                    self._fsm.get_logger().warn("DROP: 投放失败")
-                    if hasattr(self._fsm, "release_current_drop_target"):
-                        self._fsm.release_current_drop_target()
-                return "ASCEND"
+        timeout = self._fsm.get_param("drop_confirmation_timeout", 5.0)
+        result = self._fsm.check_drop_service_result()
+        if result is not None:
+            self._drop_success = result
+            if self._drop_success:
+                self._fsm.get_logger().info("DROP: 投放成功")
+            else:
+                self._fsm.get_logger().error("DROP: 舵机未确认投放, 中止任务")
+                return "ERROR"
+            return "ASCEND"
 
         if time.time() - self._start_time > timeout:
-            self._fsm.get_logger().warn("DROP: 投放确认超时")
-            if hasattr(self._fsm, "release_current_drop_target"):
-                self._fsm.release_current_drop_target()
-            return "ASCEND"
+            self._fsm.get_logger().warn("DROP: 投放结果不明确, 中止任务")
+            return "ERROR"
         return None
 
     def _execute_ascend(self) -> Optional[str]:
@@ -454,9 +450,8 @@ class DropState:
                 return "TRANSIT_TO_RECON_ZONE"
 
         if time.time() - self._start_time > 15.0:
-            drops = self._fsm.drop_success_count
-            max_drops = self._fsm.get_param("max_drops", 2)
-            return "SELECT_TARGET" if drops < max_drops else "TRANSIT_TO_RECON_ZONE"
+            self._fsm.get_logger().error("ASCEND: 未回到巡航高度")
+            return "ERROR"
 
         return None
 

@@ -19,8 +19,21 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from drone_interfaces.msg import CylinderArray, LandingTarget, CoverageStatus
+
+
+WINDOW_NAME = "Drone Vision Debug"
+
+
+def configure_window():
+    """Create a resizable window with a stable initial viewport."""
+    cv2.namedWindow(
+        WINDOW_NAME,
+        cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_NORMAL,
+    )
+    cv2.resizeWindow(WINDOW_NAME, 640, 480)
 
 
 class VisionViewer(Node):
@@ -41,7 +54,8 @@ class VisionViewer(Node):
 
         # 订阅 (qos=1 只保留最新帧, 避免旧帧延迟)
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._on_image, 1,
+            Image, "/drone/camera/image_raw", self._on_image,
+            qos_profile_sensor_data,
         )
         self._cyl_sub = self.create_subscription(
             CylinderArray, "/drone/vision/cylinders", self._on_cylinders, 1,
@@ -59,11 +73,21 @@ class VisionViewer(Node):
         self.get_logger().info("画面查看器已就绪")
 
     def _on_image(self, msg: Image):
-        try:
-            h, w = msg.height, msg.width
-            self._image = np.frombuffer(bytes(msg.data), dtype=np.uint8).reshape(h, w, 3)
-        except Exception:
-            pass
+        h, w = msg.height, msg.width
+        if msg.encoding not in ("bgr8", "rgb8"):
+            raise ValueError(f"不支持的图像编码: {msg.encoding}")
+        if msg.step < w * 3:
+            raise ValueError(
+                f"无效图像步长: step={msg.step}, width={w}, encoding={msg.encoding}"
+            )
+
+        rows = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, msg.step)
+        image = rows[:, :w * 3].reshape(h, w, 3)
+        if msg.encoding == "rgb8":
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        else:
+            image = image.copy()
+        self._image = image
 
     def _on_cylinders(self, msg: CylinderArray):
         self._cylinders = msg.cylinders
@@ -110,11 +134,15 @@ class VisionViewer(Node):
                               (c.bbox_x2, c.bbox_y2), (0, 255, 0), 2)
             # OpenCV 精修圆心 (红点) + 拟合圆/椭圆 (黄色)
             cv2.circle(frame, (u, v), 8, (0, 0, 255), -1)
-            r_px = int(c.radius * max(w, h) / 5.0)  # 近似的像素半径
+            bbox_width = c.bbox_x2 - c.bbox_x1
+            bbox_height = c.bbox_y2 - c.bbox_y1
+            r_px = max(0, min(bbox_width, bbox_height) // 2)
             if r_px > 2:
                 cv2.circle(frame, (u, v), r_px, (0, 255, 255), 2)
             label = f"CYL#{c.id} r={c.radius:.2f}m {c.confidence:.2f}"
-            cv2.putText(frame, label, (u + 15, v - 10),
+            label_x = max(0, c.bbox_x1)
+            label_y = max(18, c.bbox_y1 - 6)
+            cv2.putText(frame, label, (label_x, label_y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 2)
 
         # ---- 投放区蓝色标识 (橙色框 + 橙色圆心) ----
@@ -125,15 +153,23 @@ class VisionViewer(Node):
             mu, mv = int(m.center_u), int(m.center_v)
             cv2.circle(frame, (mu, mv), 6, (0, 165, 255), -1)
             label = f"MARKER {m.confidence:.2f}"
-            cv2.putText(frame, label, (mu + 10, mv - 5),
+            label_x = max(0, m.bbox_x1)
+            label_y = max(18, m.bbox_y1 - 6)
+            cv2.putText(frame, label, (label_x, label_y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 2)
 
         # ---- H 降落标识 (青色) ----
         if self._landing and self._landing.confidence > 0.1:
             lu, lv = int(self._landing.center_u), int(self._landing.center_v)
             cv2.circle(frame, (lu, lv), 15, (255, 255, 0), 2)
-            cv2.putText(frame, f"H yaw={self._landing.yaw_correction:.1f}deg {self._landing.confidence:.2f}",
-                        (lu + 20, lv), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 2)
+            landing_label = (
+                f"H yaw={self._landing.yaw_correction:.1f}deg "
+                f"{self._landing.confidence:.2f}"
+            )
+            cv2.putText(
+                frame, landing_label, (lu + 20, lv),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 2,
+            )
 
         # ---- HUD 面板 ----
         # 半透明底栏
@@ -144,13 +180,27 @@ class VisionViewer(Node):
         line_h = h - 40
         cv2.putText(frame, f"FPS:{fps:.0f}  {w}x{h}",
                     (10, line_h), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"CYL:{len(self._cylinders)}  |  MKR:{len(self._markers)}  |  H:{'YES' if self._landing and self._landing.confidence > 0.1 else 'no'}  |  COV:{self._coverage:.1%}",
-                    (200, line_h), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        h_visible = self._landing and self._landing.confidence > 0.1
+        status = (
+            f"CYL:{len(self._cylinders)}  |  MKR:{len(self._markers)}  |  "
+            f"H:{'YES' if h_visible else 'no'}  |  COV:{self._coverage:.1%}"
+        )
+        cv2.putText(
+            frame, status, (200, line_h), cv2.FONT_HERSHEY_SIMPLEX,
+            0.5, (200, 200, 200), 1,
+        )
 
         # 无检测提示
         if not self._cylinders and not (self._landing and self._landing.confidence > 0.1):
-            cv2.putText(frame, "NO TARGET — point camera at white cylinder or blue marker",
-                        (cx - 220, cy - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (100, 100, 255), 1)
+            cv2.putText(
+                frame,
+                "NO TARGET",
+                (cx - 55, cy - 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (100, 100, 255),
+                1,
+            )
 
         return frame
 
@@ -158,6 +208,7 @@ class VisionViewer(Node):
 def main():
     rclpy.init(args=sys.argv)
     viewer = VisionViewer()
+    configure_window()
 
     print("=" * 60)
     print("  视觉检测实时查看器")
@@ -179,7 +230,7 @@ def main():
 
             if viewer.has_image:
                 frame = viewer.render()
-                cv2.imshow("Vision Debug — Drone Detection", frame)
+                cv2.imshow(WINDOW_NAME, frame)
                 key = cv2.waitKey(1) & 0xFF
 
                 if key == ord("q"):
@@ -200,7 +251,8 @@ def main():
     finally:
         cv2.destroyAllWindows()
         viewer.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
         print("\n查看器已关闭")
 
 

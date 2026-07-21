@@ -20,22 +20,22 @@
 │                                                      │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
 │  │ Mission   │  │ Vision   │  │ Servo            │   │
-│  │ Controller│  │ Pipeline │  │ Controller       │   │
-│  │ (Python)  │  │ (C++/Py) │  │ (GPIO/PWM)       │   │
+│  │ Controller│  │ Pipeline │  │ Controller (C++) │   │
+│  │ (Python)  │  │ (C++/Py) │  │ dr-ne_servo2     │   │
 │  └─────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
 │        │              │                │              │
 │        └──────────────┼────────────────┘              │
-│                       │ DDS/RTPS                      │
-│                       │ (micro-XRCE-DDS)               │
-│                       │ via Serial/UART               │
+│                       │ VehicleCommand (DDS/RTPS)     │
+│                       │ via UART → PX4                │
 └───────────────────────┼──────────────────────────────┘
                         │
 ┌───────────────────────┼──────────────────────────────┐
-│                PX4 Flight Controller                  │
-│  uxrce_dds_client ←→ uORB ←→ EKF2/Commander/Control  │
+│                CUAV 7-Nano (PX4)                      │
+│  VehicleCommand → Control Allocation → MAIN5 PWM     │
 │   ⇅                                                  │
-│  IMU / GPS / Baro / Mag (sensors)                     │
-│  Motor PWM outputs                                    │
+│  IMU / GPS / Baro / Mag                              │
+│  Motor: MAIN1-4 (PWM)                                │
+│  Servo: MAIN5 (PWM 50Hz, 1150-2150μs)                │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -52,13 +52,13 @@
 ├─────────────────────────────────────────────────────────┤
 │  Layer 3: Skill Modules                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │ Vision       │  │ Servo        │  │ Path Planner  │  │
-│  │ (drone_vision)│  │ (drone_servo)│  │ (内嵌)        │  │
+│  │ Vision       │  │ Servo (C++)  │  │ Path Planner  │  │
+│  │ (drone_vision)│  │(drone_servo2)│  │ (内嵌)        │  │
 │  │              │  │              │  │              │  │
-│  │ - YOLO检测   │  │ - PWM控制    │  │ - 覆盖路径   │  │
-│  │ - 椭圆精修   │  │ - 投放逻辑   │  │ - 过渡路径   │  │
+│  │ - YOLO检测   │  │ - 多位置步进 │  │ - 覆盖路径   │  │
+│  │ - 椭圆精修   │  │ - VehCmd中继 │  │ - 过渡路径   │  │
 │  │ - 覆盖监控   │  │ - SITL Mock  │  │ - 对心降落   │  │
-│  │ - 姿态补偿   │  │              │  │              │  │
+│  │ - 姿态补偿   │  │ - PWM归一化  │  │              │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
 ├─────────┼─────────────────┼─────────────────┼───────────┤
 │  Layer 2: Flight Control Abstraction (px4_control)      │
@@ -134,12 +134,26 @@ CUADC_drone_missions_ws/src/
 │   │   └── vision_params.yaml       # YOLO参数 + OpenCV后处理 + 伺服PID
 │   └── package.xml
 │
-├── drone_servo/                     # 舵机投放控制
+├── drone_servo2/                    # 舵机投放控制 (C++, 主力)
+│   ├── include/drone_servo2/
+│   │   ├── servo_interface.hpp      # IServo 抽象接口: set_pwm()
+│   │   └── drop_manager.hpp         # 多位置步进投放状态机
+│   ├── src/
+│   │   └── servo_controller.cpp     # ServoMock + PX4CommandServo + 节点 (400行)
+│   ├── config/
+│   │   └── servo_params.yaml        # positions=[1150,1700,2150]
+│   ├── scripts/
+│   │   ├── check_servo.sh
+│   │   ├── test_servo_full.sh
+│   │   └── demo.sh
+│   └── CMakeLists.txt
+│
+├── drone_servo/                     # 舵机投放控制 (Python, 参考实现)
 │   ├── drone_servo/
 │   │   ├── __init__.py
-│   │   ├── servo_controller.py      # 舵机控制 (285行, SITL Mock / Jetson GPIO 双模式)
-│   │   ├── drop_manager.py          # 投放逻辑管理 (195行, TriggerDrop 服务)
-│   │   └── servo_mock.py            # SITL 模拟舵机 (95行)
+│   │   ├── servo_controller.py      # 多位置步进 (SITL Mock / PX4 VehicleCommand)
+│   │   ├── drop_manager.py          # 投放管理器 (multi-position)
+│   │   └── servo_mock.py            # SITL 模拟舵机
 │   ├── config/
 │   │   └── servo_params.yaml
 │   └── package.xml
@@ -155,12 +169,12 @@ CUADC_drone_missions_ws/src/
 │   │   │   ├── state_transit.py     # 跨区域飞行
 │   │   │   ├── state_cylinder_search.py    # 投放区搜索 & 选筒
 │   │   │   ├── state_cylinder_approach.py  # 逼近圆筒圆心
-│   │   │   ├── state_drop.py        # 触发投放 (465行, 含精校+投放逻辑)
+│   │   │   ├── state_drop.py        # 触发投放 (467行, 含精校+三级降高: 5m→2m→1.25m)
 │   │   │   ├── state_recon_patrol.py       # 侦察区全覆盖巡视
 │   │   │   ├── state_recon_inspect.py      # 危险品分类确认 (已废弃, 不再使用)
 │   │   │   ├── state_return.py      # 返航
 │   │   │   └── state_precision_land.py    # 视觉精准降落
-│   │   ├── precision_align_controller.py  # 低空精校 (426行, CUADC 像素闭环, 默认启用)
+│   │   ├── precision_align_controller.py  # 低空精校 (441行, CUADC 像素闭环; reset_confirmation() 支持高度变化后热重启)
 │   │   ├── drop_visual_aligner.py  # 低空视觉校准 (489行, 梯度下降, precision_align_enable=false 时启用)
 │   │   ├── path_planner.py          # 路径规划 (366行, 覆盖路径+过渡路径)
 │   │   └── cylinder_selector.py     # 圆筒选择策略 (145行)
@@ -239,10 +253,10 @@ PX4 NED (vehicle_odometry.position)
 
 | 方法 | 5m高度+5°倾斜误差 | 适用场景 |
 |------|-------------------|---------|
-| 简化版 `dx = pixel * alt / f` | ~0.44m | 无姿态数据时回退 |
+| 简化版 `dx = pixel * alt / f` | ~0.44m | 离线分析工具，不用于任务目标发布 |
 | 姿态补偿 `pixel_to_world()` | <0.05m | 正常飞行 (推荐) |
 
-**回退策略**: 当 `/drone/pose` 话题不可用时，自动回退到简化版 `pixel_to_world_simple()`.
+`/drone/pose` 是任务就绪硬条件。姿态投影无效时丢弃该帧目标，不发布简化投影坐标。
 
 ---
 
@@ -369,15 +383,15 @@ class FlightController:
 | Jetson 推理 | ~30ms (CPU) | ~8-15ms (TensorRT FP16) |
 | 开发效率 | 每个检测器手工设计特征 | 标注数据 → 训练 → 导出 → 部署 |
 
-**核心思路**: YOLO 负责鲁棒的粗定位 (bbox)，OpenCV 在 bbox 内做亚像素级精确拟合 (圆筒椭圆/H 圆形底板)。YOLO 置信度低时用 HSV 颜色回退验证。
+**核心思路**: YOLO 负责圆筒和蓝色标识粗定位，OpenCV 对候选做颜色、形状和物理尺度验证。验证失败即拒绝目标。H 降落标识使用独立几何检测器。
 
 #### 6.2.1 统一视觉管线 (`vision_pipeline.py`)
 
-**推荐部署模式**: 单一 ROS2 节点，一次 YOLO 前向传播，多任务后处理。
+**推荐部署模式**: 单一 ROS2 节点，两套单类模型串行推理，避免 GPU 并发峰值。
 
 ```
-cylinder_yolo.pt (V2, 1类)       drop_marker_yolo.pt (V1, 1类)
-    │ Ultralytics                      │ Ultralytics
+cylinder_yolo.onnx (1类)       drop_marker_yolo.onnx (1类)
+    │ ONNX Runtime CUDA                │ ONNX Runtime CUDA
     ▼                                  ▼
 ┌──────────────────────────────────────────────────┐
 │                vision_pipeline.py                 │
@@ -391,7 +405,7 @@ cylinder_yolo.pt (V2, 1类)       drop_marker_yolo.pt (V1, 1类)
 │                  → World 坐标                      │
 │                  → /drone/vision/markers          │
 │                                                   │
-│  landing_H dets → LandingPadRefiner (圆拟合)      │
+│  landing image  → LandingPadRefiner (圆环+H几何)   │
 │                  → 姿态补偿 World 坐标              │
 │                  → /drone/vision/landing_target   │
 │                                                   │
@@ -406,17 +420,17 @@ cylinder_yolo.pt (V2, 1类)       drop_marker_yolo.pt (V1, 1类)
 
 | 模型文件 | 类别 | 训练来源 | 用途 |
 |----------|------|---------|------|
-| `cylinder_yolo.pt` | cylinder (白色圆筒) | cv_trainer V2, YOLOv8n | 圆筒检测 → 投放目标选择 |
-| `drop_marker_yolo.pt` | drop_zone_marker (蓝色标识) | cv_trainer V1, YOLO11n | 投放区标识 → 低空精校伺服目标 |
+| `cylinder_yolo.onnx` | cylinder (白色圆筒) | cv_trainer V2, YOLOv8n | 圆筒检测 → 投放目标选择 |
+| `drop_marker_yolo.onnx` | drop_zone_marker (蓝色标识) | cv_trainer V1, YOLO11n | 投放区标识 → 低空精校伺服目标 |
 
 > **注意**: 
-> - 两个模型为独立 `YOLOEngine` 实例，推理串行但共享 preprocess 开销
-> - 危险品分类 (1-3) 已在主线视觉管线中禁用 (`_process_hazards` 调用已注释)
-> - H 降落标识 (landing_H) 暂无专用模型，使用 OpenCV 回退 (自适应阈值+圆形检测)
+> - 两个模型为独立 `YOLOEngine` 实例并串行推理，帧率上限 20FPS
+> - 危险品分类已从主线视觉管线移除
+> - H 降落标识不依赖 YOLO，使用圆环与 H 笔画联合几何验证
 
-#### 6.2.2 高度自适应
+#### 6.2.2 高度自适应工具
 
-`coordinate_transforms.py` 中的 `AltitudeAdaptiveParams` 根据飞行高度动态调整参数:
+`AltitudeAdaptiveParams` 保留给离线分析和独立检测节点。统一实飞管线使用固定训练阈值，再用蓝色标识物理投影尺寸过滤，不在运行中动态降低 YOLO 置信度。
 
 ```python
 adaptive = AltitudeAdaptiveParams(focal_length_px=400, base_altitude=5.0)
@@ -460,7 +474,7 @@ _refine_marker_center(image, bbox):
   → cv2.moments() → 亚像素质心 (cx, cy)
     ↓
 精修成功 → 用于 center_u/center_v + World 坐标计算
-精修失败 → 回退到 YOLO bbox 中心
+精修或物理尺度验证失败 → 拒绝该候选
 ```
 
 蓝色标识是地面上的标准圆形，HSV 分割 + 轮廓矩质心的精度远高于 YOLO bbox 中心。可通过 `drop_marker_refine_enable` 参数开关。
@@ -488,13 +502,11 @@ if confidence < 0.7:
 #### 6.2.5 H 降落标识 (`landing_detector.py`)
 
 ```
-YOLO 检出 "landing_H" bbox
-    ↓
-LandingPadRefiner.refine(image, bbox):
-  ROI → 自适应阈值 → 形态学清理
-  → 找最大圆形轮廓 → minEnclosingCircle
-  → 圆形度验证 > 0.6
-  → PCA 分析 H 形状主方向 → 偏航修正角
+LandingPadRefiner.detect(image):
+  全图灰度阈值 → 外圆环候选
+  → 圆内白色凹轮廓提取
+  → H 笔画形状验证
+  → 目标中心与偏航修正角
     ↓
 姿态补偿 → World 坐标
 ```
@@ -525,38 +537,63 @@ state = approach.update(cylinder_u, cylinder_v, img_cx, img_cy, altitude, fx, fy
 
 不变——侦察区离散化网格 + FOV 覆盖标记 + 覆盖率阈值判定。
 
-#### 6.2.8 无 YOLO 回退模式
+#### 6.2.8 模型与执行后端要求
 
-当 `model_path` 参数为空或模型加载失败时，自动启用纯 OpenCV 回退:
-- 圆筒: `HoughCircles` + 白色 HSV 验证
-- 危险品: HSV 颜色分割 + 轮廓筛选
-- 降落: 自适应阈值 + 圆形检测
+圆筒和蓝色标识模型均为启动硬依赖。模型文件、ONNX Runtime 或请求的 CUDA/TensorRT provider 不可用时，节点直接启动失败并保持 `ready=0`，不静默切换 CPU 或传统 CV。
 
-回退模式延迟 ~30ms，精度比 YOLO 低但保证系统可运行。
+### 6.3 drone_servo2: 舵机多位置步进投放 (C++)
 
-### 6.3 drone_servo: 舵机控制
+舵机物理连接在飞控 CUAV 7-Nano 的 MAIN5 输出口 (PWM 50Hz, 范围 1150-2150μs).
+Jetson 通过 VehicleCommand DO_SET_ACTUATOR 命令控制舵机, 而非直接 GPIO/I2C.
 
-```python
-class ServoController:
-    """舵机投放控制器"""
-    def __init__(self, pwm_pin: int, platform: str = 'jetson'):
-        # Jetson: 使用 Jetson.GPIO 或 PCA9685 PWM驱动板
-        # SITL: 使用 ServoMock (仅记录日志)
-        ...
-
-    def configure(self, open_pulse_us: int, close_pulse_us: int): ...
-    def open(self) -> bool: ...       # 打开投放机构
-    def close(self) -> bool: ...      # 关闭投放机构
-    def drop(self) -> bool: ...       # 一次完整投放动作 (open → 延时 → close)
-    def is_ready(self) -> bool: ...   # 检查伺服状态
+```
+Jetson (drone_servo2) → VehicleCommand(187) → /drone/cmd/vehicle_command_relay
+  → px4_bridge 转发 → /fmu/in/vehicle_command (DDS)
+    → PX4 → MAIN5 PWM → 舵机
 ```
 
-**SITL Mock**: 在SITL模式下，`ServoMock` 将所有操作记录到日志，并通过ROS2话题发布投放事件。
+#### 投放序列
 
-**投放确认策略**:
-- 发送投放指令后，等待 1s (机械动作完成)
-- 可选: 通过视觉确认 (投放前后图像对比, 判断圆筒内是否有变化)
-- 投放成功/失败通过 `TriggerDrop.srv` 的服务响应返回
+```
+positions = [1150, 1700, 2150] μs
+  初始:  舵机 = 1150μs → 闭合 (挂载两枚载荷)
+  投放1: 舵机 → 1700μs → 释放第一枚
+  投放2: 舵机 → 2150μs → 释放第二枚
+```
+
+舵机只进不退, 每次投放 step 到下一个 PWM 位置, 保持 1s 后确认完成.
+
+#### 接口
+
+```cpp
+class IServo {
+    virtual bool set_pwm(double pwm_us) = 0;  // 设置 PWM 输出
+    virtual bool is_ready() const = 0;
+    virtual void reset() = 0;                  // 回到初始位置
+};
+
+class DropManager {
+    DropManager(IServo*, std::vector<double> positions, double delay_ms, double timeout_s);
+    bool execute_drop(int cylinder_id);  // 前进到下一个位置
+    bool can_drop() const;               // 是否还有剩余投放
+};
+```
+
+#### 硬件适配
+
+| 模式 | 类 | 行为 |
+|---|---|---|
+| SITL | ServoMock | 记录日志, 模拟位置 |
+| Jetson | PX4CommandServo | 发布 VehicleCommand(DO_SET_ACTUATOR=187) |
+
+#### PWM 归一化
+
+`normalized = (pwm_us - 1650) / 500` — 线性映射 1150→-1.0, 1700→+0.1, 2150→+1.0.
+归一化值通过 DO_SET_ACTUATOR 的 param1 发送, PX4 控制分配系统映射回实际 PWM 输出.
+
+#### Python 参考实现
+
+`drone_servo` (Python) 保持同步逻辑, 作为参考实现保留. 实际部署使用 `drone_servo2` (C++).
 
 ### 6.4 drone_mission: 任务编排
 
@@ -618,7 +655,10 @@ class ServoController:
 - 双速模式: 粗调 ≤0.075m/s (pixel>80px), 精调 ≤0.022m/s (pixel≤80px)
 - 步进-悬停-观察周期: 粗调 0.12s 步进 + 0.08s 悬停, 精调 0.08s 步进
 - 收敛条件: raw≤6px + smooth≤5px + 连续 8 帧 → 0.8s 刹车复查 → 释放投放许可
-- 两级投放高度: 2.0m 初次精校达标 → 慢速降至 1.25m 重新精校 (final_descent)
+- 两级投放高度: 2.0m 初次精校达标 → 定点直降至 1.25m 热重启复查 (final_descent)
+  - 降高期间暂停精校控制, 避免下降运动与像素修正指令冲突导致 XY 抖动
+  - `reset_confirmation()` 仅清零确认状态 (stable_count/brake/release), 保留目标锁和 EMA 平滑值
+  - 热重启使低空复查无需冷启动收敛, 消除此前 19-29s 的来回振荡
 
 **关键参数** (均在 `mission_params.yaml`):
 | 参数 | 默认值 | 说明 |
@@ -698,7 +738,7 @@ class MissionStateMachine:
 | `/drone/vision/landing_target` | LandingTarget | Vision→Mission | 20Hz | 降落目标定位 |
 | `/drone/vision/coverage` | CoverageStatus | Vision→Mission | 2Hz | 侦察区覆盖进度 |
 | `/drone/servo/velocity_cmd` | TwistStamped | Vision→Ctrl | 20Hz | 视觉伺服速度指令 |
-| `/drone/servo/status` | ServoStatus | Servo→Mission | 1Hz | 舵机状态 |
+| `/drone/cmd/vehicle_command_relay` | VehicleCommand | Servo→PX4 | Event | 舵机 DO_SET_ACTUATOR 指令中继 |
 
 ### 7.2 ROS2 服务
 
@@ -1026,14 +1066,14 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 | `drone_vision/training/export.py` | ✅ 已实现 | ~50 | ONNX/TensorRT 导出 |
 | `drone_vision/scripts/vision_viewer.py` | ✅ 已实现 | ~200 | 实时画面查看器 |
 | `scripts/debug_vision.sh` | ✅ 已实现 | ~65 | 一键视觉调试 (双模型 + 摄像头 + viewer) |
-| `drone_servo/servo_controller.py` | ✅ 已实现 | ~285 | 舵机控制 (SITL Mock / Jetson PCA9685 双模式) |
-| `drone_servo/servo_mock.py` | ✅ 已实现 | ~95 | SITL 模拟投放 |
+| `drone_servo2/servo_controller.cpp` | ✅ 已实现 | ~400 | 舵机多位置步进投放 (SITL Mock / PX4 VehicleCommand) |
+| `drone_servo/servo_controller.py` | ✅ 参考 | ~220 | Python 参考实现, 逻辑同 C++ 版 |
 | `drone_servo/drop_manager.py` | ✅ 已实现 | ~195 | 投放管理 (TriggerDrop 服务) |
 | `drone_mission/mission_state_machine.py` | ✅ 已实现 | ~1381 | FSM核心 + StandaloneBridgeFacade + StandaloneFlightFacade |
 | `drone_mission/states/*.py` | ✅ 已实现 | ~1734 | 11 个状态处理器 (含已废弃的 recon_inspect) |
 | `drone_mission/path_planner.py` | ✅ 已实现 | ~366 | 路径规划 (弓字形覆盖 + 过渡路径) |
 | `drone_mission/cylinder_selector.py` | ✅ 已实现 | ~145 | 选筒策略 (半径排序 + 去重 + 排除) |
-| `drone_mission/precision_align_controller.py` | ✅ 已实现 | ~426 | 低空精校 (CUADC 像素闭环, 默认启用) |
+| `drone_mission/precision_align_controller.py` | ✅ 已实现 | ~441 | 低空精校 (CUADC 像素闭环, 默认启用; reset_confirmation() 热重启) |
 | `drone_mission/drop_visual_aligner.py` | ✅ 已实现 | ~489 | 低空视觉校准 (梯度下降, 备选方案) |
 | `drone_utils/*.py` | ✅ 已实现 | ~593 | 日志(178) + 看门狗(108) + 紧急(216) + 配置(91) |
 | **总计** | | **~8700** |
@@ -1051,8 +1091,8 @@ ros2 run drone_mission mission_fsm --ros-args -p sweep_speed:=1.5
 
 ### 一键调试 (`scripts/debug_vision.sh`)
 ```bash
-./scripts/debug_vision.sh              # 默认 /dev/video0
-./scripts/debug_vision.sh /dev/video1  # 切换摄像头
+./scripts/debug_vision.sh              # 默认外接任务相机稳定 by-id 路径
+./scripts/debug_vision.sh /dev/video1  # 临时指定外接相机设备
 ```
 自动完成: 清理旧进程 → 启动摄像头 → 加载双模型 → 显示标注画面
 
@@ -1103,25 +1143,23 @@ ros2 topic echo /drone/vision/hazards
 
 | 决策 | 理由 |
 |------|------|
-| 7包非单体架构 | 独立测试、清晰职责、并行开发 |
+| 9包非单体架构 | 独立测试、清晰职责、并行开发 |
 | 视觉为独立节点 | 计算密集，需独立进程；Jetson上利用GPU不阻塞飞控 |
 | YOLO + OpenCV 混合检测 | YOLO提供鲁棒粗定位，OpenCV做亚像素精修；泛化强于纯传统CV |
 | 双独立模型分离推理 | V1(蓝色标识)+V2(白色圆筒) 独立引擎, 避免类别数不匹配; 各模型可独立更新 |
-| 姿态补偿坐标变换 | 5m+5°倾斜时误差从0.44m→<0.05m；/drone/pose不可用时回退简化版 |
-| 高度自适应阈值 | 10m高空目标仅~7px, 必须降conf阈值；避免固定参数导致的漏检/误检 |
+| 姿态补偿坐标变换 | 5m+5°倾斜时误差从0.44m→<0.05m；无有效姿态则拒绝该帧目标 |
 | 仿真预训练+真实微调 | 仿真零标注成本快速迭代；200-500张真实数据微调即可实飞 |
-| 无YOLO回退模式 | HoughCircles+HSV保证模型不可用时系统仍可运行 |
+| 模型/provider硬校验 | 防止节点表面存活但实际处于极慢或错误后端 |
 | 指令用Service, 数据用Topic | 指令需要确认响应；视觉数据是持续流 |
-| 抽象舵机硬件接口 | SITL(mock)与实飞(GPIO)使用完全相同的任务代码 |
+| 抽象舵机硬件接口 | SITL 使用 mock；实飞通过 PX4 VehicleCommand 控制 MAIN5 |
 | 斜坡Setpoint速度控制 | 已有验证模式，精确速度控制无需调PX4参数 |
 | 坐标变换统一在drone_vision | 姿态补偿需相机内参，属视觉范畴；drone_utils提供基础工具 |
 | 自动最优条带方向 | 沿区域长边飞行使转弯最少; Area 2 从16次转弯降至10次 |
-| 覆盖率驱动返航 | 覆盖率≥95%触发返航, 不等候全部航点, 比固定超时更智能 |
+| 完整航点覆盖 | 默认跑完全部弓字形航点；覆盖率用于监控，不提前返航 |
 | 侦察区纯路径覆盖 | 不执行危险品识别, 聚焦全覆盖巡视的路径算法 |
-| 双单类模型分离推理 | V1(蓝色标识)+V2(白色圆筒) 独立引擎, 避免类别数不匹配; 各模型可独立更新 |
 | 投放标识 OpenCV 精修 | 蓝色标识 YOLO bbox 中心每帧跳动 50-100px，HSV 分割+轮廓矩质心替代，消除 pixel_error 噪声主源 |
 | class_names YAML 驱动 | 模型类别数变更只需改配置, 无需改代码 |
-| camera_device 可配置 | 切换摄像头 -p camera_device:=/dev/video1 无需改代码 |
+| camera_device 可配置 | 默认稳定 by-id 指向外接任务相机，可显式覆盖 `/dev/video1` |
 | PID视觉伺服(双模式) | 积分项修正漂移；降落/圆筒逼近不同参数 |
 
 ---
@@ -1130,7 +1168,7 @@ ros2 topic echo /drone/vision/hazards
 
 SITL 仿真已跑通。真机部署通过**独立 launch/config 层**覆盖差异, 核心状态机/视觉/飞控代码共用。
 
-> **2026-07-15 修复**: `drone_vision/setup.py` 添加 `package_data={'drone_vision': ['models/*.pt']}` + `zip_safe=False`，确保 YOLO 模型文件随 `colcon build` 安装。此前真机和仿真均因模型未安装导致视觉管线降级到纯 OpenCV 回退模式。
+> **2026-07-20 状态**: ONNX 模型随包安装并强制校验 CUDA provider；进入侦察阶段后主动释放两套检测模型。
 
 ```
                     ┌─ 状态机 (共用)
@@ -1141,14 +1179,14 @@ SITL 仿真已跑通。真机部署通过**独立 launch/config 层**覆盖差�
                            │
            ┌───────────────┴───────────────┐
            ▼                               ▼
-    SITL 路线 (已跑通)              真机路线 (待开发)
+    SITL 路线                       真机路线 (待硬件验证)
     ├ sitl.launch.py              ├ real_flight.launch.py ✅
     ├ start_full_simulation.sh    ├ start_real_flight.sh ❌
-    ├ ARM: param2=21196 (force)   ├ ARM: param2=0 (标准解锁)
-    ├ 舵机: ServoMock             ├ 舵机: PCA9685/GPIO
-    ├ 相机: Gazebo bridge         ├ 相机: GStreamer
+    ├ ARM: param2=0               ├ ARM: param2=0 (标准解锁)
+    ├ 舵机: ServoMock             ├ 舵机: PX4 MAIN5 / VehicleCommand
+    ├ 相机: Gazebo bridge         ├ 相机: V4L2 外接相机
     ├ 通信: UDP MicroXRCEAgent    ├ 通信: Serial MicroXRCEAgent
-    └ 模型: .pt (PyTorch)         └ 模型: .engine (TensorRT)
+    └ 模型: ONNX                  └ 模型: ONNX Runtime CUDA
 ```
 
 真机审计详情见 `docs/2026-07-14-sitl-audit-and-real-hardware-gaps.md`。

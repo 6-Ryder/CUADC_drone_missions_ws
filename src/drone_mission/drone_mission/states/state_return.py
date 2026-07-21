@@ -72,8 +72,9 @@ class ReturnState:
 
         # 超时
         if elapsed > 60.0:
-            self._fsm.get_logger().warn("RETURN: 超时, 强制进入精准降落")
-            return "PRECISION_LAND"
+            self._fsm.get_logger().error("RETURN: 未到达 H 点, 请求 PX4 RTL")
+            self._fsm.bridge.return_to_launch()
+            return "ERROR"
 
         return None
 

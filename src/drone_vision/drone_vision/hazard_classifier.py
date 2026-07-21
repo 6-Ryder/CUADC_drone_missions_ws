@@ -14,6 +14,7 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from drone_interfaces.msg import HazardDetection, HazardArray
 from cv_bridge import CvBridge
@@ -82,6 +83,7 @@ class ColorVerifier:
         Returns
         -------
         (is_match, color_ratio) — color_ratio 为匹配像素占比.
+
         """
         x1, y1, x2, y2 = bbox
         roi = image[y1:y2, x1:x2]
@@ -128,7 +130,8 @@ class HazardClassifierNode(Node):
 
         # 订阅
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb, 10,
+            Image, "/drone/camera/image_raw", self._image_cb,
+            qos_profile_sensor_data,
         )
 
         # 发布
@@ -179,7 +182,10 @@ class HazardClassifierNode(Node):
         try:
             from drone_vision.models.yolo_engine import create_engine
 
-            class_names = self.get_parameter("class_names").get_parameter_value().string_array_value
+            class_names = (
+                self.get_parameter("class_names")
+                .get_parameter_value().string_array_value
+            )
             self._engine = create_engine(
                 model_path=model_path,
                 conf_threshold=self.get_parameter("conf_threshold").value,

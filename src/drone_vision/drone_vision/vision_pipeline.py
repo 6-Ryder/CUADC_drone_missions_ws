@@ -16,34 +16,55 @@
 """
 
 import os
+import gc
+import math
 import time
 from typing import List, Optional, Tuple
 
-import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+)
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped, TwistStamped
-from std_msgs.msg import Header
+from std_msgs.msg import String
 from cv_bridge import CvBridge
 
 from drone_interfaces.msg import (
     CylinderDetection, CylinderArray,
-    HazardDetection, HazardArray,
+    HazardArray,
     LandingTarget, CoverageStatus,
 )
+from drone_interfaces.srv import SetVisionMode
 
 from drone_vision.models.yolo_engine import Detection, create_engine, YOLOEngine
-from drone_vision.cylinder_detector import CylinderRefiner, CylinderTracker
-from drone_vision.hazard_classifier import ColorVerifier, CLASS_TO_HAZARD
+from drone_vision.cylinder_detector import (
+    CylinderRefiner,
+    CylinderTracker,
+)
+from drone_vision.marker_detector import BlueMarkerRefiner
 from drone_vision.landing_detector import LandingPadRefiner
 from drone_vision.coverage_monitor import CoverageMonitor
-from drone_vision.coordinate_transforms import (
-    CoordinateTransformer, AltitudeAdaptiveParams,
-)
+from drone_vision.coordinate_transforms import CoordinateTransformer
 from drone_vision.visual_servoing import (
     VisualServoController, CylinderApproachController, ServoState,
+)
+
+
+CAMERA_INFO_QOS = QoSProfile(
+    depth=1,
+    reliability=QoSReliabilityPolicy.RELIABLE,
+    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+)
+
+IMAGE_QOS = QoSProfile(
+    depth=1,
+    reliability=QoSReliabilityPolicy.BEST_EFFORT,
+    durability=QoSDurabilityPolicy.VOLATILE,
 )
 
 
@@ -69,12 +90,11 @@ class VisionPipelineNode(Node):
 
         # 坐标变换 + 姿态补偿
         self._coord_xform: Optional[CoordinateTransformer] = None
-        self._adaptive_params: Optional[AltitudeAdaptiveParams] = None
 
         # 后处理器
         self._cyl_refiner: Optional[CylinderRefiner] = None
         self._cyl_tracker: Optional[CylinderTracker] = None
-        self._color_verifier: Optional[ColorVerifier] = None
+        self._marker_refiner: Optional[BlueMarkerRefiner] = None
         self._landing_refiner: Optional[LandingPadRefiner] = None
         self._coverage: Optional[CoverageMonitor] = None
 
@@ -82,13 +102,17 @@ class VisionPipelineNode(Node):
         self._landing_servo: Optional[VisualServoController] = None
         self._cylinder_servo: Optional[CylinderApproachController] = None
         self._servo_mode: str = "none"  # "landing" | "cylinder_approach" | "none"
+        self._detection_mode: str = "all"  # "all" | "landing" | "idle"
         self._target_cylinder_id: int = -1
+        self._models_validated = False
+        self._detection_models_released = False
 
         # ---- 实时状态 ----
         self._drone_pose: Tuple[float, float, float, float, float, float, float] = (
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         )  # (x, y, z, qx, qy, qz, qw)
         self._current_altitude = 5.0
+        self._current_yaw_ned = 0.0
         self._last_frame_time = time.time()
         self._frame_count = 0
         self._skip_count = 0
@@ -96,10 +120,12 @@ class VisionPipelineNode(Node):
         # ---- 订阅 ----
         # gz_camera_bridge.py (Python) 发布到 /drone/camera/image_raw, QoS 匹配
         self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb, 10,
+            Image, "/drone/camera/image_raw", self._image_cb,
+            IMAGE_QOS,
         )
         self._caminfo_sub = self.create_subscription(
-            CameraInfo, "/drone/camera/camera_info", self._caminfo_cb, 10,
+            CameraInfo, "/drone/camera/camera_info", self._caminfo_cb,
+            CAMERA_INFO_QOS,
         )
         # 订阅无人机位姿 (用于姿态补偿)
         self._pose_sub = self.create_subscription(
@@ -127,9 +153,16 @@ class VisionPipelineNode(Node):
         self._servo_vel_pub = self.create_publisher(
             TwistStamped, "/drone/vision/servo_cmd", 10,
         )
+        self._status_pub = self.create_publisher(
+            String, "/drone/vision/status", CAMERA_INFO_QOS,
+        )
+        self._mode_service = self.create_service(
+            SetVisionMode, "/drone/vision/set_mode", self._set_mode_cb,
+        )
 
         # ---- 初始化 ----
         self._init_timer = self.create_timer(1.0, self._lazy_init)
+        self._status_timer = self.create_timer(1.0, self._publish_status)
         self._initialized = False
 
         self.get_logger().info("统一视觉管线 v2 已创建 (姿态补偿 + 高度自适应)")
@@ -147,11 +180,19 @@ class VisionPipelineNode(Node):
         self.declare_parameter("model_width", 640)
         self.declare_parameter("model_height", 640)
         self.declare_parameter("device", "cuda")
+        self.declare_parameter("max_inference_fps", 20.0)
         # 类别名 (YAML 配置, 必须与模型输出类别数一致)
         self.declare_parameter("class_names", ["cylinder"])
         self.declare_parameter("drop_marker_class_names", ["drop_zone_marker"])
         # 投放区蓝色标识 OpenCV 精修
         self.declare_parameter("drop_marker_refine_enable", True)
+        self.declare_parameter("drop_marker_min_blue_ratio", 0.4)
+        self.declare_parameter("drop_marker_min_area", 80)
+        self.declare_parameter("drop_marker_min_aspect_ratio", 0.4)
+        self.declare_parameter("drop_marker_min_circularity", 0.35)
+        self.declare_parameter("drop_marker_min_diameter", 30)
+        self.declare_parameter("drop_marker_min_scale_ratio", 0.45)
+        self.declare_parameter("drop_marker_max_scale_ratio", 1.8)
         # 相机
         self.declare_parameter("fx", 400.0)
         self.declare_parameter("fy", 400.0)
@@ -168,13 +209,10 @@ class VisionPipelineNode(Node):
         self.declare_parameter("cylinder_tracking_max_age", 10)
         self.declare_parameter("cylinder_tracking_iou_thresh", 0.3)
         self.declare_parameter("cylinder_tracking_min_hits", 3)
-        # 危险品
-        self.declare_parameter("hazard_enable_color_fallback", True)
-        self.declare_parameter("hazard_color_confirm_ratio", 0.3)
         # 降落
         self.declare_parameter("landing_refine_enable", True)
         self.declare_parameter("landing_adaptive_thresh_block", 11)
-        self.declare_parameter("landing_circle_min_area", 300)
+        self.declare_parameter("landing_circle_min_area", 80)
         self.declare_parameter("landing_H_orientation_enable", True)
         # 覆盖
         self.declare_parameter("coverage_grid_resolution", 0.5)
@@ -197,18 +235,13 @@ class VisionPipelineNode(Node):
         if self._initialized:
             return
 
-        # --- 坐标变换 + 高度自适应 ---
+        # --- 坐标变换 ---
         fx = self.get_parameter("fx").value
         fy = self.get_parameter("fy").value
         cx = self.get_parameter("cx").value
         cy = self.get_parameter("cy").value
         K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
         self._coord_xform = CoordinateTransformer(K)
-        self._adaptive_params = AltitudeAdaptiveParams(
-            focal_length_px=max(fx, fy),
-            base_altitude=5.0,
-            base_conf_threshold=self.get_parameter("conf_threshold").value,
-        )
 
         # --- 后处理器 ---
         self._cyl_refiner = CylinderRefiner(
@@ -224,8 +257,22 @@ class VisionPipelineNode(Node):
             iou_thresh=self.get_parameter("cylinder_tracking_iou_thresh").value,
             min_hits=self.get_parameter("cylinder_tracking_min_hits").value,
         )
-        self._color_verifier = ColorVerifier(
-            confirm_ratio=self.get_parameter("hazard_color_confirm_ratio").value,
+        self._marker_refiner = BlueMarkerRefiner(
+            min_component_area=self.get_parameter(
+                "drop_marker_min_area"
+            ).value,
+            min_detection_blue_ratio=self.get_parameter(
+                "drop_marker_min_blue_ratio"
+            ).value,
+            min_aspect_ratio=self.get_parameter(
+                "drop_marker_min_aspect_ratio"
+            ).value,
+            min_circularity=self.get_parameter(
+                "drop_marker_min_circularity"
+            ).value,
+            min_component_diameter=self.get_parameter(
+                "drop_marker_min_diameter"
+            ).value,
         )
         self._landing_refiner = LandingPadRefiner(
             adaptive_thresh_block=self.get_parameter("landing_adaptive_thresh_block").value,
@@ -253,95 +300,105 @@ class VisionPipelineNode(Node):
             max_horizontal_vel=1.5, deadzone=0.05,
         )
 
-        # --- 加载 YOLO ---
-        model_path = self.get_parameter("model_path").value
-        if not model_path:
-            default = os.path.join(
-                os.path.dirname(__file__), "models", "cylinder_yolo.pt",
-            )
-            if os.path.exists(default):
-                model_path = default
-        elif not os.path.isabs(model_path):
-            # 相对路径 → 解析到 models/ 目录
-            resolved = os.path.join(
-                os.path.dirname(__file__), "models", model_path,
-            )
-            if os.path.exists(resolved):
-                model_path = resolved
-
-        class_names = self.get_parameter("class_names").value
-
-        if model_path and os.path.exists(model_path):
-            try:
-                self._engine = create_engine(
-                    model_path=model_path,
-                    conf_threshold=self.get_parameter("conf_threshold").value,
-                    nms_iou_threshold=self.get_parameter("nms_iou_threshold").value,
-                    input_size=(
-                        self.get_parameter("model_width").value,
-                        self.get_parameter("model_height").value,
-                    ),
-                    class_names=list(class_names),
-                    device=self.get_parameter("device").value,
-                )
-                ok = self._engine.load()
-                if ok:
-                    self.get_logger().info(f"YOLO 模型已加载: {model_path}")
-                    self.get_logger().info(f"  类别: {class_names}")
-                else:
-                    self.get_logger().warn("YOLO 加载失败, 将使用纯 OpenCV 回退")
-            except Exception as e:
-                self.get_logger().error(f"YOLO 引擎创建失败: {e}")
-        else:
-            self.get_logger().warn("未找到 YOLO 模型, 使用纯 OpenCV 回退模式")
-
-        # --- 加载投放区蓝色标识模型 (可选) ---
-        marker_model_path = self.get_parameter("drop_marker_model_path").value
-        if marker_model_path and not os.path.isabs(marker_model_path):
-            resolved = os.path.join(
-                os.path.dirname(__file__), "models", marker_model_path,
-            )
-            if os.path.exists(resolved):
-                marker_model_path = resolved
-
-        marker_class_names = self.get_parameter("drop_marker_class_names").value
-
-        if marker_model_path and os.path.exists(marker_model_path):
-            try:
-                self._drop_marker_engine = create_engine(
-                    model_path=marker_model_path,
-                    conf_threshold=self.get_parameter("conf_threshold").value,
-                    nms_iou_threshold=self.get_parameter("nms_iou_threshold").value,
-                    input_size=(
-                        self.get_parameter("model_width").value,
-                        self.get_parameter("model_height").value,
-                    ),
-                    class_names=list(marker_class_names),
-                    device=self.get_parameter("device").value,
-                )
-                ok = self._drop_marker_engine.load()
-                if ok:
-                    self.get_logger().info(
-                        f"投放区蓝色标识模型已加载: {marker_model_path}"
-                    )
-                    self.get_logger().info(f"  类别: {marker_class_names}")
-                else:
-                    self.get_logger().warn("投放区蓝色标识模型加载失败")
-                    self._drop_marker_engine = None
-            except Exception as e:
-                self.get_logger().error(f"投放区蓝色标识模型创建失败: {e}")
+        # Both task models are mandatory. A live process without them is not healthy.
+        model_path = self._resolve_model_path(
+            self.get_parameter("model_path").value,
+        )
+        marker_model_path = self._resolve_model_path(
+            self.get_parameter("drop_marker_model_path").value,
+        )
+        common = {
+            "conf_threshold": self.get_parameter("conf_threshold").value,
+            "nms_iou_threshold": self.get_parameter("nms_iou_threshold").value,
+            "input_size": (
+                self.get_parameter("model_width").value,
+                self.get_parameter("model_height").value,
+            ),
+            "device": self.get_parameter("device").value,
+        }
+        self._engine = create_engine(
+            model_path=model_path,
+            class_names=list(self.get_parameter("class_names").value),
+            **common,
+        )
+        self._drop_marker_engine = create_engine(
+            model_path=marker_model_path,
+            class_names=list(self.get_parameter("drop_marker_class_names").value),
+            **common,
+        )
+        if not self._engine.load():
+            raise RuntimeError(f"圆筒 YOLO 模型加载失败: {model_path}")
+        if not self._drop_marker_engine.load():
+            raise RuntimeError(f"蓝色标识 YOLO 模型加载失败: {marker_model_path}")
+        self._models_validated = True
+        self.get_logger().info(f"圆筒 YOLO 已加载: {model_path}")
+        self.get_logger().info(f"蓝色标识 YOLO 已加载: {marker_model_path}")
 
         self._initialized = True
         self._init_timer.cancel()
         self.get_logger().info(
-            "统一视觉管线 v2 初始化完成 "
-            f"(姿态补偿={'✓' if self._coord_xform else '✗'}, "
-            f"高度自适应={'✓' if self._adaptive_params else '✗'})"
+            "统一视觉管线 v2 初始化完成 (姿态补偿已启用)"
         )
+
+    @staticmethod
+    def _resolve_model_path(configured_path: str) -> str:
+        if not configured_path:
+            raise RuntimeError("视觉模型路径为空")
+        path = configured_path
+        if not os.path.isabs(path):
+            path = os.path.join(os.path.dirname(__file__), "models", path)
+        if not os.path.isfile(path):
+            raise RuntimeError(f"视觉模型不存在: {path}")
+        return path
 
     # ================================================================
     # 伺服模式切换 (供 mission 节点通过 Service 调用)
     # ================================================================
+
+    def _set_mode_cb(self, request, response):
+        if not request.enable:
+            self._detection_mode = "idle"
+            self.set_servo_mode("none")
+            self._release_detection_models()
+        elif request.mode == 2:
+            self._detection_mode = "landing"
+            self.set_servo_mode("landing")
+            self._release_detection_models()
+        elif request.mode in (0, 3):
+            if self._detection_models_released:
+                response.success = False
+                response.message = "投放检测模型已在侦察阶段释放"
+                return response
+            self._detection_mode = "all"
+            self.set_servo_mode("none")
+        else:
+            response.success = False
+            response.message = f"不支持的视觉模式: {request.mode}"
+            return response
+        response.success = True
+        response.message = self._detection_mode
+        return response
+
+    def _release_detection_models(self):
+        if self._detection_models_released:
+            return
+        for engine in (self._engine, self._drop_marker_engine):
+            if engine is not None:
+                engine.close()
+        self._engine = None
+        self._drop_marker_engine = None
+        self._detection_models_released = True
+        gc.collect()
+        self.get_logger().info("投放检测模型已释放")
+
+    def _publish_status(self):
+        ready = self._initialized and self._models_validated and self._frame_count > 0
+        msg = String()
+        msg.data = (
+            f"ready={int(ready)} models={int(self._models_validated)} "
+            f"frames={self._frame_count} mode={self._detection_mode}"
+        )
+        self._status_pub.publish(msg)
 
     def set_servo_mode(self, mode: str, cylinder_id: int = -1):
         """
@@ -349,8 +406,11 @@ class VisionPipelineNode(Node):
 
         Parameters
         ----------
-        mode : "landing" | "cylinder_approach" | "none"
-        cylinder_id : 圆筒逼近时的目标 ID
+        mode : str
+            "landing" | "cylinder_approach" | "none".
+        cylinder_id : int
+            圆筒逼近时的目标 ID.
+
         """
         if mode not in ("landing", "cylinder_approach", "none"):
             self.get_logger().warn(f"未知伺服模式: {mode}")
@@ -405,6 +465,15 @@ class VisionPipelineNode(Node):
             msg.pose.orientation.w,
         )
         self._current_altitude = msg.pose.position.z
+        q = msg.pose.orientation
+        world_yaw = math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z),
+        )
+        self._current_yaw_ned = math.atan2(
+            math.sin(math.pi / 2.0 - world_yaw),
+            math.cos(math.pi / 2.0 - world_yaw),
+        )
 
     # ================================================================
     # 主回调
@@ -414,10 +483,11 @@ class VisionPipelineNode(Node):
         if not self._initialized:
             return
 
-        # ---- 帧率自适应: Jetson 上跟不上时自动跳帧 ----
+        # Mission 控制周期是 20Hz；处理更快只会增加 GPU 压力。
         self._frame_count += 1
         t_elapsed = time.time() - self._last_frame_time
-        min_interval = 0.03  # 最大 ~33 FPS
+        max_fps = max(float(self.get_parameter("max_inference_fps").value), 1.0)
+        min_interval = 1.0 / max_fps
         if t_elapsed < min_interval:
             self._skip_count += 1
             if self._skip_count % 100 == 0:
@@ -431,43 +501,42 @@ class VisionPipelineNode(Node):
         except Exception:
             return
 
-        h, w = image.shape[:2]
-
-        # ---- 高度自适应置信度阈值 ----
-        if self._adaptive_params:
-            cyl_params = self._adaptive_params.get_cylinder_params(self._current_altitude)
-            effective_conf = cyl_params["effective_conf_threshold"]
-        else:
-            effective_conf = self.get_parameter("conf_threshold").value
-
-        # ---- 1. YOLO 推理 ----
-        if self._engine and self._engine.is_loaded:
+        # 目标模型只在投放阶段运行。两模型顺序执行，避免无收益的 GPU 并发峰值。
+        all_dets: List[Detection] = []
+        marker_dets: List[Detection] = []
+        marker_source = "none"
+        if self._detection_mode == "all":
             all_dets = self._engine.infer(image)
-        else:
-            all_dets = self._fallback_all(image)
-
-        if self._drop_marker_engine and self._drop_marker_engine.is_loaded:
             marker_dets = self._drop_marker_engine.infer(image)
-            # 发布投放区标识检测
+            marker_source = "yolo"
+            if (
+                self.get_parameter("drop_marker_refine_enable").value
+                and self._marker_refiner
+            ):
+                marker_dets = self._marker_refiner.refine(image, marker_dets)
+                marker_source = "yolo+blue"
+            expected_diameter = (
+                (self.get_parameter("fx").value + self.get_parameter("fy").value)
+                * 0.5 / max(self._current_altitude, 0.5)
+            )
+            marker_dets = self._marker_refiner.filter_by_expected_diameter(
+                marker_dets,
+                expected_diameter,
+                self.get_parameter("drop_marker_min_scale_ratio").value,
+                self.get_parameter("drop_marker_max_scale_ratio").value,
+            )
+
+        # 发布投放区标识检测
+        if self._marker_refiner:
             marker_array = CylinderArray()
             marker_array.header.stamp = self.get_clock().now().to_msg()
             marker_array.header.frame_id = "world"
-            n_refined = 0
             for i, md in enumerate(marker_dets):
-                # --- OpenCV 精修: 蓝色 HSV 分割 → 轮廓矩质心 (替代 YOLO bbox 中心) ---
-                refined_cx, refined_cy, refined_ok = self._refine_marker_center(
-                    image, md.bbox, md.cx, md.cy,
-                )
-                if refined_ok:
-                    n_refined += 1
-                use_cx = refined_cx if refined_ok else md.cx
-                use_cy = refined_cy if refined_ok else md.cy
-
                 det = CylinderDetection()
                 det.id = i
                 det.confidence = float(md.confidence)
-                det.center_u = float(use_cx)
-                det.center_v = float(use_cy)
+                det.center_u = float(md.cx)
+                det.center_v = float(md.cy)
                 det.radius = 0.5  # 蓝色标识固定 1m 直径, 半径 0.5m
                 det.bbox_x1 = int(md.bbox[0])
                 det.bbox_y1 = int(md.bbox[1])
@@ -480,13 +549,13 @@ class VisionPipelineNode(Node):
                 cy = self.get_parameter("cy").value
                 alt = max(self._current_altitude, 0.5)
                 selected_xy = CoordinateTransformer.pixel_to_world_simple(
-                    use_cx, use_cy, alt, fx, fy, cx, cy,
+                    md.cx, md.cy, alt, fx, fy, cx, cy,
                     drone_world_x=self._drone_pose[0],
                     drone_world_y=self._drone_pose[1],
                 )
                 if self._coord_xform:
                     world_xy = self._coord_xform.pixel_to_world(
-                        use_cx, use_cy,
+                        md.cx, md.cy,
                         (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
                         (self._drone_pose[3], self._drone_pose[4],
                          self._drone_pose[5], self._drone_pose[6]),
@@ -507,38 +576,32 @@ class VisionPipelineNode(Node):
                 self.get_logger().info(
                     "DROP_MARKER: "
                     f"n={len(marker_dets)} "
-                    f"refined={n_refined}/{len(marker_dets)} "
+                    f"source={marker_source} "
                     f"conf={marker_dets[0].confidence:.2f}"
                 )
             all_dets.extend(marker_dets)
 
-        # 根据当前伺服模式筛选检测
-        if self._servo_mode == "landing":
-            # 降落模式: 仅关注 landing_H
+        # 根据任务阶段筛选检测。
+        if self._detection_mode == "landing":
             cyl_dets = []
-            hazard_dets = []
-            landing_dets = [d for d in all_dets if d.class_name == "landing_H"]
-        elif self._servo_mode == "cylinder_approach":
-            # 圆筒逼近: 仅关注 cylinder
-            cyl_dets = [d for d in all_dets if d.class_name in ("cylinder", "empty_cylinder")]
-            hazard_dets = []
             landing_dets = []
-        else:
-            # 全模式
-            cyl_dets = [d for d in all_dets if d.class_name in ("cylinder", "empty_cylinder")]
-            hazard_dets = [d for d in all_dets if d.class_name in ("flammable", "health_hazard", "danger", "empty_cylinder")]
+        elif self._detection_mode == "all":
+            cyl_dets = [
+                d for d in all_dets
+                if d.class_name in ("cylinder", "empty_cylinder")
+            ]
             landing_dets = [d for d in all_dets if d.class_name == "landing_H"]
+        else:
+            cyl_dets = []
+            landing_dets = []
 
         # ---- 2. 圆筒检测 + OpenCV 精修 (姿态补偿坐标) ----
         self._process_cylinders_v2(image, cyl_dets)
 
-        # ---- 3. 危险品分类 — 已禁用 (侦察区仅执行全覆盖路径巡视) ----
-        # self._process_hazards(image, hazard_dets)
-
-        # ---- 4. H 降落标识 + 姿态补偿 + 伺服 ----
+        # ---- 3. H 降落标识 + 姿态补偿 + 伺服 ----
         self._process_landing_v2(image, landing_dets)
 
-        # ---- 5. 覆盖监控 ----
+        # ---- 4. 覆盖监控 ----
         self._process_coverage()
 
         # FPS 监控
@@ -557,12 +620,6 @@ class VisionPipelineNode(Node):
         refined: List[tuple] = []
         enable_refine = self.get_parameter("cylinder_refine_enable").value
 
-        # 高度自适应半径范围
-        if self._adaptive_params:
-            cyl_params = self._adaptive_params.get_cylinder_params(self._current_altitude)
-        else:
-            cyl_params = {"min_radius_px": 5, "max_radius_px": 100}
-
         for d in dets:
             bbox_px = (
                 int(d.bbox[0]), int(d.bbox[1]),
@@ -571,7 +628,14 @@ class VisionPipelineNode(Node):
             if enable_refine and self._cyl_refiner:
                 result = self._cyl_refiner.refine(image, d.bbox)
                 if result:
-                    refined.append((*result, bbox_px))
+                    refined_cx, refined_cy, radius_px, _ = result
+                    refined.append((
+                        refined_cx,
+                        refined_cy,
+                        radius_px,
+                        d.confidence,
+                        bbox_px,
+                    ))
                 elif d.confidence > 0.7:
                     refined.append((d.cx, d.cy,
                                     min(d.bbox[2] - d.bbox[0], d.bbox[3] - d.bbox[1]) / 4,
@@ -591,8 +655,6 @@ class VisionPipelineNode(Node):
 
         fx = self.get_parameter("fx").value
         fy = self.get_parameter("fy").value
-        cx = self.get_parameter("cx").value
-        cy = self.get_parameter("cy").value
         alt = max(self._current_altitude, 0.5)
 
         msg_array = CylinderArray()
@@ -610,41 +672,23 @@ class VisionPipelineNode(Node):
             if bbox and len(bbox) == 4:
                 det.bbox_x1, det.bbox_y1, det.bbox_x2, det.bbox_y2 = bbox
 
-            simple_xy = CoordinateTransformer.pixel_to_world_simple(
-                t["cx"], t["cy"], alt, fx, fy, cx, cy,
-                drone_world_x=self._drone_pose[0],
-                drone_world_y=self._drone_pose[1],
-            )
-            selected_xy = None
-
             # ---- 姿态补偿坐标变换 ----
-            if self._coord_xform:
-                world_xy = self._coord_xform.pixel_to_world(
-                    t["cx"], t["cy"],
-                    (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
-                    (self._drone_pose[3], self._drone_pose[4], self._drone_pose[5], self._drone_pose[6]),
-                    ground_z=0.0, q_convention="xyzw",
-                )
-                if world_xy:
-                    dx = world_xy[0] - self._drone_pose[0]
-                    dy = world_xy[1] - self._drone_pose[1]
-                    max_reasonable_offset = max(alt * 1.5, 3.0)
-                    if (dx * dx + dy * dy) ** 0.5 <= max_reasonable_offset:
-                        selected_xy = world_xy
-                    else:
-                        self.get_logger().warn(
-                            "CYL_COORD: 姿态投影异常, 使用简化投影 "
-                            f"raw=({world_xy[0]:.2f},{world_xy[1]:.2f}) "
-                            f"drone=({self._drone_pose[0]:.2f},{self._drone_pose[1]:.2f})"
-                        )
-            else:
-                selected_xy = simple_xy
+            world_xy = self._coord_xform.pixel_to_world(
+                t["cx"], t["cy"],
+                (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
+                self._drone_pose[3:7],
+                ground_z=0.0, q_convention="xyzw",
+            )
+            if world_xy is None:
+                continue
+            dx = world_xy[0] - self._drone_pose[0]
+            dy = world_xy[1] - self._drone_pose[1]
+            max_reasonable_offset = max(alt * 1.5, 3.0)
+            if (dx * dx + dy * dy) ** 0.5 > max_reasonable_offset:
+                continue
 
-            if selected_xy is None:
-                selected_xy = simple_xy
-
-            det.center_x = selected_xy[0]
-            det.center_y = selected_xy[1]
+            det.center_x = world_xy[0]
+            det.center_y = world_xy[1]
 
             # 真实半径 (像素→米)
             det.radius = t["radius"] * alt / max(fx, fy)
@@ -662,13 +706,24 @@ class VisionPipelineNode(Node):
         target.confidence = 0.0
 
         if not dets:
-            self._landing_pub.publish(target)
-            return
+            result = None
+            if self._detection_mode == "landing" and self._landing_refiner:
+                result = self._landing_refiner.detect(image)
+            if result is None:
+                self._landing_pub.publish(target)
+                return
+            cx_px, cy_px, confidence, yaw = result
+            target.center_u = cx_px
+            target.center_v = cy_px
+            target.confidence = confidence
+            target.yaw_correction = yaw
+            best = None
+        else:
+            best = max(dets, key=lambda d: d.confidence)
 
-        best = max(dets, key=lambda d: d.confidence)
         enable_refine = self.get_parameter("landing_refine_enable").value
 
-        if enable_refine and self._landing_refiner:
+        if best is not None and enable_refine and self._landing_refiner:
             result = self._landing_refiner.refine(image, best.bbox)
             if result:
                 cx_px, cy_px, conf, yaw = result
@@ -681,7 +736,7 @@ class VisionPipelineNode(Node):
                 target.center_v = best.cy
                 target.confidence = best.confidence
                 target.yaw_correction = 0.0
-        else:
+        elif best is not None:
             target.center_u = best.cx
             target.center_v = best.cy
             target.confidence = best.confidence
@@ -692,7 +747,7 @@ class VisionPipelineNode(Node):
             world_xy = self._coord_xform.pixel_to_world(
                 target.center_u, target.center_v,
                 (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
-                (self._drone_pose[3], self._drone_pose[4], self._drone_pose[5], self._drone_pose[6]),
+                self._drone_pose[3:7],
                 ground_z=0.0, q_convention="xyzw",
             )
             if world_xy:
@@ -716,11 +771,12 @@ class VisionPipelineNode(Node):
                 altitude=max(self._current_altitude, 0.3),
                 focal_length_u=fx,
                 focal_length_v=fy,
+                current_yaw=self._current_yaw_ned,
             )
             # 发布伺服速度指令
             vel = TwistStamped()
             vel.header.stamp = self.get_clock().now().to_msg()
-            vel.header.frame_id = "base_link"
+            vel.header.frame_id = "ned"
             vel.twist.linear.x = state.velocity_north
             vel.twist.linear.y = state.velocity_east
             vel.twist.linear.z = state.velocity_down
@@ -732,53 +788,6 @@ class VisionPipelineNode(Node):
                 f"vel=({state.velocity_north:.2f},{state.velocity_east:.2f}) "
                 f"conv={state.is_converged}"
             )
-
-    # ================================================================
-    # 旧方法保留 (向后兼容, v1 节点单独运行时使用)
-    # ================================================================
-
-    # ================================================================
-    # 危险品处理
-    # ================================================================
-
-    def _process_hazards(self, image: np.ndarray, dets: List[Detection]):
-        hazards = []
-        enable_color = self.get_parameter("hazard_enable_color_fallback").value
-
-        for d in dets:
-            confirmed_type = CLASS_TO_HAZARD.get(d.class_name, 0)
-            final_conf = d.confidence
-
-            if enable_color and d.confidence < 0.7:
-                is_match, color_ratio = self._color_verifier.verify(
-                    image, d.bbox, confirmed_type,
-                )
-                if not is_match:
-                    for alt_type in [1, 2, 3]:
-                        if alt_type == confirmed_type:
-                            continue
-                        is_alt, alt_ratio = self._color_verifier.verify(
-                            image, d.bbox, alt_type,
-                        )
-                        if is_alt and alt_ratio > color_ratio:
-                            confirmed_type = alt_type
-                            final_conf = max(final_conf, alt_ratio)
-                            break
-                    else:
-                        continue
-                final_conf = max(final_conf, color_ratio)
-
-            h = HazardDetection()
-            h.id = -1
-            h.hazard_type = confirmed_type
-            h.confidence = float(final_conf)
-            hazards.append(h)
-
-        msg_array = HazardArray()
-        msg_array.header.stamp = self.get_clock().now().to_msg()
-        msg_array.header.frame_id = "world"
-        msg_array.hazards = hazards
-        self._hazard_pub.publish(msg_array)
 
     # ================================================================
     # 降落处理
@@ -844,115 +853,6 @@ class VisionPipelineNode(Node):
         self._cov_pub.publish(msg)
 
     # ================================================================
-    # 投放区蓝色标识 OpenCV 精修
-    # ================================================================
-
-    @staticmethod
-    def _refine_marker_center(image: np.ndarray, bbox, yolo_cx, yolo_cy):
-        """
-        OpenCV HSV 分割 → 轮廓矩质心, 替代 YOLO bbox 中心.
-
-        蓝色标识是地面上的蓝色圆形, HSV 分割后取最大蓝色轮廓的矩质心,
-        精度远高于 YOLO bbox 中心 (后者每帧可跳动 50-100px)。
-
-        Returns (cx, cy, ok). 调用方负责在 ok=False 时回退到 YOLO 中心.
-        """
-        x1, y1, x2, y2 = [int(v) for v in bbox]
-        margin = 3
-        x1c = max(0, x1 - margin)
-        y1c = max(0, y1 - margin)
-        x2c = min(image.shape[1], x2 + margin)
-        y2c = min(image.shape[0], y2 + margin)
-
-        roi = image[y1c:y2c, x1c:x2c]
-        if roi.size == 0:
-            return yolo_cx, yolo_cy, False
-
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        # 蓝色: H ∈ [95, 135], S > 60, V > 60
-        lower_blue = np.array([95, 60, 60])
-        upper_blue = np.array([135, 255, 255])
-        mask = cv2.inRange(hsv, lower_blue, upper_blue)
-
-        # 形态学清理: 开运算去噪 → 闭运算填孔
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return yolo_cx, yolo_cy, False
-
-        best = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(best)
-        if area < 80:
-            return yolo_cx, yolo_cy, False
-
-        M = cv2.moments(best)
-        if M["m00"] <= 0:
-            return yolo_cx, yolo_cy, False
-
-        return (M["m10"] / M["m00"] + x1c,
-                M["m01"] / M["m00"] + y1c,
-                True)
-
-    # ================================================================
-    # OpenCV 回退 (无 YOLO 模型时的全图搜索)
-    # ================================================================
-
-    def _fallback_all(self, image: np.ndarray) -> List[Detection]:
-        """纯 OpenCV 全图搜索, 返回简单 Detection 列表."""
-        detections = []
-
-        # 圆筒: HoughCircles
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
-        circles = cv2.HoughCircles(
-            blurred, cv2.HOUGH_GRADIENT, dp=1.0, minDist=30,
-            param1=100, param2=30, minRadius=10, maxRadius=100,
-        )
-        if circles is not None:
-            for c in circles[0]:
-                cx, cy, r = c
-                bbox = (
-                    max(0, int(cx - r * 1.3)), max(0, int(cy - r * 1.3)),
-                    min(image.shape[1], int(cx + r * 1.3)), min(image.shape[0], int(cy + r * 1.3)),
-                )
-                detections.append(Detection(
-                    class_id=0, class_name="cylinder", confidence=0.5,
-                    bbox=bbox, cx=float(cx), cy=float(cy),
-                ))
-
-        # 危险品: 颜色分割 (简化)
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        color_configs = [
-            (1, [np.array([5, 80, 80]), np.array([25, 255, 255])]),
-            (2, [np.array([100, 80, 80]), np.array([130, 255, 255])]),
-            (3, [np.array([0, 80, 80]), np.array([10, 255, 255])]),
-            (3, [np.array([160, 80, 80]), np.array([180, 255, 255])]),
-        ]
-        class_names = {1: "flammable", 2: "health_hazard", 3: "danger"}
-        for cls_id, (lower, upper) in color_configs:
-            mask = cv2.inRange(hsv, lower, upper)
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if area < 100:
-                    continue
-                x, y, w, h_box = cv2.boundingRect(cnt)
-                detections.append(Detection(
-                    class_id=cls_id,
-                    class_name=class_names.get(cls_id, "unknown"),
-                    confidence=min(area / 500.0, 0.8),
-                    bbox=(x, y, x + w, y + h_box),
-                    cx=float(x + w / 2), cy=float(y + h_box / 2),
-                ))
-
-        return detections
-
-    # ================================================================
     # 外部接口
     # ================================================================
 
@@ -965,6 +865,9 @@ class VisionPipelineNode(Node):
         if self._coverage:
             self._coverage.update(world_x, world_y, world_z)
 
+    def destroy_node(self):
+        super().destroy_node()
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -975,7 +878,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

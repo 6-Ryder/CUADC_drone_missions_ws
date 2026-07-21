@@ -19,14 +19,13 @@
 运行频率: 20Hz (0.05s 控制周期)
 """
 
-import math
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Empty
+from std_msgs.msg import String
 
 # 状态处理器
 from drone_mission.states.state_init import InitState
@@ -43,7 +42,7 @@ from drone_mission.states.state_precision_land import PrecisionLandState
 from px4_control.px4_bridge import PX4Bridge
 from px4_control.flight_controller import FlightController
 from px4_control.standalone_bridge import StandaloneBridge
-from px4_control.telemetry import Position, ned_to_world, world_to_ned, configure_home
+from px4_control.telemetry import ned_to_world
 
 from drone_mission.cylinder_selector import CylinderSelector
 from drone_mission.path_planner import PathPlanner
@@ -125,8 +124,8 @@ class MissionFSM(Node):
         self._fc: Optional[FlightController] = None
         self._vision_node = None  # VisionPipelineNode 引用 (外部注入)
         # Facade caches (created lazily in standalone mode)
-        self._standalone_bridge = None
-        self._standalone_fc = None
+        self._standalone_bridge: Optional[StandaloneBridge] = None
+        self._standalone_fc: Optional[FlightController] = None
 
         # ---- 状态机 ----
         self._current_state: MissionState = MissionState.INIT
@@ -156,6 +155,9 @@ class MissionFSM(Node):
         self._drop_future = None
         self._drop_pending_cylinder_id: int = -1
         self._drop_result_consumed: bool = True
+        self._servo_ready: bool = False
+        self._vision_ready: bool = False
+        self._mission_failed: bool = False
 
         # ---- 视觉数据缓存 ----
         self._cylinders: List[Any] = []
@@ -177,6 +179,7 @@ class MissionFSM(Node):
         self._standalone_armed = False
         self._standalone_landed = True
         self._standalone_battery = 1.0
+        self._standalone_battery_ready = False
 
         # ---- 初始化延迟 ----
         self._init_timer = self.create_timer(1.0, self._lazy_init)
@@ -196,6 +199,7 @@ class MissionFSM(Node):
         self.declare_parameter("max_error_count", 5)
         self.declare_parameter("waypoint_timeout", 120.0)
         self.declare_parameter("land_altitude", 0.15)
+        self.declare_parameter("max_drops", 2)
         # 速度
         self.declare_parameter("sweep_speed", 0.8)
         self.declare_parameter("transit_speed", 2.0)
@@ -228,9 +232,9 @@ class MissionFSM(Node):
         self.declare_parameter("drop_marker_min_confidence", 0.35)
         self.declare_parameter("drop_marker_fallback_delay", 15.0)
         self.declare_parameter("marker_memory_merge_distance", 0.75)
-        self.declare_parameter("marker_memory_min_observations", 1)
+        self.declare_parameter("marker_memory_min_observations", 3)
         self.declare_parameter("drop_descend_height", 2.0)
-        self.declare_parameter("drop_confirmation_timeout", 3.0)
+        self.declare_parameter("drop_confirmation_timeout", 5.0)
         self.declare_parameter("drop_align_pixel_tolerance", 35.0)
         self.declare_parameter("drop_visual_align_probe_step", 0.40)
         self.declare_parameter("drop_visual_align_probe_speed", 0.30)
@@ -246,26 +250,26 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_target_source", "cylinder")
         self.declare_parameter("precision_align_image_width", 1280.0)
         self.declare_parameter("precision_align_image_height", 960.0)
-        self.declare_parameter("precision_align_alpha", 0.45)
-        self.declare_parameter("precision_align_gain", 0.65)
-        self.declare_parameter("precision_align_max_speed", 0.075)
-        self.declare_parameter("precision_align_fine_pixel_error", 80.0)
-        self.declare_parameter("precision_align_fine_max_speed", 0.022)
-        self.declare_parameter("precision_align_min_correction_speed", 0.006)
-        self.declare_parameter("precision_align_step_s", 0.12)
-        self.declare_parameter("precision_align_fine_step_s", 0.08)
-        self.declare_parameter("precision_align_hover_s", 0.08)
-        self.declare_parameter("precision_align_timeout", 40.0)
-        self.declare_parameter("precision_align_max_retries", 3)
+        self.declare_parameter("precision_align_alpha", 0.55)
+        self.declare_parameter("precision_align_gain", 1.25)
+        self.declare_parameter("precision_align_max_speed", 0.25)
+        self.declare_parameter("precision_align_fine_pixel_error", 90.0)
+        self.declare_parameter("precision_align_fine_max_speed", 0.065)
+        self.declare_parameter("precision_align_min_correction_speed", 0.012)
+        self.declare_parameter("precision_align_step_s", 0.18)
+        self.declare_parameter("precision_align_fine_step_s", 0.12)
+        self.declare_parameter("precision_align_hover_s", 0.04)
+        self.declare_parameter("precision_align_timeout", 25.0)
+        self.declare_parameter("precision_align_max_retries", 2)
         self.declare_parameter("precision_align_image_x_to_right_sign", 1.0)
         self.declare_parameter("precision_align_image_y_to_forward_sign", -1.0)
-        self.declare_parameter("precision_align_threshold_norm_x", 0.006)
-        self.declare_parameter("precision_align_threshold_norm_y", 0.006)
-        self.declare_parameter("precision_align_raw_pixel_tolerance", 6.0)
-        self.declare_parameter("precision_align_smooth_pixel_tolerance", 5.0)
-        self.declare_parameter("precision_align_stable_frames", 8)
-        self.declare_parameter("precision_align_final_brake_s", 0.8)
-        self.declare_parameter("precision_align_release_max_horizontal_speed", 0.02)
+        self.declare_parameter("precision_align_threshold_norm_x", 0.008)
+        self.declare_parameter("precision_align_threshold_norm_y", 0.008)
+        self.declare_parameter("precision_align_raw_pixel_tolerance", 9.0)
+        self.declare_parameter("precision_align_smooth_pixel_tolerance", 7.0)
+        self.declare_parameter("precision_align_stable_frames", 5)
+        self.declare_parameter("precision_align_final_brake_s", 0.5)
+        self.declare_parameter("precision_align_release_max_horizontal_speed", 0.04)
         self.declare_parameter("precision_align_min_confidence", 0.25)
         self.declare_parameter("precision_align_target_world_gate", 1.5)
         self.declare_parameter("precision_align_max_jump_diag_ratio", 0.55)
@@ -276,7 +280,7 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_final_descent_enable", True)
         self.declare_parameter("precision_align_final_drop_height", 1.25)
         self.declare_parameter("precision_align_final_descent_speed", 0.25)
-        self.declare_parameter("precision_align_log_interval", 0.5)
+        self.declare_parameter("precision_align_log_interval", 0.75)
         self.declare_parameter("cylinder_approach_fast_speed", 0.30)
         self.declare_parameter("cylinder_approach_slow_speed", 0.15)
         self.declare_parameter("cylinder_approach_memory_speed", 0.25)
@@ -356,9 +360,11 @@ class MissionFSM(Node):
             )
 
         # 配置 DropState 子状态
-        for drop_state_name in [MissionState.DESCEND_TO_DROP,
-                                 MissionState.EXECUTE_DROP,
-                                 MissionState.ASCEND]:
+        for drop_state_name in [
+            MissionState.DESCEND_TO_DROP,
+            MissionState.EXECUTE_DROP,
+            MissionState.ASCEND,
+        ]:
             handler = self._state_handlers.get(drop_state_name)
             if isinstance(handler, DropState):
                 handler.set_sub_state(drop_state_name.value)
@@ -378,6 +384,8 @@ class MissionFSM(Node):
 
         # 初始化视觉数据订阅
         self._init_vision_subscriptions()
+        # INIT 依赖 PX4 电池/状态消息，必须先创建 standalone 遥测订阅。
+        _ = self.bridge
 
         self.get_logger().info("Mission FSM 初始化完成, 开始任务")
         self._transition_to(MissionState.INIT)
@@ -385,7 +393,12 @@ class MissionFSM(Node):
     def _init_vision_subscriptions(self):
         """订阅视觉检测话题 + 遥测 (standalone mode)."""
         try:
-            from drone_interfaces.msg import CylinderArray, HazardArray, LandingTarget, CoverageStatus
+            from drone_interfaces.msg import (
+                CoverageStatus,
+                CylinderArray,
+                HazardArray,
+                LandingTarget,
+            )
 
             self._cyl_sub = self.create_subscription(
                 CylinderArray, "/drone/vision/cylinders", self._cyl_cb, 10,
@@ -416,6 +429,29 @@ class MissionFSM(Node):
         except Exception as e:
             self.get_logger().warn(f"/drone/pose 订阅失败: {e}")
 
+        self._servo_status_sub = self.create_subscription(
+            String, "/drone/servo/status", self._servo_status_cb, 10,
+        )
+        self._vision_status_sub = self.create_subscription(
+            String, "/drone/vision/status", self._vision_status_cb, 10,
+        )
+
+        from drone_interfaces.srv import SetVisionMode
+        self._vision_mode_client = self.create_client(
+            SetVisionMode, "/drone/vision/set_mode",
+        )
+
+    def _servo_status_cb(self, msg: String):
+        """记录舵机节点心跳和硬件就绪状态."""
+        self._watchdog.feed("servo")
+        self._servo_ready = "ready=1" in msg.data
+
+    def _vision_status_cb(self, msg: String):
+        """Accept vision heartbeat only after models and a camera frame are ready."""
+        self._vision_ready = "ready=1" in msg.data
+        if self._vision_ready:
+            self._watchdog.feed("vision")
+
     # ================================================================
     # 视觉数据回调
     # ================================================================
@@ -425,7 +461,6 @@ class MissionFSM(Node):
         self._cylinders_timestamp = time.time()
         if self._current_state == MissionState.CYLINDER_SEARCH:
             self._remember_cylinders(self._cylinders)
-        self._watchdog.feed("vision")
         self._emergency.update_vision(len(self._cylinders) > 0)
 
     def _marker_cb(self, msg):
@@ -433,7 +468,6 @@ class MissionFSM(Node):
         self._markers_timestamp = time.time()
         if self._current_state == MissionState.CYLINDER_SEARCH:
             self._remember_markers(self._markers)
-        self._watchdog.feed("vision")
 
     @staticmethod
     def _cyl_field(cyl, key: str, default=0.0):
@@ -619,6 +653,9 @@ class MissionFSM(Node):
 
         self._watchdog.feed("mission_fsm")
 
+        if self.bridge.battery_ready:
+            self._emergency.update_battery(self.bridge.battery_remaining)
+
         # 紧急检查
         emergency_level = self._emergency.check()
         if emergency_level == EmergencyLevel.RTL:
@@ -627,7 +664,7 @@ class MissionFSM(Node):
             return
         elif emergency_level == EmergencyLevel.ABORT:
             self.get_logger().error("紧急: 任务中止!")
-            self._transition_to(MissionState.COMPLETE)
+            self._transition_to(MissionState.ERROR)
             return
 
         # 执行当前状态
@@ -643,8 +680,8 @@ class MissionFSM(Node):
             next_state_name = handler.execute()
         except Exception as e:
             self.get_logger().error(f"状态执行异常 {self._current_state.value}: {e}")
-            self._emergency._error_count += 1
-            next_state_name = None
+            self._transition_to(MissionState.ERROR)
+            return
 
         if next_state_name:
             # 特殊处理: ASCEND 的下一状态取决于投放次数
@@ -698,6 +735,8 @@ class MissionFSM(Node):
                 handler.enter()
             except Exception as e:
                 self.get_logger().error(f"状态进入异常 {state.value}: {e}")
+                self._transition_to(MissionState.ERROR)
+                return
             self._emergency.set_state(state.value)
         else:
             # COMPLETE / ERROR 无处理器
@@ -738,19 +777,20 @@ class MissionFSM(Node):
 
     def _handle_complete(self):
         """任务完成处理."""
+        success = not self._mission_failed
         self.get_logger().info("=" * 60)
-        self.get_logger().info("  任务完成!")
+        self.get_logger().info("  任务完成" if success else "  任务失败")
         self.get_logger().info(f"  投放: {self._drop_success_count}/{self._drop_count}")
         coverage = self.get_coverage()
         if coverage:
             self.get_logger().info(f"  侦察覆盖: {coverage.get('coverage_ratio', 0):.1%}")
         self.get_logger().info("=" * 60)
         self._task_logger.write_summary({
-            "success": True,
+            "success": success,
             "drops_completed": self._drop_success_count,
             "drops_total": self._drop_count,
             "coverage_ratio": coverage.get("coverage_ratio", 0) if coverage else 0,
-            "final_state": "COMPLETE",
+            "final_state": "COMPLETE" if success else "ERROR",
         })
         # 停止控制循环
         if hasattr(self, '_ctrl_timer'):
@@ -758,7 +798,8 @@ class MissionFSM(Node):
 
     def _handle_error(self):
         """错误处理."""
-        self.get_logger().error(f"任务进入 ERROR 状态")
+        self._mission_failed = True
+        self.get_logger().error("任务进入 ERROR 状态")
         self._task_logger.log_error("mission_error", "FSM entered ERROR state")
         self._transition_to(MissionState.COMPLETE)
 
@@ -796,12 +837,27 @@ class MissionFSM(Node):
 
     @property
     def vision_node(self):
-        """VisionPipelineNode 实例 (外部注入)."""
+        """Return the externally injected vision pipeline node."""
         return self._vision_node
 
     @vision_node.setter
     def vision_node(self, vn):
         self._vision_node = vn
+
+    def set_vision_mode(self, mode: str) -> None:
+        """Switch the separately running vision pipeline through its ROS service."""
+        if self._vision_node is not None:
+            self._vision_node.set_servo_mode(mode)
+            return
+
+        if not self._vision_mode_client.wait_for_service(timeout_sec=1.0):
+            raise RuntimeError("视觉模式服务不可用")
+
+        from drone_interfaces.srv import SetVisionMode
+        request = SetVisionMode.Request()
+        request.mode = 2 if mode == "landing" else 3
+        request.enable = mode != "none"
+        self._vision_mode_client.call_async(request)
 
     # -- 工具 --
     @property
@@ -811,6 +867,18 @@ class MissionFSM(Node):
     @property
     def watchdog(self) -> Watchdog:
         return self._watchdog
+
+    @property
+    def servo_ready(self) -> bool:
+        return self._servo_ready
+
+    @property
+    def odom_ready(self) -> bool:
+        return self._standalone_odom_ready
+
+    @property
+    def battery_ready(self) -> bool:
+        return self.bridge.battery_ready
 
     @property
     def emergency(self) -> EmergencyHandler:
@@ -866,7 +934,7 @@ class MissionFSM(Node):
 
     def get_known_markers(self) -> list:
         """获取搜索阶段累计的蓝色标识目标库."""
-        min_obs = int(self.get_param("marker_memory_min_observations", 1))
+        min_obs = int(self.get_param("marker_memory_min_observations", 3))
         return [
             m for m in self._known_markers
             if int(m.get("observations", 0)) >= min_obs
@@ -943,8 +1011,8 @@ class MissionFSM(Node):
             self._drop_pending_cylinder_id = cylinder_id
             self._drop_result_consumed = False
 
-            if not self._drop_client.wait_for_service(timeout_sec=0.1):
-                self.get_logger().warn("舵机服务不可用, 模拟投放")
+            if not self._drop_client.wait_for_service(timeout_sec=2.0):
+                self.get_logger().error("舵机服务不可用, 投放失败")
                 self._drop_future = None
                 return
 
@@ -953,7 +1021,7 @@ class MissionFSM(Node):
             self._drop_future = self._drop_client.call_async(req)
 
         except Exception as e:
-            self.get_logger().warn(f"投放服务启动失败: {e}, 模拟投放")
+            self.get_logger().error(f"投放服务启动失败: {e}")
             self._drop_future = None
             self._drop_pending_cylinder_id = cylinder_id
             self._drop_result_consumed = False
@@ -963,12 +1031,11 @@ class MissionFSM(Node):
         if self._drop_result_consumed:
             return None
 
-        # 服务不可用或启动失败时按 SITL 模拟成功处理, 保持任务可继续.
+        # 服务不可用或启动失败是真实投放失败, 绝不能增加成功计数.
         if self._drop_future is None:
             self._drop_count += 1
-            self._drop_success_count += 1
             self._drop_result_consumed = True
-            return True
+            return False
 
         if not self._drop_future.done():
             return None
@@ -988,56 +1055,10 @@ class MissionFSM(Node):
         self._drop_future = None
         return success
 
-    def call_drop_service(self, cylinder_id: int) -> bool:
-        """
-        调用舵机投放服务.
-
-        通过 ROS2 Service Client 调用 /drone/servo/trigger_drop.
-        """
-        try:
-            from drone_interfaces.srv import TriggerDrop
-
-            if not hasattr(self, '_drop_client'):
-                self._drop_client = self.create_client(
-                    TriggerDrop, "/drone/servo/trigger_drop"
-                )
-
-            if not self._drop_client.wait_for_service(timeout_sec=2.0):
-                self.get_logger().warn("舵机服务不可用, 模拟投放")
-                self._drop_count += 1
-                self._drop_success_count += 1
-                return True
-
-            req = TriggerDrop.Request()
-            req.cylinder_id = cylinder_id
-
-            future = self._drop_client.call_async(req)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=3.0)
-
-            if future.done() and future.result() is not None:
-                resp = future.result()
-                if resp.success:
-                    self._drop_count += 1
-                    self._drop_success_count += 1
-                else:
-                    self._drop_count += 1
-                return resp.success
-            else:
-                self._drop_count += 1
-                return False
-
-        except Exception as e:
-            self.get_logger().warn(f"投放服务调用失败: {e}")
-            # 模拟投放
-            self._drop_count += 1
-            self._drop_success_count += 1
-            return True
-
     # -- 悬停 --
     def loiter(self, duration: float = 0.0):
         """在当前位悬停."""
         self.fc.loiter(duration)
-
 
 
 # ================================================================

@@ -1,4 +1,5 @@
-"""低空投放视觉校准.
+"""
+低空投放视觉校准.
 
 该模块只负责 DESCEND_TO_DROP 阶段的最后校准:
   不放先算方向、不依赖 fx/fy/alt/gain 参数。
@@ -12,8 +13,6 @@ import math
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Optional, Tuple
-
-from px4_control.telemetry import ned_to_world, world_to_ned
 
 
 class ServoPhase(IntEnum):
@@ -40,7 +39,8 @@ class VisualAlignStatus:
 
 
 class DropVisualAligner:
-    """投放前低空视觉精修控制器.
+    """
+    投放前低空视觉精修控制器.
 
     每轮迭代:
       1. PROBE_X: 从锚点尝试 ±WorldX, 取 pixel_error 更小的方向提交
@@ -162,8 +162,10 @@ class DropVisualAligner:
             du, dv = self._pixel_delta(target)
             pixel_error = math.hypot(du, dv)
 
-            if (world_error > world_gate
-                    and pixel_error > float(self._fsm.get_param("drop_align_pixel_tolerance", 35.0))):
+            pixel_gate = float(
+                self._fsm.get_param("drop_align_pixel_tolerance", 35.0)
+            )
+            if world_error > world_gate and pixel_error > pixel_gate:
                 continue
 
             score = min(world_error, world_gate) * 1000.0 + pixel_error
@@ -296,8 +298,14 @@ class DropVisualAligner:
             # 悬停 2 秒让 is_centered 有机会累积稳定帧
             pos = self._fsm.bridge.get_current_position()
             self._fsm.fc.goto_ned(pos.north, pos.east, -drop_height, speed=0.0)
-            hover_duration = float(self._fsm.get_param("drop_visual_align_hover_time", 2.5))
-            if self._fsm.get_clock().now().nanoseconds / 1e9 - self._probe_start_time >= hover_duration:
+            hover_duration = float(
+                self._fsm.get_param("drop_visual_align_hover_time", 2.5)
+            )
+            hover_elapsed = (
+                self._fsm.get_clock().now().nanoseconds / 1e9
+                - self._probe_start_time
+            )
+            if hover_elapsed >= hover_duration:
                 self._advance_phase(drop_height)
             return True
 
@@ -324,7 +332,10 @@ class DropVisualAligner:
             self._update_step_scale(status.pixel_error)
             step = self._current_step()
 
-            self._phase = (ServoPhase.PROBE_X_PLUS if self._working_axis_x else ServoPhase.PROBE_Y_PLUS)
+            self._phase = (
+                ServoPhase.PROBE_X_PLUS
+                if self._working_axis_x else ServoPhase.PROBE_Y_PLUS
+            )
             dn, de = self._axis_delta_ned(self._working_axis_x, +1.0, step)
             self._probe_move(
                 self._baseline_n + dn, self._baseline_e + de, drop_h,
@@ -359,7 +370,10 @@ class DropVisualAligner:
                 f"delta={delta:+.0f}px src={current_id}"
             )
 
-            self._phase = (ServoPhase.PROBE_X_MINUS if self._working_axis_x else ServoPhase.PROBE_Y_MINUS)
+            self._phase = (
+                ServoPhase.PROBE_X_MINUS
+                if self._working_axis_x else ServoPhase.PROBE_Y_MINUS
+            )
             dn, de = self._axis_delta_ned(self._working_axis_x, -1.0, step)
             self._probe_move(
                 self._baseline_n + dn, self._baseline_e + de, drop_h,

@@ -73,6 +73,7 @@ class PathPlanner:
         Returns
         -------
         list of dict: 每个航点为 {x, y, z, yaw, speed, hover_s, label}
+
         """
         x_min = zone_bounds["x_min"] + self.margin_east
         x_max = zone_bounds["x_max"] - self.margin_east
@@ -178,6 +179,7 @@ class PathPlanner:
         -------
         list of dict: {north, east, down, yaw, speed, hover_s, label}
             沿长边飞行的弓字形航点序列
+
         """
         north_range = area_north_max - area_north_min
         east_range = area_east_max - area_east_min
@@ -287,6 +289,7 @@ class PathPlanner:
         Returns
         -------
         list of dict: 1-3 个航点
+
         """
         if speed is None:
             speed = self.transit_speed
@@ -326,6 +329,7 @@ class PathPlanner:
         Returns
         -------
         list of dict: {north, east, down, yaw, speed, hover_s, label}
+
         """
         if speed is None:
             speed = self.transit_speed
@@ -357,10 +361,13 @@ class PathPlanner:
         Parameters
         ----------
         from_xyz : (x, y, z)
+            当前 World 坐标.
         home_xyz : (x, y, z)
+            返航目标 World 坐标.
 
         Returns
         -------
         list of dict
+
         """
         return self.plan_transit(from_xyz, home_xyz, speed=self.return_speed)

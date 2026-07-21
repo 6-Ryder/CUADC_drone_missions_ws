@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Gazebo Camera → ROS2 Image Bridge
+Gazebo Camera → ROS2 Image Bridge.
+
 解决 ros_gz_image C++ bridge 的 DDS 大消息传输问题。
 通过 gz topic --json-output 抓取单帧，base64 解码后发布为 ROS2 Image。
 

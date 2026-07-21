@@ -10,7 +10,7 @@
   <depend>rclpy</depend>
   <depend>drone_vision</depend>
   <depend>drone_mission</depend>
-  <depend>drone_servo</depend>
+  <depend>drone_servo2</depend>
   <depend>px4_control</depend>
   <depend>drone_utils</depend>
 

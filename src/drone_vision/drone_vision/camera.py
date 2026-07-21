@@ -2,11 +2,11 @@
 相机驱动节点.
 
 SITL 模式: 通过 ros_gz_bridge 订阅 Gazebo 相机话题
-实飞模式: 通过 GStreamer pipeline 读取 Jetson 相机 (CSI/USB)
+实飞模式: 通过 V4L2 读取指定的 USB 相机
 
 参数:
   sim_mode: true → 订阅 /camera/image (Gazebo)
-            false → 打开 GStreamer pipeline
+            false → 打开指定的 V4L2 设备
 
 发布:
   /drone/camera/image_raw   (sensor_msgs/Image)
@@ -15,9 +15,14 @@ SITL 模式: 通过 ros_gz_bridge 订阅 Gazebo 相机话题
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
-import numpy as np
 import time
 import threading
 
@@ -28,6 +33,13 @@ except ImportError:
     HAS_CV2 = False
 
 
+CAMERA_INFO_QOS = QoSProfile(
+    depth=1,
+    reliability=QoSReliabilityPolicy.RELIABLE,
+    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+)
+
+
 class CameraDriverNode(Node):
     """相机驱动 — SITL 或实飞."""
 
@@ -36,23 +48,24 @@ class CameraDriverNode(Node):
 
         self._declare_params()
         self._bridge = CvBridge()
+        self._cap = None
+        self._running = False
+        self._thread = None
 
         self.sim_mode = self.get_parameter("sim_mode").value
 
         # 发布
         self._img_pub = self.create_publisher(
-            Image, "/drone/camera/image_raw", 10,
+            Image, "/drone/camera/image_raw", qos_profile_sensor_data,
         )
         self._info_pub = self.create_publisher(
-            CameraInfo, "/drone/camera/camera_info", 10,
+            CameraInfo, "/drone/camera/camera_info", CAMERA_INFO_QOS,
         )
-        # 发送一次 camera_info
-        self._publish_camera_info()
-
         if self.sim_mode:
             self._init_sitl()
         else:
             self._init_real()
+        self._publish_camera_info()
 
         self.get_logger().info(f"相机驱动已启动 (sim_mode={self.sim_mode})")
 
@@ -75,7 +88,8 @@ class CameraDriverNode(Node):
         """SITL: 订阅 Gazebo 相机话题 (通过 ros_gz_bridge)."""
         self.get_logger().info("SITL 模式: 等待 /camera/image 话题...")
         self._gz_sub = self.create_subscription(
-            Image, "/camera/image", self._sitl_image_cb, 10,
+            Image, "/camera/image", self._sitl_image_cb,
+            qos_profile_sensor_data,
         )
 
     def _sitl_image_cb(self, msg: Image):
@@ -90,71 +104,49 @@ class CameraDriverNode(Node):
     # ----------------------------------------------------------
 
     def _init_real(self):
-        """实飞: GStreamer pipeline 读取 Jetson 相机."""
-        self.get_logger().info("实飞模式: 初始化 GStreamer 相机...")
-        self._cap = None
-        self._running = False
-        self._thread = None
-
-        # 尝试打开相机
-        try:
-            self._open_camera()
-            self._running = True
-            self._thread = threading.Thread(target=self._capture_loop, daemon=True)
-            self._thread.start()
-        except Exception as e:
-            self.get_logger().error(f"相机初始化失败: {e}")
+        """实飞: 通过 V4L2 读取指定相机."""
+        self.get_logger().info("实飞模式: 初始化 V4L2 相机...")
+        # 初始化失败必须终止节点，否则启动脚本会把无图像的进程误判为健康。
+        self._open_camera()
+        self._running = True
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._thread.start()
 
     def _open_camera(self):
-        """打开相机 — GStreamer 优先, 设备 ID 回退."""
+        """通过 V4L2 打开配置指定的 USB 相机."""
+        if not HAS_CV2:
+            raise RuntimeError("OpenCV 未安装, 无法启动 V4L2 相机")
         device = self.get_parameter("camera_device").value
         w = self.get_parameter("camera_width").value
         h = self.get_parameter("camera_height").value
         fps = self.get_parameter("camera_fps").value
 
-        # 尝试多个 pipeline:
-        #   - nvarguscamerasrc (Jetson MIPI CSI)
-        #   - v4l2src (USB camera, 用参数指定的设备)
-        pipelines = [
-            # Jetson MIPI CSI (Raspberry Pi Camera v2)
-            (
-                "nvarguscamerasrc sensor-id=0 ! "
-                f"video/x-raw(memory:NVMM),width={w},height={h},framerate={fps}/1 ! "
-                "nvvidconv flip-method=2 ! "
-                "video/x-raw,format=BGRx ! "
-                "videoconvert ! video/x-raw,format=BGR ! appsink"
-            ),
-            # USB camera (v4l2, 设备路径可配置)
-            (
-                f"v4l2src device={device} ! "
-                f"video/x-raw,width={w},height={h},framerate={fps}/1 ! "
-                "videoconvert ! video/x-raw,format=BGR ! appsink"
-            ),
-        ]
+        cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
+        if not cap.isOpened():
+            cap.release()
+            raise RuntimeError(f"无法通过 V4L2 打开相机设备: {device}")
 
-        for i, pipeline in enumerate(pipelines):
-            self.get_logger().info(f"尝试 pipeline {i}: {pipeline[:80]}...")
-            cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-            if cap.isOpened():
-                self._cap = cap
-                self.get_logger().info(f"相机已打开 (pipeline {i})")
-                return
-
-        # 回退: 尝试简单设备ID (从设备路径提取数字, 如 /dev/video0 → 0)
-        try:
-            dev_id = int(device.replace("/dev/video", ""))
-        except (ValueError, AttributeError):
-            dev_id = 0
-
-        for offset in range(3):  # 尝试 dev_id, dev_id+1, dev_id+2
-            try_id = dev_id + offset
-            cap = cv2.VideoCapture(try_id)
-            if cap.isOpened():
-                self._cap = cap
-                self.get_logger().info(f"相机已打开 (device /dev/video{try_id})")
-                return
-
-        raise RuntimeError(f"无法打开相机设备: {device}")
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        cap.set(cv2.CAP_PROP_FPS, fps)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        actual_w = int(round(cap.get(cv2.CAP_PROP_FRAME_WIDTH)))
+        actual_h = int(round(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        actual_fps = float(cap.get(cv2.CAP_PROP_FPS))
+        if (actual_w, actual_h) != (w, h):
+            cap.release()
+            raise RuntimeError(
+                f"相机不支持任务分辨率 {w}x{h}, 实际协商为 "
+                f"{actual_w}x{actual_h}"
+            )
+        self._actual_width = actual_w
+        self._actual_height = actual_h
+        self._actual_fps = actual_fps
+        self._cap = cap
+        self.get_logger().info(
+            f"V4L2 相机已打开: {device} "
+            f"({actual_w}x{actual_h} @ {actual_fps:.1f}Hz)"
+        )
 
     def _capture_loop(self):
         """实飞采集循环 — 丢弃积压帧, 始终取最新."""
@@ -167,17 +159,13 @@ class CameraDriverNode(Node):
                 time.sleep(0.1)
                 continue
 
-            # 清空 OpenCV 内部缓冲区, 只保留最新帧
-            for _ in range(5):
-                self._cap.grab()
-
-            ret, frame = self._cap.retrieve()
+            ret, frame = self._cap.read()
             if not ret:
                 self.get_logger().warn("相机读取失败, 重试...")
                 time.sleep(0.5)
                 continue
 
-            # 发布 (手动构造 Image, 解决 cv_bridge KeyError:16 兼容性问题)
+            # 手动构造 Image, 避免不同 cv_bridge 构建之间的类型兼容问题。
             msg = Image()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "camera_optical_frame"
@@ -198,8 +186,12 @@ class CameraDriverNode(Node):
         msg = CameraInfo()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "camera_optical_frame"
-        msg.height = self.get_parameter("camera_height").value
-        msg.width = self.get_parameter("camera_width").value
+        msg.height = getattr(
+            self, "_actual_height", self.get_parameter("camera_height").value,
+        )
+        msg.width = getattr(
+            self, "_actual_width", self.get_parameter("camera_width").value,
+        )
         msg.k = [
             self.get_parameter("fx").value, 0.0, self.get_parameter("cx").value,
             0.0, self.get_parameter("fy").value, self.get_parameter("cy").value,
@@ -215,10 +207,10 @@ class CameraDriverNode(Node):
 
     def destroy_node(self):
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=2.0)
-        if self._cap:
+        if self._cap is not None:
             self._cap.release()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         super().destroy_node()
 
 
@@ -231,7 +223,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

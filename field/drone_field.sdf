@@ -240,7 +240,7 @@
       <static>true</static>
       <pose>10 4 0.010 0 0 0</pose>
       <link name="pad_base">
-        <!-- 圆形底板 (深灰, 直径 80cm = 半径 0.4m) -->
+        <!-- 白色外圆, 直径 80cm = 半径 0.4m -->
         <visual name="pad_base_visual">
           <geometry>
             <cylinder>
@@ -249,21 +249,22 @@
             </cylinder>
           </geometry>
           <material>
-            <ambient>0.2 0.2 0.2 1</ambient>
-            <diffuse>0.25 0.25 0.25 1</diffuse>
+            <ambient>0.9 0.9 0.9 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
           </material>
         </visual>
-        <!-- 外环 (白色, 半径 0.4m, 环宽约 3cm) -->
-        <visual name="pad_ring_visual">
+        <!-- 上层深灰内圆, 与白色外圆共同形成约 4cm 环宽 -->
+        <visual name="pad_inner_visual">
+          <pose>0 0 0.006 0 0 0</pose>
           <geometry>
             <cylinder>
-              <radius>0.40</radius>
+              <radius>0.36</radius>
               <length>0.004</length>
             </cylinder>
           </geometry>
           <material>
-            <ambient>0.9 0.9 0.9 1</ambient>
-            <diffuse>1 1 1 1</diffuse>
+            <ambient>0.2 0.2 0.2 1</ambient>
+            <diffuse>0.25 0.25 0.25 1</diffuse>
           </material>
         </visual>
       </link>
@@ -277,7 +278,7 @@
       <static>true</static>
       <!-- H 左竖条: center at (9.87, 4, 0.012), size=(0.04, 0.35, 0.004) -->
       <link name="h_left_bar">
-        <pose>9.87 4 0.013 0 0 0</pose>
+        <pose>9.87 4 0.020 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
@@ -292,7 +293,7 @@
       </link>
       <!-- H 右竖条: center at (10.13, 4, 0.012), size=(0.04, 0.35, 0.004) -->
       <link name="h_right_bar">
-        <pose>10.13 4 0.013 0 0 0</pose>
+        <pose>10.13 4 0.020 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
@@ -307,7 +308,7 @@
       </link>
       <!-- H 横条: center at (10, 4, 0.012), size=(0.30, 0.04, 0.004) -->
       <link name="h_cross_bar">
-        <pose>10 4 0.013 0 0 0</pose>
+        <pose>10 4 0.020 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>

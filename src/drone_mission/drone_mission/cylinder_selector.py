@@ -27,11 +27,14 @@ class CylinderSelector:
 
     def __init__(self, min_radius_first: bool = True):
         """
+        初始化目标选择器.
+
         Parameters
         ----------
         min_radius_first : bool
             True: 先选半径最小的 (默认)
             False: 先选半径最大的
+
         """
         self._min_radius_first = min_radius_first
         self._selected_ids: Set[int] = set()
@@ -47,10 +50,12 @@ class CylinderSelector:
         Parameters
         ----------
         cylinders : list of CylinderDetection (或 dict with id/center_x/center_y/radius/confidence)
+            当前可见的圆筒目标.
 
         Returns
         -------
         int or None: 选中的圆筒 ID, None 表示无可选
+
         """
         # 过滤掉已选择的
         available = []
@@ -94,7 +99,8 @@ class CylinderSelector:
         return cid
 
     def release_last_selection(self) -> None:
-        """撤销最近一次选择, 用于逼近/投放失败后切换到下一个目标.
+        """
+        撤销最近一次选择, 用于逼近/投放失败后切换到下一个目标.
 
         保留选择历史 (_selected_positions / _selected_ids) 不变,
         仅递减计数, 确保下次 select() 排除已失败的目标.
@@ -111,6 +117,7 @@ class CylinderSelector:
         (target_id, needs_reconfirm)
             target_id: 选中的圆筒 ID, -1 表示暂无可选
             needs_reconfirm: True 表示需要降高重新检测
+
         """
         if not cylinders:
             return (-1, False)

@@ -42,6 +42,7 @@ class TransitState:
             到达后跳转的状态名
         label : str
             日志标签
+
         """
         self._target_world = target_world_xyz
         self._target_state = target_state
@@ -96,8 +97,8 @@ class TransitState:
         # 超时
         timeout = self._fsm.get_param("waypoint_timeout", 120.0)
         if elapsed > timeout:
-            self._fsm.get_logger().warn(f"{self._label}: 超时, 强制进入下一状态")
-            return self._target_state
+            self._fsm.get_logger().error(f"{self._label}: 未到达目标航点")
+            return "ERROR"
 
         return None
 

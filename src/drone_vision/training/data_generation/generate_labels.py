@@ -31,9 +31,8 @@
 
 import argparse
 import json
-import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -288,9 +287,9 @@ names:
 
     print(f"\n完成! {generated} 个标签文件")
     print(f"输出: {output_dir}")
-    print(f"\n下一步:")
-    print(f"  1. 在 Gazebo 中截图 (用 poses/ 中的位姿)")
-    print(f"  2. 将截图放入 images/ 目录")
+    print("\n下一步:")
+    print("  1. 在 Gazebo 中截图 (用 poses/ 中的位姿)")
+    print("  2. 将截图放入 images/ 目录")
     print(f"  3. 运行: python train.py --data {output_dir}/data.yaml")
 
 
