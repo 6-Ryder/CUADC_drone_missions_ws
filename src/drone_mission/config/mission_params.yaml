@@ -3,6 +3,11 @@
 # 原点: 起飞点 H (world: 10, 4, 0)
 /mission_state_machine:
   ros__parameters:
+    # --- 坐标系原点 ---
+    home_x: 10.0
+    home_y: 4.0
+    home_z: 0.0
+
     # --- 任务全局参数 ---
     takeoff_height: 5.0           # 巡航飞行高度 (m, NED z 负值)
     waypoint_tolerance: 0.5       # 航点到达容差 (m)

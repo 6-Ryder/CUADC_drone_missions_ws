@@ -44,6 +44,19 @@ def generate_launch_description():
         description="uXRCE-DDS 串口波特率",
     )
 
+    home_x_arg = DeclareLaunchArgument(
+        "home_x", default_value="0.0",
+        description="Home 点 World x (真机解锁点即原点)",
+    )
+    home_y_arg = DeclareLaunchArgument(
+        "home_y", default_value="0.0",
+        description="Home 点 World y",
+    )
+    home_z_arg = DeclareLaunchArgument(
+        "home_z", default_value="0.0",
+        description="Home 点 World z",
+    )
+
     xrce_agent = ExecuteProcess(
         cmd=[
             "MicroXRCEAgent", "serial", "--dev",
@@ -127,6 +140,9 @@ def generate_launch_description():
                 "camera_fy": 400.0,
                 "camera_cx": 320.0,
                 "camera_cy": 240.0,
+                "home_x": LaunchConfiguration("home_x"),
+                "home_y": LaunchConfiguration("home_y"),
+                "home_z": LaunchConfiguration("home_z"),
             },
         ],
         additional_env={"RCUTILS_COLORIZED_OUTPUT": "1"},
@@ -142,6 +158,9 @@ def generate_launch_description():
         camera_device_arg,
         serial_device_arg,
         serial_baud_arg,
+        home_x_arg,
+        home_y_arg,
+        home_z_arg,
         xrce_agent,
         camera_node,
         px4_bridge_node,

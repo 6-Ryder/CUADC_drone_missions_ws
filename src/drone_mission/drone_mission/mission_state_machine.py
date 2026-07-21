@@ -42,7 +42,7 @@ from drone_mission.states.state_precision_land import PrecisionLandState
 from px4_control.px4_bridge import PX4Bridge
 from px4_control.flight_controller import FlightController
 from px4_control.standalone_bridge import StandaloneBridge
-from px4_control.telemetry import ned_to_world
+from px4_control.telemetry import configure_home, ned_to_world
 
 from drone_mission.cylinder_selector import CylinderSelector
 from drone_mission.path_planner import PathPlanner
@@ -173,13 +173,7 @@ class MissionFSM(Node):
         self._markers_timestamp: float = 0.0
         self._hazards_timestamp: float = 0.0
 
-        # ---- 遥测缓存 (standalone mode, 通过 ROS2 话题获取) ----
-        self._standalone_pose = None  # (x, y, z, qx, qy, qz, qw)
         self._standalone_odom_ready = False
-        self._standalone_armed = False
-        self._standalone_landed = True
-        self._standalone_battery = 1.0
-        self._standalone_battery_ready = False
 
         # ---- 初始化延迟 ----
         self._init_timer = self.create_timer(1.0, self._lazy_init)
@@ -192,6 +186,9 @@ class MissionFSM(Node):
     def _declare_params(self):
         """声明所有 YAML 参数."""
         # 全局
+        self.declare_parameter("home_x", 10.0)
+        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_z", 0.0)
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
@@ -309,6 +306,11 @@ class MissionFSM(Node):
         """等待 PX4 Bridge 就绪后初始化."""
         if self._initialized:
             return
+
+        hx = self.get_param("home_x", 10.0)
+        hy = self.get_param("home_y", 4.0)
+        hz = self.get_param("home_z", 0.0)
+        configure_home(hx, hy, hz)
 
         # 检查 PX4 Bridge 是否可以获取
         # 在真实部署中, PX4Bridge 是独立节点; 此处通过 ros2 话题检查
@@ -636,9 +638,6 @@ class MissionFSM(Node):
 
     def _pose_cb(self, msg):
         """Standalone mode: receive /drone/pose from px4_bridge."""
-        p = msg.pose.position
-        q = msg.pose.orientation
-        self._standalone_pose = (p.x, p.y, p.z, q.x, q.y, q.z, q.w)
         self._standalone_odom_ready = True
         self._watchdog.feed("px4_odom")
 
