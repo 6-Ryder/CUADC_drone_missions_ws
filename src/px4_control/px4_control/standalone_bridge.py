@@ -73,14 +73,17 @@ class StandaloneBridge:
     VEHICLE_CMD_DO_SET_MODE = 176
     VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
 
-    def __init__(self, node: Node):
+    def __init__(self, node: Node, sim_mode: bool = True):
         """
         Parameters
         ----------
         node : rclpy.node.Node
             The ROS2 node that owns publishers/subscriptions/timers.
+        sim_mode : bool
+            True=SITL (force arm with magic number), False=真机 (标准解锁).
         """
         self._node = node
+        self._sim_mode = sim_mode
         qos = _px4_qos()
 
         # ---- Telemetry state ----
@@ -224,16 +227,24 @@ class StandaloneBridge:
         self._send_command(self.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
 
     def arm(self) -> None:
-        self._node.get_logger().info("[StandaloneBridge] 解锁请求 (SITL force)")
-        self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
+        if self._sim_mode:
+            self._node.get_logger().info("[StandaloneBridge] 解锁请求 (SITL force)")
+            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
+        else:
+            self._node.get_logger().info("[StandaloneBridge] 解锁请求 (标准)")
+            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 0.0)
 
     def disarm(self) -> None:
         self._node.get_logger().info("[StandaloneBridge] 上锁请求")
         self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
 
     def force_disarm(self) -> None:
-        self._node.get_logger().warn("[StandaloneBridge] 强制上锁!")
-        self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
+        if self._sim_mode:
+            self._node.get_logger().warn("[StandaloneBridge] 强制上锁! (SITL force)")
+            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
+        else:
+            self._node.get_logger().warn("[StandaloneBridge] 强制上锁!")
+            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
 
     def land_at_current(self) -> None:
         """原地降落 (MAV_CMD_NAV_LAND = 189)."""

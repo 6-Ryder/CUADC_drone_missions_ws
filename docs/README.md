@@ -576,13 +576,17 @@ ros2 launch drone_bringup simple_mission.launch.py \
     drop_x:=42.5 drop_y:=4.0 \
     cruise_altitude:=5.0 \
     loiter_time:=3.0
+
+# 无 GUI (headless) 模式, 减少内存占用
+HEADLESS=1 ros2 launch drone_bringup simple_mission.launch.py
 ```
 
 **真机环境**（仅需 MicroXRCEAgent + px4_bridge + simple_mission）：
 
 ```bash
 ros2 launch drone_bringup simple_mission.launch.py \
-    home_x:=<实际起飞点X> home_y:=<实际起飞点Y> \
+    sim_mode:=false \
+    home_x:=0.0 home_y:=0.0 \
     drop_x:=<目标点X> drop_y:=<目标点Y> \
     cruise_altitude:=5.0
 ```
@@ -597,29 +601,34 @@ ros2 launch drone_bringup simple_mission.launch.py \
 | `home_x` | 10.0 | 起飞点 World X |
 | `home_y` | 4.0 | 起飞点 World Y |
 | `loiter_time` | 5.0 | 目标点上空悬停时间 (s) |
+| `sim_mode` | true | true=SITL force arm, false=真机标准解锁 |
 
 ### 与全任务代码的对应关系
 
-`simple_mission` 没有引用项目内任何自定义模块（坐标变换和 PX4 指令都在自身内部重新实现），但通过**完全相同的话题和通信路径**控制无人机：
+`simple_mission` 与 `mission_fsm` **共用相同的底层模块和通信路径**：
 
 ```
-simple_mission ──→ /drone/cmd_setpoint_ned            ←── 与全任务 FSM 完全相同
-              ──→ /drone/cmd/vehicle_command_relay    ←── 与全任务 FSM 完全相同
-              ←── /fmu/out/vehicle_odometry           ←── 与全任务 FSM 完全相同
-              ←── /fmu/out/vehicle_status_v4          ←── 与全任务 FSM 完全相同
-              ←── /fmu/out/vehicle_land_detected      ←── 与全任务 FSM 完全相同
+simple_mission ── StandaloneBridge ──→ /drone/cmd_setpoint_ned            ←── mission_fsm 同
+                                   ──→ /drone/cmd/vehicle_command_relay    ←── mission_fsm 同
+                                   ←── /fmu/out/vehicle_odometry           ←── mission_fsm 同
+                                   ←── /fmu/out/vehicle_status_v4          ←── mission_fsm 同
+                                   ←── /fmu/out/vehicle_land_detected      ←── mission_fsm 同
+
+坐标变换:  simple_mission ── telemetry.configure_home() → world_to_ned()  ←── mission_fsm 同
+飞行控制:  simple_mission ── FlightController.takeoff/goto_world/land     ←── mission_fsm 同
 ```
 
 各阶段与全任务 FSM 的异同：
 
 | 阶段 | 与全任务对比 | 说明 |
 |------|:-----------:|------|
-| 解锁 (ARM) | **完全相同** | `VehicleCommand(400, 1.0, 21196)` → 同一 relay 话题 |
-| Offboard 切换 | **完全相同** | `VehicleCommand(176, 1.0, 6.0)` → 同一 relay 话题 |
-| 起飞 (TAKEOFF) | **完全相同** | `Point` → `/drone/cmd_setpoint_ned`，到达判定逻辑一致 |
-| 航点飞行 (TRANSIT) | **完全相同** | `world_to_ned(drop_x, drop_y, alt)` → 同一 setpoint 话题 |
-| 返航 (RETURN) | **完全相同** | `world_to_ned(home_x, home_y, alt)` → 同一 setpoint 话题 |
-| 降落 (LAND) | **策略不同** | simple 托管给 PX4 (`DO_LAND_START`)；全任务自己控制下降速率以配合视觉精准降落 |
+| 坐标变换 | **完全相同** | 共用 `telemetry.configure_home()` + `world_to_ned()` |
+| 通信层 | **完全相同** | 共用 `StandaloneBridge` (10Hz 心跳 + 遥测 + 指令中继) |
+| 解锁/Offboard | **完全相同** | `StandaloneBridge.arm()` / `set_offboard_mode()` |
+| 起飞 (TAKEOFF) | **逻辑相似** | `fc.takeoff()` 内联实现, 全任务用 `TakeoffState` 分阶段 |
+| 航点飞行 (TRANSIT) | **完全相同** | `world_to_ned() → StandaloneBridge.set_position_target()` |
+| 返航 (RETURN) | **完全相同** | 同上 |
+| 降落 (LAND) | **策略不同** | simple: `StandaloneBridge.land_at_current()` 托管 PX4; 全任务: `FlightController.land()` 速度下降 |
 
 ### 这个测试能验证什么
 
@@ -628,11 +637,10 @@ simple_mission ──→ /drone/cmd_setpoint_ned            ←── 与全任�
 | 验证项 | 对应全任务代码 |
 |--------|--------------|
 | PX4 DDS ↔ ROS2 通信链路 | `px4_bridge.py` — DDS 订阅/发布 + Offboard 心跳 |
-| 解锁 → Offboard 模式切换 | `_StandaloneBridgeFacade.arm()` / `set_offboard_mode()` |
-| 位置控制指令 → 飞控执行 | `/drone/cmd_setpoint_ned` → `px4_bridge._cmd_setpoint_cb()` → PX4 |
-| 遥测采集（里程计/状态/着陆检测） | `/fmu/out/vehicle_odometry` / `vehicle_status_v4` / `vehicle_land_detected` |
-| 坐标变换 (World ↔ NED) | `telemetry.py` — `world_to_ned()` / `ned_to_world()` |
-| 起飞/航点/返航的到达判定逻辑 | `TakeoffState` / `TransitState` / `ReturnState` |
+| StandaloneBridge 中继通信 | `standalone_bridge.py` — 遥控测 + 10Hz 心跳 + 指令转发 |
+| 坐标变换 (World ↔ NED) | `telemetry.py` — `configure_home()` + `world_to_ned()` / `ned_to_world()` |
+| FlightController 飞行控制 | `flight_controller.py` — `takeoff()` / `goto_world()` / `land()` |
+| 位置控制指令 → 飞控执行 | `/drone/cmd_setpoint_ned` → `px4_bridge` → PX4 |
 | 真机 GPS/里程计定位精度 | 全任务所有依赖位置的状态 |
 
 **不能验证（视觉和投放模块需单独测试）：**

@@ -55,6 +55,10 @@ def generate_launch_description():
         "loiter_time", default_value="5.0",
         description="投放区悬停时间 (s)",
     )
+    sim_mode_arg = DeclareLaunchArgument(
+        "sim_mode", default_value="true",
+        description="仿真模式 (true=SITL force arm, false=真机标准解锁)",
+    )
 
     # ---- 节点 ----
 
@@ -83,6 +87,7 @@ def generate_launch_description():
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
             "loiter_time": LaunchConfiguration("loiter_time"),
+            "sim_mode": LaunchConfiguration("sim_mode"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -107,6 +112,7 @@ def generate_launch_description():
         home_x_arg,
         home_y_arg,
         loiter_time_arg,
+        sim_mode_arg,
         px4_bridge_node,
         mission_delayed,
     ])

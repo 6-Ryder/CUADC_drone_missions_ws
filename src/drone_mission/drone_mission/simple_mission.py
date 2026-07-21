@@ -69,6 +69,7 @@ class SimpleMission(Node):
         self.declare_parameter("waypoint_timeout", 120.0)      # FlightController 需要
         self.declare_parameter("loiter_time", 5.0)
         self.declare_parameter("state_timeout", 180.0)
+        self.declare_parameter("sim_mode", True)  # True=SITL, False=真机
 
         # ---- 配置坐标变换 ----
         hx = self.param("home_x")
@@ -76,7 +77,8 @@ class SimpleMission(Node):
         configure_home(hx, hy, 0.0)
 
         # ---- 控制层 ----
-        self._bridge = StandaloneBridge(self)
+        sim_mode = self.param("sim_mode")
+        self._bridge = StandaloneBridge(self, sim_mode=sim_mode)
         self._fc = FlightController(self._bridge)
 
         # ---- 状态机 ----

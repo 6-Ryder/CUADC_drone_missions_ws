@@ -32,6 +32,8 @@ from px4_msgs.msg import (
     VehicleStatus,
     VehicleAttitude,
     VehicleLandDetected,
+    BatteryStatus,
+    SensorGps,
 )
 
 from px4_control.telemetry import (
@@ -118,6 +120,12 @@ class PX4Bridge(Node):
         )
         self._land_sub = self.create_subscription(
             VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, qos,
+        )
+        self._battery_sub = self.create_subscription(
+            BatteryStatus, "/fmu/out/battery_status", self._battery_cb, qos,
+        )
+        self._gps_sub = self.create_subscription(
+            SensorGps, "/fmu/out/vehicle_gps_position", self._gps_cb, qos,
         )
 
         # ---- 发布 ROS2 → PX4 ----
@@ -248,10 +256,6 @@ class PX4Bridge(Node):
         self._current_telemetry.status.armed = (msg.arming_state == 2)
         self._current_telemetry.status.offboard_mode = (msg.nav_state == self.NAV_STATE_OFFBOARD)
         self._current_telemetry.status.navigation_state = msg.nav_state
-        # battery_remaining/gps no longer in VehicleStatus (use dedicated topics)
-        self._current_telemetry.status.battery_remaining = 1.0
-        self._current_telemetry.status.gps_fix_type = 0
-        self._current_telemetry.status.gps_satellites = 0
 
         # 更新着陆状态
         self._current_telemetry.status.landed = (
@@ -274,6 +278,15 @@ class PX4Bridge(Node):
     def _land_cb(self, msg: VehicleLandDetected):
         self._land_detected = msg
         self._current_telemetry.status.landed = msg.landed
+
+    def _battery_cb(self, msg: BatteryStatus):
+        """订阅真实电池状态 (替代 SITL 硬编码假值)."""
+        self._current_telemetry.status.battery_remaining = float(msg.remaining)
+
+    def _gps_cb(self, msg: SensorGps):
+        """订阅真实 GPS 状态 (替代 SITL 硬编码假值)."""
+        self._current_telemetry.status.gps_fix_type = msg.fix_type
+        self._current_telemetry.status.gps_satellites = msg.satellites_used
 
     def _cmd_relay_cb(self, msg: VehicleCommand):
         """中继 VehicleCommand — 从 /drone/cmd/vehicle_command_relay 转发到 PX4."""

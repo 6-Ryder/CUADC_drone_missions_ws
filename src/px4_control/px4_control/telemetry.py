@@ -94,15 +94,15 @@ class Telemetry:
 # ============================================================
 
 # World(ENU) 原点在 NED 坐标系中的偏移.
-# 仿真默认: H 在 Gazebo World 中位于 (10, 4, 0).
-# 真机部署: Home=解锁点, World(ENU) 以 Home 为原点 → 偏移 (0, 0, 0).
-_home_world_x: float = 10.0
-_home_world_y: float = 4.0
+# 仿真: H 在 Gazebo World 中位于 (10, 4, 0) — 通过 configure_home(10,4,0) 设置.
+# 真机: Home=解锁点, World(ENU) 以 Home 为原点 → 偏移 (0, 0, 0).
+_home_world_x: float = 0.0
+_home_world_y: float = 0.0
 _home_world_z: float = 0.0
 
 # 保留旧名称作为兼容别名 (deprecated, 请用 configure_home)
-H_WORLD_X = 10.0
-H_WORLD_Y = 4.0
+H_WORLD_X = 0.0
+H_WORLD_Y = 0.0
 H_WORLD_Z = 0.0
 
 

@@ -69,7 +69,7 @@ class GzCameraBridge(Node):
             msg.encoding = enc
             msg.is_bigendian = 0
             msg.step = step
-            msg.data = list(img_bytes)
+            msg.data = img_bytes
             self._pub.publish(msg)
 
             self._count += 1
