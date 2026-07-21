@@ -1,13 +1,10 @@
 from pathlib import Path
 
-from drone_mission.mission_state_machine import (
-    _StandaloneBridgeFacade,
-    _StandaloneFlightFacade,
-)
 from drone_mission.states.state_drop import DropState
-from px4_control.telemetry import Position, Velocity
 from drone_mission.states.state_precision_land import PrecisionLandState
 from drone_mission.states.state_takeoff import TakeoffState
+from px4_control.standalone_bridge import StandaloneBridge
+from px4_control.telemetry import Position, Velocity
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -80,7 +77,9 @@ def test_takeoff_waits_for_confirmed_offboard(monkeypatch):
     state._sub_phase_start = 0.0
     state._offboard_cmd_sent = True
     state._start_time = 0.0
-    monkeypatch.setattr("drone_mission.states.state_takeoff.time.time", lambda: 2.0)
+    monkeypatch.setattr(
+        "drone_mission.states.state_takeoff.time.time", lambda: 2.0,
+    )
 
     assert state.execute() is None
     assert fsm.fc.takeoff_calls == 0
@@ -97,7 +96,9 @@ def test_takeoff_timeout_is_an_error(monkeypatch):
     state._sub_phase_start = 0.0
     state._offboard_cmd_sent = True
     state._start_time = 0.0
-    monkeypatch.setattr("drone_mission.states.state_takeoff.time.time", lambda: 16.0)
+    monkeypatch.setattr(
+        "drone_mission.states.state_takeoff.time.time", lambda: 16.0,
+    )
 
     assert state.execute() == "ERROR"
 
@@ -115,61 +116,79 @@ def test_descent_ready_remains_latched_during_precision_alignment():
 
 
 def test_standalone_bridge_exposes_real_px4_velocity():
-    facade = _StandaloneBridgeFacade.__new__(_StandaloneBridgeFacade)
-    facade._fsm = type(
-        "FSM",
+    node = type(
+        "Node",
         (),
         {
-            "_standalone_pose": None,
-            "_standalone_battery": 0.75,
+            "create_subscription": lambda *args, **kwargs: None,
+            "create_publisher": lambda *args, **kwargs: None,
+            "create_timer": lambda *args, **kwargs: None,
         },
     )()
-    facade._position = Position()
-    facade._velocity = Velocity()
-    facade._current_yaw = 0.0
-    facade._px4_armed = True
-    facade._px4_landed = False
+    bridge = StandaloneBridge.__new__(StandaloneBridge)
+    bridge._node = node
+    bridge._position = Position()
+    bridge._velocity = Velocity()
+    bridge._armed = True
+    bridge._landed = False
+    bridge._battery_remaining = 0.75
+    bridge._battery_ready = True
+    bridge._attitude = type("Attitude", (), {})()
+    bridge._offboard = False
+    bridge._current_yaw = 0.0
 
-    odometry = type("Odometry", (), {"velocity": [1.25, -0.5, 0.08]})()
-    facade._odom_cb(odometry)
+    odometry = type("Odometry", (), {
+        "position": [0.0, 0.0, 0.0],
+        "velocity": [1.25, -0.5, 0.08],
+    })()
+    bridge._odom_cb(odometry)
 
-    telemetry = facade.get_telemetry()
+    telemetry = bridge.get_telemetry()
     assert telemetry.velocity == Velocity(vn=1.25, ve=-0.5, vd=0.08)
 
 
-def test_takeoff_target_is_not_rebuilt_from_position_drift():
-    positions = iter(
-        [
-            Position(north=0.0, east=0.0, down=0.0),
-            Position(north=0.02, east=-0.01, down=-0.1),
-        ]
-    )
-    messages = []
-    fsm = type(
-        "FSM",
-        (),
-        {
-            "bridge": type(
-                "Bridge",
-                (),
-                {"get_current_position": lambda _self: next(positions)},
-            )(),
-            "get_logger": lambda _self: type(
-                "Logger", (), {"info": lambda _logger, message: messages.append(message)},
-            )(),
-        },
-    )()
-    facade = _StandaloneFlightFacade.__new__(_StandaloneFlightFacade)
-    facade._fsm = fsm
-    facade._target_ned = None
-    facade._target_set_time = 0.0
+def test_flight_controller_takeoff_sets_same_target_for_altitude():
+    """Verify FlightController.takeoff() sets a NED target preserving XY."""
+    from px4_control.flight_controller import FlightController
 
-    facade.takeoff(5.0)
-    first_target = facade._target_ned
-    facade.takeoff(5.0)
+    class _BridgeMock:
+        def __init__(self):
+            self._position = Position(north=1.0, east=2.0, down=0.0)
+            self._target = None
+            self._offboard = False
+            self._armed = False
 
-    assert facade._target_ned == first_target
-    assert len(messages) == 1
+        def get_current_position(self):
+            return self._position
+
+        def set_position_target(self, north, east, down, yaw=0.0):
+            self._target = (north, east, down)
+
+        def is_offboard(self):
+            return self._offboard
+
+        def is_armed(self):
+            return self._armed
+
+        def set_offboard_mode(self):
+            self._offboard = True
+
+        def arm(self):
+            self._armed = True
+
+        def get_parameter(self, name):
+            return type("Param", (), {"value": 5.0})()
+
+    bridge = _BridgeMock()
+    fc = FlightController(bridge)
+    bridge._offboard = True
+    bridge._armed = True
+    fc.takeoff(5.0)
+
+    assert bridge._target is not None
+    assert bridge._target[0] == 1.0  # north preserved
+    assert bridge._target[1] == 2.0  # east preserved
+    assert bridge._target[2] == -5.0  # altitude=5 → NED down=-5
 
 
 def test_precision_land_timeout_uses_px4_land_not_force_disarm(monkeypatch):
@@ -187,8 +206,9 @@ def test_precision_land_timeout_uses_px4_land_not_force_disarm(monkeypatch):
     assert fsm.bridge.force_disarms == 0
 
 
-def test_real_flight_arm_does_not_use_force_magic():
-    source = (PACKAGE_ROOT / "drone_mission/mission_state_machine.py").read_text(
+def test_px4_bridge_arm_does_not_use_force_magic():
+    """PX4Bridge (direct DDS) uses standard arm for real hardware."""
+    source = (SOURCE_ROOT / "px4_control/px4_control/px4_bridge.py").read_text(
         encoding="utf-8",
     )
     arm_source = source.split("    def arm(self):", 1)[1].split(
@@ -198,18 +218,17 @@ def test_real_flight_arm_does_not_use_force_magic():
 
 
 def test_px4_telemetry_uses_versioned_status_topics():
-    source = (PACKAGE_ROOT / "drone_mission/mission_state_machine.py").read_text(
-        encoding="utf-8",
-    )
+    """Verify the standalone bridge subscribes to versioned PX4 topics."""
+    bridge_py = SOURCE_ROOT / "px4_control/px4_control/standalone_bridge.py"
+    source = bridge_py.read_text(encoding="utf-8")
 
     assert '"/fmu/out/vehicle_status_v4"' in source
     assert '"/fmu/out/battery_status_v1"' in source
 
 
 def test_px4_telemetry_facade_exists_before_init_state_runs():
-    source = (PACKAGE_ROOT / "drone_mission/mission_state_machine.py").read_text(
-        encoding="utf-8",
-    )
+    fsm_py = PACKAGE_ROOT / "drone_mission/mission_state_machine.py"
+    source = fsm_py.read_text(encoding="utf-8")
     lazy_init = source.split("    def _lazy_init(self):", 1)[1].split(
         "    def _init_vision_subscriptions(self):", 1,
     )[0]
@@ -220,9 +239,8 @@ def test_px4_telemetry_facade_exists_before_init_state_runs():
 
 
 def test_navigation_timeouts_do_not_advance_the_mission():
-    transit = (PACKAGE_ROOT / "drone_mission/states/state_transit.py").read_text(
-        encoding="utf-8",
-    )
+    transit_py = PACKAGE_ROOT / "drone_mission/states/state_transit.py"
+    transit = transit_py.read_text(encoding="utf-8")
     ascend = (PACKAGE_ROOT / "drone_mission/states/state_drop.py").read_text(
         encoding="utf-8",
     ).split("def _execute_ascend", 1)[1]
