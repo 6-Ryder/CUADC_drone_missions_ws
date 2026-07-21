@@ -83,8 +83,8 @@ class StandaloneBridge:
     NAV_STATE_OFFBOARD = 14
     VEHICLE_CMD_DO_SET_MODE = 176
     VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
-    VEHICLE_CMD_NAV_LAND = 189
-    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 93
+    VEHICLE_CMD_NAV_LAND = 21
+    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 20
 
     def __init__(self, node: Node):
         """
@@ -271,7 +271,7 @@ class StandaloneBridge:
         self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
 
     def land_at_current(self) -> None:
-        """原地降落 (MAV_CMD_NAV_LAND = 189)."""
+        """原地降落 (MAV_CMD_NAV_LAND = 21)."""
         self._node.get_logger().info("[StandaloneBridge] 请求着陆")
         self._send_command(self.VEHICLE_CMD_NAV_LAND, 0.0, 0.0)
 
