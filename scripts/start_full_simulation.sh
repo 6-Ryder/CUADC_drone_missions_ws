@@ -49,8 +49,7 @@ if [ ! -d "$(dirname "$PX4_WORLD")" ]; then
     exit 1
 fi
 
-# 工作区场景是唯一来源，避免 PX4 继续加载过期副本。
-cp "$PROJ/field/drone_field.sdf" "$PX4_WORLD"
+# 工作区场景是唯一来源 (PX4 目录下为符号链接, 无需 cp)
 
 # 清理 PX4 持久化参数 (避免旧参数覆盖启动设置)
 rm -f "$PX4_BLD/rootfs/0/parameters.bson" "$PX4_BLD/rootfs/0/parameters_backup.bson"
@@ -117,7 +116,7 @@ export PX4_GZ_WORLD="drone_field"
 export PX4_GZ_MODEL_POSE="10,4,0.3,0,0,0"
 export GZ_IP="127.0.0.1"
 export ROS_DOMAIN_ID=0
-export HEADLESS=1
+#export HEADLESS=1
 
 ./bin/px4 -d -i 0 > "$LOG_DIR/px4.log" 2>&1 &
 PX4_PID=$!
