@@ -109,10 +109,12 @@ class MissionFSM(Node):
     以 20Hz 频率驱动状态执行.
     """
 
-    # 投放区坐标 (World)
-    DROP_ZONE = (42.5, 4.0, 5.0)   # (x, y, z) — 投放区中心
-    # 侦察区坐标 (World)
-    RECON_ZONE = (67.5, 4.0, 5.0)  # (x, y, z) — 侦察区中心
+    # 投放区/侦察区 NED 相对偏移 (从 Home 点出发, 仿真/真机一致)
+    #  投放区: Home 东 32.5m, 北 0m
+    #  侦察区: Home 东 57.5m, 北 0m
+    DROP_NED_OFFSET = (0.0, 32.5)    # (north, east)
+    RECON_NED_OFFSET = (0.0, 57.5)   # (north, east)
+    TARGET_ALTITUDE = 5.0            # 巡航高度 (m)
 
     def __init__(self):
         super().__init__("mission_state_machine")
@@ -312,6 +314,15 @@ class MissionFSM(Node):
         hz = self.get_param("home_z", 0.0)
         configure_home(hx, hy, hz)
 
+        # 从 Home + NED 偏移计算投放区/侦察区的 World 坐标
+        # NED east → World x, NED north → World y（仿真/真机相对关系一致）
+        drop_world_x = hx + self.DROP_NED_OFFSET[1]
+        drop_world_y = hy + self.DROP_NED_OFFSET[0]
+        recon_world_x = hx + self.RECON_NED_OFFSET[1]
+        recon_world_y = hy + self.RECON_NED_OFFSET[0]
+        drop_zone = (drop_world_x, drop_world_y, self.TARGET_ALTITUDE)
+        recon_zone = (recon_world_x, recon_world_y, self.TARGET_ALTITUDE)
+
         # 检查 PX4 Bridge 是否可以获取
         # 在真实部署中, PX4Bridge 是独立节点; 此处通过 ros2 话题检查
         # 为简化 integration, 此处创建桥接的引用 (实际需通过 DDS)
@@ -349,14 +360,14 @@ class MissionFSM(Node):
         transit_drop = self._state_handlers.get(MissionState.TRANSIT_TO_DROP_ZONE)
         if isinstance(transit_drop, TransitState):
             transit_drop.configure(
-                target_world_xyz=self.DROP_ZONE,
+                target_world_xyz=drop_zone,
                 target_state="CYLINDER_SEARCH",
                 label="TRANSIT_TO_DROP_ZONE",
             )
         transit_recon = self._state_handlers.get(MissionState.TRANSIT_TO_RECON_ZONE)
         if isinstance(transit_recon, TransitState):
             transit_recon.configure(
-                target_world_xyz=self.RECON_ZONE,
+                target_world_xyz=recon_zone,
                 target_state="RECON_PATROL",
                 label="TRANSIT_TO_RECON_ZONE",
             )

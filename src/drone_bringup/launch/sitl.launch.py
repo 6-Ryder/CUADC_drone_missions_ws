@@ -69,7 +69,11 @@ def generate_launch_description():
         name="px4_bridge",
         output="screen",
         emulate_tty=True,
-        parameters=[px4_param_file],
+        parameters=[px4_param_file, {
+            "home_x": LaunchConfiguration("home_x"),
+            "home_y": LaunchConfiguration("home_y"),
+            "home_z": LaunchConfiguration("home_z"),
+        }],
         arguments=["--ros-args", "--log-level", "info"],
     )
 

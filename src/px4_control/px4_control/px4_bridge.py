@@ -36,6 +36,7 @@ from px4_msgs.msg import (
 
 from px4_control.telemetry import (
     Position, Attitude, Velocity, Telemetry, ned_to_world_pose,
+    configure_home,
 )
 from drone_utils.logger import TaskLogger
 from drone_utils.watchdog import Watchdog
@@ -100,6 +101,13 @@ class PX4Bridge(Node):
 
         # ---- 参数 ----
         self._declare_params()
+
+        # ---- 坐标变换: 配置 Home 点偏移 ----
+        configure_home(
+            float(self.get_parameter("home_x").value),
+            float(self.get_parameter("home_y").value),
+            float(self.get_parameter("home_z").value),
+        )
 
         # ---- QoS ----
         qos = px4_qos()
@@ -216,6 +224,9 @@ class PX4Bridge(Node):
         self.declare_parameter("transit_speed", 2.0)
         self.declare_parameter("return_speed", 3.0)
         self.declare_parameter("max_acceleration", 0.2)
+        self.declare_parameter("home_x", 10.0)
+        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_z", 0.0)
 
     # ================================================================
     # 订阅回调
