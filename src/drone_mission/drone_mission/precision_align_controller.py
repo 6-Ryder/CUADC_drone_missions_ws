@@ -317,12 +317,13 @@ class PrecisionAlignController:
         bridge = getattr(self._fsm, "bridge", None)
         get_telemetry = getattr(bridge, "get_telemetry", None)
         if not callable(get_telemetry):
-            return True
+            # 无法获取遥测时不能假设速度为零, 延迟此帧等遥测就绪
+            return False
         try:
             velocity = get_telemetry().velocity
             speed_xy = math.hypot(float(velocity.vn), float(velocity.ve))
         except Exception:
-            return True
+            return False
         if speed_xy <= max_speed:
             return True
         self._fsm.fc.stop_velocity()

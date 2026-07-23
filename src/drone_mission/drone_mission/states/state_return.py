@@ -14,10 +14,7 @@ from typing import Optional
 class ReturnState:
     """返航状态处理器."""
 
-    # 起飞点 H (World 坐标)
-    HOME_X = 10.0
-    HOME_Y = 4.0
-    HOME_Z = 5.0  # 巡航高度
+    HOME_Z = 5.0  # 巡航高度（仿真/真机一致）
 
     def __init__(self, fsm):
         self._fsm = fsm
@@ -30,13 +27,16 @@ class ReturnState:
         self._start_time = time.time()
         self._at_home_stable = 0
 
+        home_x = self._fsm.get_param("home_x", 10.0)
+        home_y = self._fsm.get_param("home_y", 4.0)
+
         self._fsm.get_logger().info(
-            f"RETURN: 返航至 H 点 ({self.HOME_X}, {self.HOME_Y}, {self.HOME_Z})"
+            f"RETURN: 返航至 H 点 ({home_x}, {home_y}, {self.HOME_Z})"
         )
 
         # 设置返航航点
         self._fsm.fc.goto_world(
-            self.HOME_X, self.HOME_Y, self.HOME_Z,
+            home_x, home_y, self.HOME_Z,
             speed=self._fsm.get_param("return_speed", 3.0),
         )
 
@@ -47,7 +47,9 @@ class ReturnState:
         drone_wx, drone_wy, drone_wz = ned_to_world(pos.north, pos.east, pos.down)
 
         import math
-        dist_xy = math.hypot(drone_wx - self.HOME_X, drone_wy - self.HOME_Y)
+        home_x = self._fsm.get_param("home_x", 10.0)
+        home_y = self._fsm.get_param("home_y", 4.0)
+        dist_xy = math.hypot(drone_wx - home_x, drone_wy - home_y)
         dist_z = abs(drone_wz - self.HOME_Z)
 
         tolerance = self._fsm.get_param("waypoint_tolerance", 0.5)

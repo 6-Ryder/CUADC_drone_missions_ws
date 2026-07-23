@@ -73,7 +73,11 @@ def generate_launch_description():
         name="px4_bridge",
         output="screen",
         emulate_tty=True,
-        parameters=[px4_param_file],
+        parameters=[px4_param_file, {
+            "home_x": LaunchConfiguration("home_x"),
+            "home_y": LaunchConfiguration("home_y"),
+            "home_z": LaunchConfiguration("home_z"),
+        }],
     )
 
     camera_node = Node(
@@ -96,6 +100,7 @@ def generate_launch_description():
     )
 
     # 视觉 — 实飞模式 (ONNX Runtime CUDA)
+    # 真机 Home 为解锁点(0,0), 侦察区 = NED east[55,60] north[-4,4] → World
     vision_node = Node(
         package="drone_vision",
         executable="vision_pipeline",
@@ -111,6 +116,10 @@ def generate_launch_description():
                 "cx": 320.0,
                 "cy": 240.0,
                 "device": "cuda",
+                "coverage_zone_x_min": 55.0,
+                "coverage_zone_x_max": 60.0,
+                "coverage_zone_y_min": -4.0,
+                "coverage_zone_y_max": 4.0,
             },
         ],
     )
@@ -134,6 +143,7 @@ def generate_launch_description():
         parameters=[
             mission_param_file,
             {
+                "sim_mode": False,
                 "precision_align_image_width": 640.0,
                 "precision_align_image_height": 480.0,
                 "camera_fx": 400.0,

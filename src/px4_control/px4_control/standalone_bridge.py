@@ -299,7 +299,7 @@ class StandaloneBridge:
                       param2: float = 0.0) -> None:
         """Publish VehicleCommand through relay topic."""
         msg = VehicleCommand()
-        msg.timestamp = int(time.time() * 1e6)
+        msg.timestamp = int(self._node.get_clock().now().nanoseconds / 1000)
         msg.command = command
         msg.param1 = float(param1)
         msg.param2 = float(param2)

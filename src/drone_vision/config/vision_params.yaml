@@ -77,6 +77,12 @@
     # ============================================================
     # 覆盖监控参数
     # ============================================================
+    # 侦察区 World 坐标范围 (默认 SITL: Home(10,4) + NED east[55,60] north[-4,4])
+    # 真机需通过 launch 覆盖为 Home(0,0) 对应的范围
+    coverage_zone_x_min: 65.0           # 侦察区 World x 下限 (m)
+    coverage_zone_x_max: 70.0           # 侦察区 World x 上限 (m)
+    coverage_zone_y_min: 0.0            # 侦察区 World y 下限 (m)
+    coverage_zone_y_max: 8.0            # 侦察区 World y 上限 (m)
     coverage_grid_resolution: 0.5       # 网格分辨率 (m)
     coverage_fov_half_angle: 35.0       # 相机 FOV 半角 (度)
     coverage_complete_ratio: 0.95       # 全覆盖判定阈值
