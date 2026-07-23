@@ -4,7 +4,7 @@
   <name>drone_servo2</name>
   <version>0.0.0</version>
   <description>Servo multi-position drop controller using PX4 MAIN5</description>
-  <maintainer email="ryder@todo.todo">ryder</maintainer>
+  <maintainer email="nvidia@todo.todo">nvidia</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

@@ -73,7 +73,7 @@ YAML 文件 → ROS2 Node 启动时加载 → Node.get_param() 读取 → 运行
 ## 快速启动
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/drone_tasks_ws
 ./scripts/start_full_simulation.sh
 ```
 
@@ -329,11 +329,11 @@ drone_tasks_ws/
 │   ├── drone_bringup/       # 启动脚本 (launch files: SITL + 实飞 + 视觉调试)
 │   └── px4_msgs/            # PX4 uORB → ROS2 消息定义
 ├── field/                   # Gazebo 场地描述 + 随机场地生成器
-├── PX4-Autopilot -> /home/ryder/PX4-Autopilot
+├── PX4-Autopilot -> /home/nvidia/PX4-Autopilot
 ├── scripts/
 │   ├── start_full_simulation.sh  # 一键 SITL 启动
 │   └── debug_vision.sh           # 一键视觉调试 (摄像头 + 双YOLO模型 + viewer)
-├── cv_trainer -> /home/ryder/cv_trainer  # 模型训练来源
+├── cv_trainer -> /home/nvidia/cv_trainer  # 模型训练来源
 ├── docs/                    # 架构文档 + 工作日志
 └── log/                     # 构建/仿真/视觉截图日志
 ```

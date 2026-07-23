@@ -8,12 +8,12 @@
     "python.analysis.extraPaths": [
         "/opt/ros/humble/lib/python3.10/site-packages",
         "/opt/ros/humble/local/lib/python3.10/dist-packages",
-        "/home/ryder/drone_tasks_ws/src/px4_control",
-        "/home/ryder/drone_tasks_ws/src/drone_mission",
-        "/home/ryder/drone_tasks_ws/src/drone_vision",
-        "/home/ryder/drone_tasks_ws/src/drone_utils",
-        "/home/ryder/drone_tasks_ws/src/drone_servo",
-        "/home/ryder/drone_tasks_ws/src/drone_bringup"
+        "/home/nvidia/drone_tasks_ws/src/px4_control",
+        "/home/nvidia/drone_tasks_ws/src/drone_mission",
+        "/home/nvidia/drone_tasks_ws/src/drone_vision",
+        "/home/nvidia/drone_tasks_ws/src/drone_utils",
+        "/home/nvidia/drone_tasks_ws/src/drone_servo",
+        "/home/nvidia/drone_tasks_ws/src/drone_bringup"
     ],
     "github.copilot.chat.codeGeneration.useInstructionFiles": true
 }

@@ -34,7 +34,7 @@ mkdir -p "$ROS_LOG_DIR"
 # ============================================================================
 # 环境检测
 # ============================================================================
-PX4_DIR="/home/ryder/PX4-Autopilot"
+PX4_DIR="/home/nvidia/PX4-Autopilot"
 PX4_BLD="$PX4_DIR/build/px4_sitl_default"
 PX4_WORLD="$PX4_DIR/Tools/simulation/gz/worlds/drone_field.sdf"
 

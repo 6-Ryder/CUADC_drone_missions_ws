@@ -756,7 +756,7 @@
             <emissive>0 0 0 1</emissive>
             <pbr>
               <metal>
-                <albedo_map>file:///home/ryder/drone_tasks_ws/field/drone_field_meshes/textures/hazard_flammable.png</albedo_map>
+                <albedo_map>file:///home/nvidia/drone_tasks_ws/field/drone_field_meshes/textures/hazard_flammable.png</albedo_map>
                 <metalness>0</metalness>
                 <roughness>1</roughness>
               </metal>
@@ -779,7 +779,7 @@
             <emissive>0 0 0 1</emissive>
             <pbr>
               <metal>
-                <albedo_map>file:///home/ryder/drone_tasks_ws/field/drone_field_meshes/textures/hazard_health.png</albedo_map>
+                <albedo_map>file:///home/nvidia/drone_tasks_ws/field/drone_field_meshes/textures/hazard_health.png</albedo_map>
                 <metalness>0</metalness>
                 <roughness>1</roughness>
               </metal>
@@ -802,7 +802,7 @@
             <emissive>0 0 0 1</emissive>
             <pbr>
               <metal>
-                <albedo_map>file:///home/ryder/drone_tasks_ws/field/drone_field_meshes/textures/hazard_danger.png</albedo_map>
+                <albedo_map>file:///home/nvidia/drone_tasks_ws/field/drone_field_meshes/textures/hazard_danger.png</albedo_map>
                 <metalness>0</metalness>
                 <roughness>1</roughness>
               </metal>

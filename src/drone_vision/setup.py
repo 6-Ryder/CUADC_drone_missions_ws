@@ -16,8 +16,8 @@ setup(
     ],
     install_requires=['setuptools', 'numpy>=1.21,<2'],
     zip_safe=False,
-    maintainer='ryder',
-    maintainer_email='ryder@todo.todo',
+    maintainer='nvidia',
+    maintainer_email='nvidia@todo.todo',
     description=(
         'Vision pipeline: YOLO + OpenCV for cylinder detection, '
         'hazard classification, precision landing'

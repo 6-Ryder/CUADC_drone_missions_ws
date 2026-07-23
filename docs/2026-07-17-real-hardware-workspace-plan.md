@@ -46,8 +46,8 @@ drone_tasks_ws/
 ├── rosbags/                        # ⬅ 可选：真机录制的 rosbag
 ├── launch_real/                    # ⬅ 新建：真机 launch 文件
 │   └── real_flight.launch.py       #   完善版 (或直接放在 drone_bringup/launch/)
-├── PX4-Autopilot -> /home/ryder/PX4-Autopilot  # 需要真机 airframe 配置
-└── cv_trainer -> /home/ryder/cv_trainer
+├── PX4-Autopilot -> /home/nvidia/PX4-Autopilot  # 需要真机 airframe 配置
+└── cv_trainer -> /home/nvidia/cv_trainer
 ```
 
 ### 为什么不建议大规模重构
