@@ -188,6 +188,7 @@ class MissionFSM(Node):
     def _declare_params(self):
         """声明所有 YAML 参数."""
         # 全局
+        self.declare_parameter("sim_mode", True)
         self.declare_parameter("home_x", 10.0)
         self.declare_parameter("home_y", 4.0)
         self.declare_parameter("home_z", 0.0)
@@ -829,7 +830,9 @@ class MissionFSM(Node):
         if self._bridge is not None:
             return self._bridge
         if self._standalone_bridge is None:
-            self._standalone_bridge = StandaloneBridge(self)
+            self._standalone_bridge = StandaloneBridge(
+                self, sim_mode=self.get_param("sim_mode", True)
+            )
         return self._standalone_bridge
 
     @bridge.setter

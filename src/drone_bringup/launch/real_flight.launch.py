@@ -143,6 +143,7 @@ def generate_launch_description():
         parameters=[
             mission_param_file,
             {
+                "sim_mode": False,
                 "precision_align_image_width": 640.0,
                 "precision_align_image_height": 480.0,
                 "camera_fx": 400.0,
