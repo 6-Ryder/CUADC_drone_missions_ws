@@ -270,6 +270,8 @@ DropManager::DropManager(
 
 bool DropManager::execute_drop(int cylinder_id)
 {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   if (drop_count_ >= max_drops_) {
     state_ = DropState::FAILED;
     notify_done(false, cylinder_id);
@@ -313,6 +315,7 @@ bool DropManager::execute_drop(int cylinder_id)
 
 bool DropManager::can_drop() const
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   return drop_count_ < max_drops_ &&
          servo_->is_ready() &&
          state_ != DropState::MOVING;
@@ -320,6 +323,7 @@ bool DropManager::can_drop() const
 
 void DropManager::reset()
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   state_ = DropState::IDLE;
   drop_count_ = 0;
   last_result_ = false;
@@ -519,11 +523,17 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<drone_servo2::ServoControllerNode>();
-  rclcpp::executors::MultiThreadedExecutor executor(
-    rclcpp::ExecutorOptions(), 2);
-  executor.add_node(node);
-  executor.spin();
+  try {
+    auto node = std::make_shared<drone_servo2::ServoControllerNode>();
+    rclcpp::executors::MultiThreadedExecutor executor(
+      rclcpp::ExecutorOptions(), 2);
+    executor.add_node(node);
+    executor.spin();
+  } catch (const std::exception & e) {
+    RCLCPP_FATAL(
+      rclcpp::get_logger("servo_controller_main"),
+      "ServoControllerNode 构造失败: %s", e.what());
+  }
   rclcpp::shutdown();
   return 0;
 }

@@ -83,6 +83,12 @@ class EmergencyHandler:
         self._max_errors: int = 5
         self._last_level: EmergencyLevel = EmergencyLevel.OK
 
+        # 每个条件 "已经从 OK 转为告警" 的标记, 防止 check() 高频重复计数
+        self._offboard_active: bool = False
+        self._vision_active: bool = False
+        self._timeout_active: bool = False
+        self._gps_active: bool = False
+
     # ================================================================
     # 更新接口
     # ================================================================
@@ -128,59 +134,77 @@ class EmergencyHandler:
         """
         执行完整紧急检查.
 
+        核心原则: 每个条件只在第一次触发时计一次数, 条件解除后重置标记,
+        避免 20Hz 循环导致瞬间累积到 max_errors.
+
         Returns
         -------
         EmergencyLevel: 当前紧急等级
-
         """
         now = time.time()
 
-        # 1. 严重低电量 → 强制返航
+        # 1. 严重低电量 → 强制返航 (无 debounce, 立即触发)
         if self._battery_remaining <= self.battery_critical:
             self._last_level = EmergencyLevel.RTL
             return EmergencyLevel.RTL
 
-        # 2. 低电量告警
+        # 2. 低电量告警 (无 debounce, 每次 check 都报)
         if self._battery_remaining <= self.battery_warning:
             self._warning_count += 1
             self._last_level = EmergencyLevel.WARN
             return EmergencyLevel.WARN
 
-        # 3. Offboard 丢失 → PX4 自动 LOITER, 此处记录
+        # 3. Offboard 丢失 → 只在首次触发时计一次 error
         if not self._offboard_alive:
-            self._error_count += 1
+            if not self._offboard_active:
+                self._offboard_active = True
+                self._error_count += 1
             if self._error_count > self._max_errors:
                 self._last_level = EmergencyLevel.ABORT
                 return EmergencyLevel.ABORT
             self._last_level = EmergencyLevel.WARN
             return EmergencyLevel.WARN
+        else:
+            self._offboard_active = False
 
         # 4. 视觉长时间丢失
         vision_lost_duration = now - self._vision_last_seen
         if vision_lost_duration > self.vision_loss_timeout:
-            self._warning_count += 1
-            # 视觉丢失不直接中止, 由 mission 层决定是否盲降
+            if not self._vision_active:
+                self._vision_active = True
+                self._warning_count += 1
             self._last_level = EmergencyLevel.WARN
             return EmergencyLevel.WARN
+        else:
+            self._vision_active = False
 
         # 5. 状态超时
-        effective_timeout = self._state_timeout or self.state_max_duration
+        effective_timeout = self._state_timeout if self._state_timeout is not None else self.state_max_duration
         state_duration = now - self._state_start_time
-        if state_duration > effective_timeout:
-            self._error_count += 1
+        if effective_timeout > 0 and state_duration > effective_timeout:
+            if not self._timeout_active:
+                self._timeout_active = True
+                self._error_count += 1
             if self._error_count > self._max_errors:
                 self._last_level = EmergencyLevel.ABORT
                 return EmergencyLevel.ABORT
             self._last_level = EmergencyLevel.WARN
             return EmergencyLevel.WARN
+        else:
+            self._timeout_active = False
 
         # 6. GPS 丢失
         if not self._gps_fix:
-            self._warning_count += 1
+            if not self._gps_active:
+                self._gps_active = True
+                self._warning_count += 1
             self._last_level = EmergencyLevel.WARN
             return EmergencyLevel.WARN
+        else:
+            self._gps_active = False
 
-        # 正常
+        # 正常 → 重置错误计数 (所有条件都已恢复正常)
+        self._error_count = 0
         self._last_level = EmergencyLevel.OK
         return EmergencyLevel.OK
 
@@ -189,16 +213,16 @@ class EmergencyHandler:
     # ================================================================
 
     def is_critical(self) -> bool:
-        """是否需要立即采取行动."""
-        return self.check() in (EmergencyLevel.RTL, EmergencyLevel.LAND, EmergencyLevel.ABORT)
+        """是否需要立即采取行动 (使用缓存值, 避免重复计数)."""
+        return self._last_level in (EmergencyLevel.RTL, EmergencyLevel.LAND, EmergencyLevel.ABORT)
 
     def should_rtl(self) -> bool:
-        """是否应该返航."""
-        return self.check() == EmergencyLevel.RTL
+        """是否应该返航 (使用缓存值)."""
+        return self._last_level == EmergencyLevel.RTL
 
     def should_abort(self) -> bool:
-        """是否应该中止."""
-        return self.check() == EmergencyLevel.ABORT
+        """是否应该中止 (使用缓存值)."""
+        return self._last_level == EmergencyLevel.ABORT
 
     @property
     def battery_remaining(self) -> float:

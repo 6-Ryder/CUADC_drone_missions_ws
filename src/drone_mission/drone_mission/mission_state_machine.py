@@ -854,6 +854,11 @@ class MissionFSM(Node):
     def vision_node(self, vn):
         self._vision_node = vn
 
+    # Vision mode mapping (must match vision_pipeline service handler)
+    _VISION_MODE_NONE = 0
+    _VISION_MODE_LANDING = 2
+    _VISION_MODE_ALL = 3
+
     def set_vision_mode(self, mode: str) -> None:
         """Switch the separately running vision pipeline through its ROS service."""
         if self._vision_node is not None:
@@ -865,8 +870,18 @@ class MissionFSM(Node):
 
         from drone_interfaces.srv import SetVisionMode
         request = SetVisionMode.Request()
-        request.mode = 2 if mode == "landing" else 3
-        request.enable = mode != "none"
+
+        if mode == "landing":
+            request.mode = self._VISION_MODE_LANDING
+            request.enable = True
+        elif mode == "none":
+            request.mode = self._VISION_MODE_NONE
+            request.enable = False
+        else:
+            # "all" / default — full detection mode
+            request.mode = self._VISION_MODE_ALL
+            request.enable = True
+
         self._vision_mode_client.call_async(request)
 
     # -- 工具 --
@@ -919,6 +934,10 @@ class MissionFSM(Node):
         try:
             return self.get_parameter(key).value
         except Exception:
+            if default is None:
+                self.get_logger().warn(
+                    f"参数 '{key}' 未声明且无默认值, 返回 None, 可能导致运行时错误"
+                )
             return default
 
     # -- 视觉数据获取 --

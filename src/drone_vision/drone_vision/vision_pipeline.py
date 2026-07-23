@@ -279,7 +279,14 @@ class VisionPipelineNode(Node):
             circle_min_area=self.get_parameter("landing_circle_min_area").value,
         )
         self._coverage = CoverageMonitor(
-            zone_x_range=(65.0, 70.0), zone_y_range=(0.0, 8.0),
+            zone_x_range=(
+                self.get_parameter("coverage_zone_x_min").value,
+                self.get_parameter("coverage_zone_x_max").value,
+            ),
+            zone_y_range=(
+                self.get_parameter("coverage_zone_y_min").value,
+                self.get_parameter("coverage_zone_y_max").value,
+            ),
             grid_resolution=self.get_parameter("coverage_grid_resolution").value,
             fov_half_angle_deg=self.get_parameter("coverage_fov_half_angle").value,
             complete_ratio=self.get_parameter("coverage_complete_ratio").value,
@@ -707,7 +714,7 @@ class VisionPipelineNode(Node):
 
         if not dets:
             result = None
-            if self._detection_mode == "landing" and self._landing_refiner:
+            if self._landing_refiner:
                 result = self._landing_refiner.detect(image)
             if result is None:
                 self._landing_pub.publish(target)
@@ -790,49 +797,6 @@ class VisionPipelineNode(Node):
             )
 
     # ================================================================
-    # 降落处理
-    # ================================================================
-
-    def _process_landing(self, image: np.ndarray, dets: List[Detection]):
-        target = LandingTarget()
-        target.confidence = 0.0
-
-        if not dets:
-            self._landing_pub.publish(target)
-            return
-
-        best = max(dets, key=lambda d: d.confidence)
-        enable_refine = self.get_parameter("landing_refine_enable").value
-
-        if enable_refine:
-            result = self._landing_refiner.refine(image, best.bbox)
-            if result:
-                cx_px, cy_px, conf, yaw = result
-                target.center_u = cx_px
-                target.center_v = cy_px
-                target.confidence = max(best.confidence, conf)
-                target.yaw_correction = yaw
-            else:
-                target.center_u = best.cx
-                target.center_v = best.cy
-                target.confidence = best.confidence
-        else:
-            target.center_u = best.cx
-            target.center_v = best.cy
-            target.confidence = best.confidence
-
-        fx = self.get_parameter("fx").value
-        fy = self.get_parameter("fy").value
-        cx = self.get_parameter("cx").value
-        cy = self.get_parameter("cy").value
-        alt = max(self._current_altitude, 0.3)
-
-        target.world_x = (target.center_u - cx) * alt / fx
-        target.world_y = (target.center_v - cy) * alt / fy
-
-        self._landing_pub.publish(target)
-
-    # ================================================================
     # 覆盖监控
     # ================================================================
 
@@ -866,6 +830,7 @@ class VisionPipelineNode(Node):
             self._coverage.update(world_x, world_y, world_z)
 
     def destroy_node(self):
+        self._release_detection_models()
         super().destroy_node()
 
 

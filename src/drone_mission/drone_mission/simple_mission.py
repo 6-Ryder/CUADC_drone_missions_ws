@@ -81,7 +81,7 @@ class SimpleMission(Node):
 
         # ---- 状态机 ----
         self._state: MissionState = MissionState.INIT
-        self._state_start: float = 0.0
+        self._state_start: float = time.time()
         self._command_sent: bool = False
         self._stable_count: int = 0
 
@@ -105,6 +105,10 @@ class SimpleMission(Node):
         try:
             return self.get_parameter(key).value
         except Exception:
+            if default is None:
+                self.get_logger().warn(
+                    f"参数 '{key}' 未声明且无默认值, 返回 None, 可能导致运行时错误"
+                )
             return default
 
     # ================================================================
