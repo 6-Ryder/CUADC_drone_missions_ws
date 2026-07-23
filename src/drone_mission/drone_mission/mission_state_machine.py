@@ -109,11 +109,6 @@ class MissionFSM(Node):
     以 20Hz 频率驱动状态执行.
     """
 
-    # 投放区/侦察区 NED 相对偏移 (从 Home 点出发, 仿真/真机一致)
-    #  投放区: Home 东 32.5m, 北 0m
-    #  侦察区: Home 东 57.5m, 北 0m
-    DROP_NED_OFFSET = (0.0, 32.5)    # (north, east)
-    RECON_NED_OFFSET = (0.0, 57.5)   # (north, east)
     TARGET_ALTITUDE = 5.0            # 巡航高度 (m)
 
     def __init__(self):
@@ -192,6 +187,9 @@ class MissionFSM(Node):
         self.declare_parameter("home_x", 10.0)
         self.declare_parameter("home_y", 4.0)
         self.declare_parameter("home_z", 0.0)
+        self.declare_parameter("flight_axis", "north")
+        self.declare_parameter("drop_distance", 32.5)
+        self.declare_parameter("recon_distance", 57.5)
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
@@ -206,17 +204,17 @@ class MissionFSM(Node):
         self.declare_parameter("return_speed", 3.0)
         self.declare_parameter("max_acceleration", 0.2)
         # Area 1
-        self.declare_parameter("area1_north_min", -4.0)
-        self.declare_parameter("area1_north_max", 4.0)
-        self.declare_parameter("area1_east_min", 30.0)
-        self.declare_parameter("area1_east_max", 35.0)
+        self.declare_parameter("area1_north_min", 30.0)
+        self.declare_parameter("area1_north_max", 35.0)
+        self.declare_parameter("area1_east_min", -4.0)
+        self.declare_parameter("area1_east_max", 4.0)
         self.declare_parameter("area1_altitude", 2.0)
         self.declare_parameter("area1_search_altitude", 5.0)
         # Area 2
-        self.declare_parameter("area2_north_min", -4.0)
-        self.declare_parameter("area2_north_max", 4.0)
-        self.declare_parameter("area2_east_min", 55.0)
-        self.declare_parameter("area2_east_max", 60.0)
+        self.declare_parameter("area2_north_min", 55.0)
+        self.declare_parameter("area2_north_max", 60.0)
+        self.declare_parameter("area2_east_min", -4.0)
+        self.declare_parameter("area2_east_max", 4.0)
         self.declare_parameter("area2_altitude", 5.0)
         # 覆盖
         self.declare_parameter("grid_spacing", 1.0)
@@ -315,12 +313,23 @@ class MissionFSM(Node):
         hz = self.get_param("home_z", 0.0)
         configure_home(hx, hy, hz)
 
-        # 从 Home + NED 偏移计算投放区/侦察区的 World 坐标
+        # 从参数动态计算投放区/侦察区的 World 坐标
+        flight_axis = self.get_param("flight_axis", "north")
+        drop_dist = float(self.get_param("drop_distance", 32.5))
+        recon_dist = float(self.get_param("recon_distance", 57.5))
+
+        if flight_axis == "north":
+            drop_north, drop_east = drop_dist, 0.0
+            recon_north, recon_east = recon_dist, 0.0
+        else:  # east (默认, 向后兼容)
+            drop_north, drop_east = 0.0, drop_dist
+            recon_north, recon_east = 0.0, recon_dist
+
         # NED east → World x, NED north → World y（仿真/真机相对关系一致）
-        drop_world_x = hx + self.DROP_NED_OFFSET[1]
-        drop_world_y = hy + self.DROP_NED_OFFSET[0]
-        recon_world_x = hx + self.RECON_NED_OFFSET[1]
-        recon_world_y = hy + self.RECON_NED_OFFSET[0]
+        drop_world_x = hx + drop_east
+        drop_world_y = hy + drop_north
+        recon_world_x = hx + recon_east
+        recon_world_y = hy + recon_north
         drop_zone = (drop_world_x, drop_world_y, self.TARGET_ALTITUDE)
         recon_zone = (recon_world_x, recon_world_y, self.TARGET_ALTITUDE)
 
@@ -585,10 +594,10 @@ class MissionFSM(Node):
                 self._next_known_marker_id += 1
 
     def _drop_zone_world_bounds(self, margin: float = 1.0):
-        n_min = float(self.get_param("area1_north_min", -4.0))
-        n_max = float(self.get_param("area1_north_max", 4.0))
-        e_min = float(self.get_param("area1_east_min", 30.0))
-        e_max = float(self.get_param("area1_east_max", 35.0))
+        n_min = float(self.get_param("area1_north_min", 30.0))
+        n_max = float(self.get_param("area1_north_max", 35.0))
+        e_min = float(self.get_param("area1_east_min", -4.0))
+        e_max = float(self.get_param("area1_east_max", 4.0))
         corners = [
             ned_to_world(n_min, e_min, 0.0),
             ned_to_world(n_min, e_max, 0.0),
@@ -612,10 +621,10 @@ class MissionFSM(Node):
         if wx_min <= raw_x <= wx_max and wy_min <= raw_y <= wy_max:
             return raw_x, raw_y
 
-        n_min = float(self.get_param("area1_north_min", -4.0))
-        n_max = float(self.get_param("area1_north_max", 4.0))
-        e_min = float(self.get_param("area1_east_min", 30.0))
-        e_max = float(self.get_param("area1_east_max", 35.0))
+        n_min = float(self.get_param("area1_north_min", 30.0))
+        n_max = float(self.get_param("area1_north_max", 35.0))
+        e_min = float(self.get_param("area1_east_min", -4.0))
+        e_max = float(self.get_param("area1_east_max", 4.0))
         if e_min - 1.0 <= raw_x <= e_max + 1.0 and n_min - 1.0 <= raw_y <= n_max + 1.0:
             wx, wy, _ = ned_to_world(raw_y, raw_x, 0.0)
             if wx_min <= wx <= wx_max and wy_min <= wy <= wy_max:

@@ -10,7 +10,7 @@
 
   # 真机 (以解锁点为原点, 投放区在正前方 20m)
   ros2 launch drone_bringup simple_mission.launch.py \
-      sim_mode:=false home_x:=0.0 home_y:=0.0 drop_x:=20.0 drop_y:=2.0
+      sim_mode:=false home_x:=0.0 home_y:=0.0 drop_x:=2.0 drop_y:=20.0
 
 依赖:
   - MicroXRCEAgent 已在运行 (udp4 -p 8888)
@@ -39,11 +39,11 @@ def generate_launch_description():
         description="巡航飞行高度 (m)",
     )
     drop_x_arg = DeclareLaunchArgument(
-        "drop_x", default_value="42.5",
+        "drop_x", default_value="10.0",
         description="投放区 World X 坐标 (m)",
     )
     drop_y_arg = DeclareLaunchArgument(
-        "drop_y", default_value="4.0",
+        "drop_y", default_value="36.5",
         description="投放区 World Y 坐标 (m)",
     )
     home_x_arg = DeclareLaunchArgument(

@@ -46,6 +46,22 @@ def generate_launch_description():
         description="Home position Z coordinate (meters, world frame)",
     )
 
+    flight_axis_arg = DeclareLaunchArgument(
+        "flight_axis",
+        default_value="north",
+        description="主飞行轴朝向: 'east' | 'north'",
+    )
+    drop_distance_arg = DeclareLaunchArgument(
+        "drop_distance",
+        default_value="32.5",
+        description="Home → 投放区距离 (m)",
+    )
+    recon_distance_arg = DeclareLaunchArgument(
+        "recon_distance",
+        default_value="57.5",
+        description="Home → 侦察区距离 (m)",
+    )
+
     # ---- 包路径 ----
     pkg_control = get_package_share_directory("px4_control")
     pkg_vision = get_package_share_directory("drone_vision")
@@ -115,6 +131,9 @@ def generate_launch_description():
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
             "home_z": LaunchConfiguration("home_z"),
+            "flight_axis": LaunchConfiguration("flight_axis"),
+            "drop_distance": LaunchConfiguration("drop_distance"),
+            "recon_distance": LaunchConfiguration("recon_distance"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -145,6 +164,9 @@ def generate_launch_description():
         home_x_args,
         home_y_args,
         home_z_args,
+        flight_axis_arg,
+        drop_distance_arg,
+        recon_distance_arg,
         px4_bridge_node,
         vision_delayed,
         servo_delayed,
