@@ -198,6 +198,7 @@ echo "┌───────────────────────�
 echo "│              simple_mission 简化任务仿真                          │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  场地:      drone_field (70m × 8m)                              │"
+echo "│  飞行方向:  向北 (NED north)                                    │"
 echo "│  任务:      TAKEOFF → TRANSIT → LOITER → RETURN → LAND          │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  ✓ MicroXRCEAgent    UDP:8888  (PID: $AGENT_PID)                │"

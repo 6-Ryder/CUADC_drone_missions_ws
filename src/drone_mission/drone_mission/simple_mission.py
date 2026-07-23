@@ -15,7 +15,7 @@
 用法:
   仿真: ros2 launch drone_bringup simple_mission.launch.py
   真机: ros2 launch drone_bringup simple_mission.launch.py \
-          sim_mode:=false home_x:=0.0 home_y:=0.0 drop_x:=20.0 drop_y:=2.0
+          sim_mode:=false home_x:=0.0 home_y:=0.0 drop_x:=2.0 drop_y:=20.0
 """
 
 import time
@@ -56,8 +56,8 @@ class SimpleMission(Node):
         # ---- 参数 ----
         self.declare_parameter("cruise_altitude", 5.0)
         self.declare_parameter("takeoff_height", 5.0)
-        self.declare_parameter("drop_x", 42.5)
-        self.declare_parameter("drop_y", 4.0)
+        self.declare_parameter("drop_x", 10.0)
+        self.declare_parameter("drop_y", 36.5)
         self.declare_parameter("home_x", 10.0)
         self.declare_parameter("home_y", 4.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
@@ -152,15 +152,15 @@ class SimpleMission(Node):
         # ---- TRANSIT_TO_DROP: 飞往投放区 ----
         elif self._state == MissionState.TRANSIT_TO_DROP:
             if not self._command_sent:
-                dx = self.get_param("drop_x", 42.5)
-                dy = self.get_param("drop_y", 4.0)
+                dx = self.get_param("drop_x", 10.0)
+                dy = self.get_param("drop_y", 36.5)
                 self.get_logger().info(f"TRANSIT: 飞往投放区 World({dx}, {dy}, {cruise_alt})")
                 self._fc.goto_world(dx, dy, cruise_alt, speed=2.0)
                 self._command_sent = True
 
             n, e, d = world_to_ned(
-                self.get_param("drop_x", 42.5),
-                self.get_param("drop_y", 4.0),
+                self.get_param("drop_x", 10.0),
+                self.get_param("drop_y", 36.5),
                 cruise_alt,
             )
             if self._fc.reached((n, e, d), tol):

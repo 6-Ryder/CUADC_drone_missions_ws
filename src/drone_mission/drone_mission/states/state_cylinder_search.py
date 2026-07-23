@@ -42,10 +42,10 @@ class CylinderSearchState:
         )
 
         # 飞到投放区中心
-        area1_x = (self._fsm.get_param("area1_east_min", 30.0) +
-                   self._fsm.get_param("area1_east_max", 35.0)) / 2
-        area1_y = (self._fsm.get_param("area1_north_min", -4.0) +
-                   self._fsm.get_param("area1_north_max", 4.0)) / 2
+        area1_x = (self._fsm.get_param("area1_east_min", -4.0) +
+                   self._fsm.get_param("area1_east_max", 4.0)) / 2
+        area1_y = (self._fsm.get_param("area1_north_min", 30.0) +
+                   self._fsm.get_param("area1_north_max", 35.0)) / 2
 
         # NED 坐标
         drop_alt = -self._fsm.get_param("area1_search_altitude", 5.0)
@@ -126,10 +126,10 @@ class CylinderSearchState:
 
     def _start_scan(self):
         """启动投放区慢速扫描."""
-        area1_n_min = self._fsm.get_param("area1_north_min", -4.0)
-        area1_n_max = self._fsm.get_param("area1_north_max", 4.0)
-        area1_e_min = self._fsm.get_param("area1_east_min", 30.0)
-        area1_e_max = self._fsm.get_param("area1_east_max", 35.0)
+        area1_n_min = self._fsm.get_param("area1_north_min", 30.0)
+        area1_n_max = self._fsm.get_param("area1_north_max", 35.0)
+        area1_e_min = self._fsm.get_param("area1_east_min", -4.0)
+        area1_e_max = self._fsm.get_param("area1_east_max", 4.0)
         alt = self._fsm.get_param("area1_search_altitude", 5.0)
 
         # 沿 east 方向慢速扫描
