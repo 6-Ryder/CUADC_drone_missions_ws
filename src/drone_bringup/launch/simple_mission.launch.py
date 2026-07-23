@@ -75,7 +75,7 @@ def generate_launch_description():
         parameters=[px4_param_file, {
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
-            "home_z": "0.0",
+            "home_z": 0.0,
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
