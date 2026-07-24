@@ -75,14 +75,13 @@
     servo_target_deadzone: 0.03         # 目标死区 (m), 进入后停止水平修正
 
     # ============================================================
-    # 覆盖监控参数
+    # 覆盖监控参数 (北向场地)
     # ============================================================
-    # 侦察区 World 坐标范围 (默认 SITL: Home(10,4) + NED north[55,60] east[-4,4])
-    # 真机需通过 launch 覆盖为 Home(0,0) 对应的范围
-    coverage_zone_x_min: 6.0            # 侦察区 World x 下限 (m)
-    coverage_zone_x_max: 14.0           # 侦察区 World x 上限 (m)
-    coverage_zone_y_min: 59.0           # 侦察区 World y 下限 (m)
-    coverage_zone_y_max: 64.0           # 侦察区 World y 上限 (m)
+    # 侦察区 World 坐标范围 (Home X=4, Y=10; NED North=57.5, East=±4)
+    coverage_zone_x_min: 0.0            # 侦察区 World X 下限 (m), East=-4
+    coverage_zone_x_max: 8.0            # 侦察区 World X 上限 (m), East=+4
+    coverage_zone_y_min: 65.0           # 侦察区 World Y 下限 (m), North=55
+    coverage_zone_y_max: 70.0           # 侦察区 World Y 上限 (m), North=60
     coverage_grid_resolution: 0.5       # 网格分辨率 (m)
     coverage_fov_half_angle: 35.0       # 相机 FOV 半角 (度)
     coverage_complete_ratio: 0.95       # 全覆盖判定阈值

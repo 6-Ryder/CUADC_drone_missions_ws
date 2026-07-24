@@ -216,8 +216,8 @@ class PX4Bridge(Node):
         self.declare_parameter("transit_speed", 2.0)
         self.declare_parameter("return_speed", 3.0)
         self.declare_parameter("max_acceleration", 0.2)
-        self.declare_parameter("home_x", 10.0)
-        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_x", 4.0)
+        self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)
 
     # ================================================================

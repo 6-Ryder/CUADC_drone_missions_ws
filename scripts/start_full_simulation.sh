@@ -8,7 +8,7 @@
 #   3. ros_gz_image bridge (Gazebo 相机 → ROS2 Image 话题)
 #   4. ROS2 全系统节点 (px4_bridge + vision_pipeline + servo_controller + mission_fsm)
 #
-# 场地: 70m×8m, H起降点(10,4), 投放区(Gazebo y~36.5), 侦察区(Gazebo y~61.5)
+# 场地: 70m×8m (北向), H起降点(4,10), 投放区(Gazebo y~42.5), 侦察区(Gazebo y~67.5)
 # 飞行方向: 向北 (NED north)
 # 任务: 投放区2次精准投放 → 侦察区全覆盖巡逻 → 视觉精准返航降落
 # ==============================================================================
@@ -115,7 +115,7 @@ step "Step 2/4 — 启动 PX4 SITL + Gazebo (drone_field 世界)"
 cd "$PX4_BLD"
 export PX4_SIM_MODEL="gz_x500_mono_cam_down"
 export PX4_GZ_WORLD="drone_field"
-export PX4_GZ_MODEL_POSE="10,4,0.3,0,0,0"
+export PX4_GZ_MODEL_POSE="4,10,0.3,0,0,0"
 export GZ_IP="127.0.0.1"
 export ROS_DOMAIN_ID=0
 export HEADLESS=1
@@ -211,11 +211,11 @@ echo "┌───────────────────────�
 echo "│                    无画面全仿真系统已启动                         │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  场地:      drone_field (70m × 8m)                              │"
-echo "│  无人机:    gz_x500 @ H起降点 (10, 4, 0.3)                      │"
+echo "│  无人机:    gz_x500 @ H起降点 (4, 10, 0.3)                      │"
 echo "│  飞行方向:  向北 (NED north)                                    │"
 echo "│  投放区:    y=34~39m (3个圆筒: Ø15/Ø20/Ø25cm)                   │"
 echo "│  侦察区:    y=59~64m (5个圆筒, 3个含危险品标识)                  │"
-echo "│  起降点:    (10, 4) — 含 H 标识                                 │"
+echo "│  起降点:    (4, 10) — 含 H 标识                                 │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  组件状态:                                                       │"
 echo "│    ✓ MicroXRCEAgent    UDP:8888  (PID: $AGENT_PID)              │"

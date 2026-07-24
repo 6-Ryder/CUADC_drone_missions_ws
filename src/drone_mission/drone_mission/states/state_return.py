@@ -27,8 +27,8 @@ class ReturnState:
         self._start_time = time.time()
         self._at_home_stable = 0
 
-        home_x = self._fsm.get_param("home_x", 10.0)
-        home_y = self._fsm.get_param("home_y", 4.0)
+        home_x = self._fsm.get_param("home_x", 4.0)
+        home_y = self._fsm.get_param("home_y", 10.0)
 
         self._fsm.get_logger().info(
             f"RETURN: 返航至 H 点 ({home_x}, {home_y}, {self.HOME_Z})"
@@ -47,8 +47,8 @@ class ReturnState:
         drone_wx, drone_wy, drone_wz = ned_to_world(pos.north, pos.east, pos.down)
 
         import math
-        home_x = self._fsm.get_param("home_x", 10.0)
-        home_y = self._fsm.get_param("home_y", 4.0)
+        home_x = self._fsm.get_param("home_x", 4.0)
+        home_y = self._fsm.get_param("home_y", 10.0)
         dist_xy = math.hypot(drone_wx - home_x, drone_wy - home_y)
         dist_z = abs(drone_wz - self.HOME_Z)
 

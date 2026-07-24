@@ -39,20 +39,20 @@ def generate_launch_description():
         description="巡航飞行高度 (m)",
     )
     drop_x_arg = DeclareLaunchArgument(
-        "drop_x", default_value="10.0",
+        "drop_x", default_value="4.0",
         description="投放区 World X 坐标 (m)",
     )
     drop_y_arg = DeclareLaunchArgument(
-        "drop_y", default_value="36.5",
+        "drop_y", default_value="42.5",
         description="投放区 World Y 坐标 (m)",
     )
     home_x_arg = DeclareLaunchArgument(
-        "home_x", default_value="10.0",
-        description="起降点 World X 坐标 (m)",
+        "home_x", default_value="4.0",
+        description="起降点 World X (East) 坐标 (m)",
     )
     home_y_arg = DeclareLaunchArgument(
-        "home_y", default_value="4.0",
-        description="起降点 World Y 坐标 (m)",
+        "home_y", default_value="10.0",
+        description="起降点 World Y (North) 坐标 (m)",
     )
     loiter_time_arg = DeclareLaunchArgument(
         "loiter_time", default_value="5.0",

@@ -13,7 +13,7 @@ the drone through relay topics rather than direct PX4 DDS communication.
     bridge = StandaloneBridge(node)
     fc = FlightController(bridge)
     fc.takeoff(5.0)
-    fc.goto_world(42.5, 4.0, 5.0)
+    fc.goto_world(4.0, 42.5, 5.0)
 """
 
 import math

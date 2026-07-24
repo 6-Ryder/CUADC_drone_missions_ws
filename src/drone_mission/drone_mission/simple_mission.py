@@ -58,8 +58,8 @@ class SimpleMission(Node):
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("drop_x", 10.0)
         self.declare_parameter("drop_y", 36.5)
-        self.declare_parameter("home_x", 10.0)
-        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_x", 4.0)
+        self.declare_parameter("home_y", 10.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
         self.declare_parameter("waypoint_timeout", 120.0)
@@ -69,8 +69,8 @@ class SimpleMission(Node):
 
         # ---- 坐标变换 ----
         configure_home(
-            self.get_param("home_x", 10.0),
-            self.get_param("home_y", 4.0),
+            self.get_param("home_x", 4.0),
+            self.get_param("home_y", 10.0),
             0.0,
         )
 
@@ -181,15 +181,15 @@ class SimpleMission(Node):
         # ---- RETURN: 返航 ----
         elif self._state == MissionState.RETURN:
             if not self._command_sent:
-                hx = self.get_param("home_x", 10.0)
-                hy = self.get_param("home_y", 4.0)
+                hx = self.get_param("home_x", 4.0)
+                hy = self.get_param("home_y", 10.0)
                 self.get_logger().info(f"RETURN: 返航至 World({hx}, {hy}, {cruise_alt})")
                 self._fc.goto_world(hx, hy, cruise_alt, speed=3.0)
                 self._command_sent = True
 
             n, e, d = world_to_ned(
-                self.get_param("home_x", 10.0),
-                self.get_param("home_y", 4.0),
+                self.get_param("home_x", 4.0),
+                self.get_param("home_y", 10.0),
                 cruise_alt,
             )
             if self._fc.reached((n, e, d), tol):

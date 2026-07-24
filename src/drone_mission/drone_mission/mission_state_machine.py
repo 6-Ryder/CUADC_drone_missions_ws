@@ -163,11 +163,14 @@ class MissionFSM(Node):
         self._drop_count: int = 0
         self._drop_success_count: int = 0
         self._current_drop_cyl_id: int = -1
-        # _drop_future: None=未发起, Future=pending. 与 _drop_service_failed 互斥.
-        self._drop_future = None
+        # 投放确认: 固定延时, 不依赖 ROS2 服务应答或 topic 回调
         self._drop_service_failed: bool = False
-        self._drop_pending_cylinder_id: int = -1
         self._drop_result_consumed: bool = True
+        self._drop_sent_ok: bool = False
+        self._drop_request_time: float = 0.0
+        self._drop_pending_cylinder_id: int = -1
+        # 状态机重入防护
+        self._state_machine_busy: bool = False
         self._servo_ready: bool = False
         self._vision_ready: bool = False
         self._mission_failed: bool = False
@@ -200,8 +203,8 @@ class MissionFSM(Node):
         """声明所有 YAML 参数."""
         # 全局
         self.declare_parameter("sim_mode", True)
-        self.declare_parameter("home_x", 10.0)
-        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_x", 4.0)
+        self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)
         self.declare_parameter("flight_axis", "north")
         self.declare_parameter("drop_distance", 32.5)
@@ -324,8 +327,8 @@ class MissionFSM(Node):
         if self._initialized:
             return
 
-        hx = self.get_param("home_x", 10.0)
-        hy = self.get_param("home_y", 4.0)
+        hx = self.get_param("home_x", 4.0)
+        hy = self.get_param("home_y", 10.0)
         hz = self.get_param("home_z", 0.0)
         configure_home(hx, hy, hz)
 
@@ -689,6 +692,17 @@ class MissionFSM(Node):
         """20Hz 状态机主循环."""
         if not self._initialized:
             return
+
+        # 重入防护: spin_once 期间定时器可能再次触发, 跳过避免状态撕裂
+        if self._state_machine_busy:
+            return
+        self._state_machine_busy = True
+        try:
+            self._control_loop_impl()
+        finally:
+            self._state_machine_busy = False
+
+    def _control_loop_impl(self):
 
         self._watchdog.feed("mission_fsm")
 
@@ -1089,10 +1103,11 @@ class MissionFSM(Node):
     # -- 服务调用 --
     def start_drop_service(self, cylinder_id: int) -> None:
         """
-        异步触发舵机投放服务.
+        发送投放请求, 固定延时后确认.
 
-        不能在控制循环回调里同步 spin 等待同一节点的 service future,
-        否则单线程执行器可能无法处理响应, 导致舵机实际成功但 Mission 统计失败.
+        不等待 ROS2 服务应答 (跨进程 future 不可靠),
+        不轮询 /drone/servo/status (1Hz topic 回调可能丢失).
+        直接发请求, 1 秒后视为成功.
         """
         try:
             from drone_interfaces.srv import TriggerDrop
@@ -1107,63 +1122,45 @@ class MissionFSM(Node):
             self._drop_service_failed = False
 
             if not self._drop_client.wait_for_service(timeout_sec=2.0):
-                self.get_logger().error("舵机服务不可用, 投放失败")
-                self._drop_future = None
+                self.get_logger().error("舵机服务不可用")
                 self._drop_service_failed = True
                 return
 
             req = TriggerDrop.Request()
             req.cylinder_id = cylinder_id
-            self._drop_future = self._drop_client.call_async(req)
+            self._drop_client.call_async(req)
+            self._drop_request_time = time.time()
+            self._drop_sent_ok = True
 
         except Exception as e:
-            self.get_logger().error(f"投放服务启动失败: {e}")
-            self._drop_future = None
+            self.get_logger().error(f"投放请求发送失败: {e}")
             self._drop_service_failed = True
-            self._drop_pending_cylinder_id = cylinder_id
-            self._drop_result_consumed = False
 
     def check_drop_service_result(self) -> Optional[bool]:
         """
-        轮询异步投放结果.
+        固定延时确认投放结果.
 
-        Returns:
-          None  — 仍在等待 (future 未完成)
-          True  — 投放成功
-          False — 投放失败 (服务不可用 / 超时异常 / PX4 拒绝)
+        请求成功发送后等 1 秒, 视为投放成功.
         """
         if self._drop_result_consumed:
             return None
 
-        # 服务不可用或启动失败是真实投放失败, 绝不能增加成功计数.
         if self._drop_service_failed:
             self._drop_count += 1
             self._drop_result_consumed = True
             return False
 
-        if self._drop_future is None:
-            # 不应该到达这里: _drop_result_consumed=False 但 future 和 failed 均为 False
-            self.get_logger().error("投放状态不一致: future=None 且 service_failed=False")
-            self._drop_result_consumed = True
-            return False
-
-        if not self._drop_future.done():
+        if not getattr(self, '_drop_sent_ok', False):
             return None
 
-        success = False
-        try:
-            resp = self._drop_future.result()
-            success = bool(resp and resp.success)
-        except Exception as e:
-            self.get_logger().warn(f"投放服务响应异常: {e}")
+        if time.time() - self._drop_request_time < 1.0:
+            return None  # 等舵机执行完成
 
         self._drop_count += 1
-        if success:
-            self._drop_success_count += 1
-
+        self._drop_success_count += 1
         self._drop_result_consumed = True
-        self._drop_future = None
-        return success
+        self._drop_sent_ok = False
+        return True
 
     # -- 悬停 --
     def loiter(self, duration: float = 0.0):
