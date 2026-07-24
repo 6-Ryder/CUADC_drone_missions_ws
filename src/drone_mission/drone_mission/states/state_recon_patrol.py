@@ -24,6 +24,8 @@ class ReconPatrolState:
         self._wp_idx: int = 0
         self._coverage_complete: bool = False
         self._last_progress_log: float = 0.0
+        self._waypoint_stable_count: int = 0
+        self._waypoint_stable_required: int = 8  # 20Hz 下=0.4s 稳定确认
 
     def enter(self):
         self._fsm.logger.log_state("TRANSIT_TO_RECON_ZONE", "RECON_PATROL",
@@ -32,6 +34,7 @@ class ReconPatrolState:
         self._wp_idx = 0
         self._coverage_complete = False
         self._last_progress_log = 0.0
+        self._waypoint_stable_count = 0
 
         # 侦察阶段只记录覆盖率，不需要运行两套目标检测模型。
         self._fsm.set_vision_mode("none")
@@ -94,11 +97,16 @@ class ReconPatrolState:
 
         current_wp = self._waypoints[self._wp_idx]
 
-        # 检查是否到达当前航点
+        # 检查是否到达当前航点 (需连续稳定多帧, 防止偶然穿过容差边界后漂出)
         wp_target = (current_wp["north"], current_wp["east"], current_wp["down"])
         if self._fsm.fc.reached(wp_target,
                                 self._fsm.get_param("waypoint_tolerance", 0.5)):
-            # 到达, 立即飞向下一个航点
+            self._waypoint_stable_count += 1
+        else:
+            self._waypoint_stable_count = max(0, self._waypoint_stable_count - 1)
+
+        if self._waypoint_stable_count >= self._waypoint_stable_required:
+            self._waypoint_stable_count = 0
             self._wp_idx += 1
             if self._wp_idx < len(self._waypoints):
                 self._fly_to_wp(self._wp_idx)

@@ -21,7 +21,7 @@
 
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 import rclpy
 from rclpy.node import Node
@@ -50,6 +50,20 @@ from drone_mission.path_planner import PathPlanner
 from drone_utils.logger import TaskLogger
 from drone_utils.watchdog import Watchdog
 from drone_utils.emergency import EmergencyHandler, EmergencyLevel
+
+
+# ============================================================
+# 状态处理器接口
+# ============================================================
+
+class StateHandler(Protocol):
+    """状态处理器协议 — 每个 Mission 状态实现 enter/execute/exit."""
+
+    def enter(self) -> None: ...
+
+    def execute(self) -> Optional[str]: ...
+
+    def exit(self) -> None: ...
 
 
 # ============================================================
@@ -127,7 +141,7 @@ class MissionFSM(Node):
         # ---- 状态机 ----
         self._current_state: MissionState = MissionState.INIT
         self._prev_state: Optional[MissionState] = None
-        self._state_handlers: Dict[MissionState, Any] = {}
+        self._state_handlers: Dict[MissionState, StateHandler] = {}
         self._state_enter_time: float = 0.0
 
         # ---- 策略 ----
@@ -149,7 +163,9 @@ class MissionFSM(Node):
         self._drop_count: int = 0
         self._drop_success_count: int = 0
         self._current_drop_cyl_id: int = -1
+        # _drop_future: None=未发起, Future=pending. 与 _drop_service_failed 互斥.
         self._drop_future = None
+        self._drop_service_failed: bool = False
         self._drop_pending_cylinder_id: int = -1
         self._drop_result_consumed: bool = True
         self._servo_ready: bool = False
@@ -404,6 +420,9 @@ class MissionFSM(Node):
 
         self._initialized = True
         self._init_timer.cancel()
+
+        # 关键参数验证: 非法值会在日志警告, 不会阻止启动
+        self._validate_critical_params()
 
         # 初始化视觉数据订阅
         self._init_vision_subscriptions()
@@ -952,6 +971,40 @@ class MissionFSM(Node):
                 )
             return default
 
+    def _validate_critical_params(self) -> None:
+        """验证关键参数的取值范围, 越界时记录告警."""
+        checks = [
+            ("takeoff_height", 1.0, 50.0),
+            ("control_frequency", 5.0, 100.0),
+            ("battery_warning", 0.05, 1.0),
+            ("battery_critical", 0.01, 0.9),
+            ("vision_loss_timeout", 0.5, 60.0),
+            ("state_max_duration", 10.0, 600.0),
+            ("drop_descend_height", 0.3, 10.0),
+            ("precision_align_alpha", 0.01, 1.0),
+            ("precision_align_gain", 0.1, 10.0),
+            ("precision_align_max_speed", 0.01, 2.0),
+            ("precision_align_timeout", 2.0, 120.0),
+            ("precision_align_stable_frames", 1, 50),
+            ("precision_align_final_drop_height", 0.2, 8.0),
+            ("grid_spacing", 0.2, 10.0),
+            ("waypoint_tolerance", 0.05, 5.0),
+            ("transit_speed", 0.1, 15.0),
+            ("return_speed", 0.1, 15.0),
+        ]
+        for key, lo, hi in checks:
+            val = self.get_param(key)
+            if val is None:
+                continue
+            try:
+                fval = float(val)
+                if not (lo <= fval <= hi):
+                    self.get_logger().warn(
+                        f"参数 '{key}'={fval} 超出推荐范围 [{lo}, {hi}]"
+                    )
+            except (TypeError, ValueError):
+                self.get_logger().warn(f"参数 '{key}' 类型无效: {val}")
+
     # -- 视觉数据获取 --
     def get_cylinders(self) -> list:
         """获取最新的圆筒检测结果 (过去 2s 内)."""
@@ -1051,10 +1104,12 @@ class MissionFSM(Node):
 
             self._drop_pending_cylinder_id = cylinder_id
             self._drop_result_consumed = False
+            self._drop_service_failed = False
 
             if not self._drop_client.wait_for_service(timeout_sec=2.0):
                 self.get_logger().error("舵机服务不可用, 投放失败")
                 self._drop_future = None
+                self._drop_service_failed = True
                 return
 
             req = TriggerDrop.Request()
@@ -1064,17 +1119,31 @@ class MissionFSM(Node):
         except Exception as e:
             self.get_logger().error(f"投放服务启动失败: {e}")
             self._drop_future = None
+            self._drop_service_failed = True
             self._drop_pending_cylinder_id = cylinder_id
             self._drop_result_consumed = False
 
     def check_drop_service_result(self) -> Optional[bool]:
-        """轮询异步投放结果. None 表示仍在等待."""
+        """
+        轮询异步投放结果.
+
+        Returns:
+          None  — 仍在等待 (future 未完成)
+          True  — 投放成功
+          False — 投放失败 (服务不可用 / 超时异常 / PX4 拒绝)
+        """
         if self._drop_result_consumed:
             return None
 
         # 服务不可用或启动失败是真实投放失败, 绝不能增加成功计数.
-        if self._drop_future is None:
+        if self._drop_service_failed:
             self._drop_count += 1
+            self._drop_result_consumed = True
+            return False
+
+        if self._drop_future is None:
+            # 不应该到达这里: _drop_result_consumed=False 但 future 和 failed 均为 False
+            self.get_logger().error("投放状态不一致: future=None 且 service_failed=False")
             self._drop_result_consumed = True
             return False
 

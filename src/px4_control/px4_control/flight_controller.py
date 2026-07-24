@@ -29,20 +29,22 @@ class FlightController:
     所有速度使用 NED 坐标系 (vn, ve, vd).
     """
 
-    def __init__(self, bridge: PX4Bridge):
+    def __init__(self, bridge):
         """
         初始化飞行控制接口.
 
         Parameters
         ----------
-        bridge : PX4Bridge
-            PX4 通信桥接实例
+        bridge : PX4Bridge or StandaloneBridge
+            PX4 通信桥接实例. 两种实现共享相同接口:
+            is_armed / arm / set_offboard_mode / get_current_position /
+            set_position_target / set_velocity_target / is_landed / force_disarm /
+            land_at_current / get_current_attitude / get_parameter / get_telemetry
 
         """
         self._bridge = bridge
-        self._node = bridge  # PX4Bridge 本身是 Node
 
-        # 参数缓存
+        # 参数缓存 (bridge 通过 get_parameter 委托到所属 ROS2 Node)
         self._takeoff_height = bridge.get_parameter("takeoff_height").value
         self._waypoint_tolerance = bridge.get_parameter("waypoint_tolerance").value
         self._takeoff_tolerance = bridge.get_parameter("takeoff_tolerance").value

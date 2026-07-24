@@ -103,16 +103,12 @@ _home_world_y: float = 0.0
 _home_world_z: float = 0.0
 
 
-H_WORLD_X = 0.0   # east
-H_WORLD_Y = 0.0    # north
-H_WORLD_Z = 0.0    # up
-
-
 def configure_home(world_x: float = 0.0, world_y: float = 0.0, world_z: float = 0.0) -> None:
-    global _home_world_x, _home_world_y, _home_world_z, H_WORLD_X, H_WORLD_Y, H_WORLD_Z
-    _home_world_x = H_WORLD_X = float(world_x)
-    _home_world_y = H_WORLD_Y = float(world_y)
-    _home_world_z = H_WORLD_Z = float(world_z)
+    """配置 Home 点 World 坐标, 供 World↔NED 坐标变换使用."""
+    global _home_world_x, _home_world_y, _home_world_z
+    _home_world_x = float(world_x)
+    _home_world_y = float(world_y)
+    _home_world_z = float(world_z)
 
 
 def world_to_ned(world_x: float, world_y: float, world_z: float) -> Tuple[float, float, float]:
@@ -206,6 +202,28 @@ def ned_body_to_world_quat(
     half_sqrt = math.sqrt(0.5)
     q_ned_to_world = (half_sqrt, half_sqrt, 0.0, 0.0)
     return _normalize_quat_xyzw(*_quat_multiply_xyzw(q_ned_to_world, q_body_to_ned))
+
+
+# ============================================================
+# PX4 常量 (单一定义, px4_bridge + standalone_bridge 共享)
+# ============================================================
+
+# Navigation State (VehicleStatus.nav_state)
+NAV_STATE_MANUAL = 0
+NAV_STATE_ALTCTL = 1
+NAV_STATE_POSCTL = 2
+NAV_STATE_AUTO_MISSION = 3
+NAV_STATE_AUTO_LOITER = 4
+NAV_STATE_AUTO_RTL = 5
+NAV_STATE_OFFBOARD = 14
+NAV_STATE_LAND = 16
+
+# VehicleCommand 指令
+VEHICLE_CMD_DO_SET_MODE = 176
+VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
+VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 20
+VEHICLE_CMD_NAV_LAND = 21
+VEHICLE_CMD_DO_SET_ACTUATOR = 187
 
 
 def yaw_from_quat(q_w: float, q_x: float, q_y: float, q_z: float) -> float:

@@ -38,6 +38,11 @@ from px4_msgs.msg import (
 )
 
 from px4_control.telemetry import (
+    NAV_STATE_OFFBOARD,
+    VEHICLE_CMD_COMPONENT_ARM_DISARM,
+    VEHICLE_CMD_DO_SET_MODE,
+    VEHICLE_CMD_NAV_LAND,
+    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH,
     Attitude,
     Position,
     Telemetry,
@@ -79,12 +84,6 @@ class StandaloneBridge:
       /fmu/out/vehicle_attitude
       /fmu/out/battery_status_v1
     """
-
-    NAV_STATE_OFFBOARD = 14
-    VEHICLE_CMD_DO_SET_MODE = 176
-    VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
-    VEHICLE_CMD_NAV_LAND = 21
-    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 20
 
     def __init__(self, node: Node, sim_mode: bool = True):
         """
@@ -187,7 +186,7 @@ class StandaloneBridge:
 
     def _status_cb(self, msg: VehicleStatus) -> None:
         self._armed = (msg.arming_state == 2)
-        self._offboard = (msg.nav_state == self.NAV_STATE_OFFBOARD)
+        self._offboard = (msg.nav_state == NAV_STATE_OFFBOARD)
         self._telemetry_ready = True  # 收到状态后允许发送指令
 
     def _land_cb(self, msg: VehicleLandDetected) -> None:
@@ -277,7 +276,7 @@ class StandaloneBridge:
             return  # 1Hz 限流
         self._last_offboard_cmd_time = now
         self._node.get_logger().info("[StandaloneBridge] 请求 Offboard 模式")
-        self._send_command(self.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
+        self._send_command(VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
 
     def arm(self) -> None:
         """解锁请求 (限流: 1Hz, 遥测就绪后, 已解锁则跳过)."""
@@ -294,32 +293,32 @@ class StandaloneBridge:
         self._last_arm_cmd_time = now
         if self._sim_mode:
             self._node.get_logger().info("[StandaloneBridge] 解锁请求 (SITL force)")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
+            self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
         else:
             self._node.get_logger().info("[StandaloneBridge] 解锁请求 (标准)")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 0.0)
+            self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 0.0)
 
     def disarm(self) -> None:
         self._node.get_logger().info("[StandaloneBridge] 上锁请求")
-        self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
+        self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
 
     def force_disarm(self) -> None:
         if self._sim_mode:
             self._node.get_logger().warn("[StandaloneBridge] 强制上锁! (SITL force)")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
+            self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
         else:
             self._node.get_logger().warn("[StandaloneBridge] 强制上锁!")
-            self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
+            self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
 
     def land_at_current(self) -> None:
         """原地降落 (MAV_CMD_NAV_LAND = 21)."""
         self._node.get_logger().info("[StandaloneBridge] 请求着陆")
-        self._send_command(self.VEHICLE_CMD_NAV_LAND, 0.0, 0.0)
+        self._send_command(VEHICLE_CMD_NAV_LAND, 0.0, 0.0)
 
     def return_to_launch(self) -> None:
         """RTL 返航."""
         self._node.get_logger().info("[StandaloneBridge] 请求 RTL")
-        self._send_command(self.VEHICLE_CMD_NAV_RETURN_TO_LAUNCH, 0.0, 0.0)
+        self._send_command(VEHICLE_CMD_NAV_RETURN_TO_LAUNCH, 0.0, 0.0)
 
     # ----------------------------------------------------------------
     # Internal
