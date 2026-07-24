@@ -153,6 +153,7 @@ ros2 launch drone_bringup simple_mission.launch.py \
     sim_mode:=false \
     home_x:=0.0 \
     home_y:=0.0 \
+    home_z:=0.0 \
     drop_x:=2.0 \
     drop_y:=20.0 \
     cruise_altitude:=5.0 \
