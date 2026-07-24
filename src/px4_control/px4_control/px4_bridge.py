@@ -182,7 +182,7 @@ class PX4Bridge(Node):
         self._offboard_active: bool = False
         self._velocity_mode: bool = False  # True=速度控制, False=位置控制
         self._last_velocity_cmd = (0.0, 0.0, 0.0)  # 缓存速度指令, 避免心跳覆写
-
+        
         # ---- 订阅 Mission FSM 的 setpoint 指令 (NED) ----
         self._cmd_sp_sub = self.create_subscription(
             Point, "/drone/cmd_setpoint_ned", self._cmd_setpoint_cb, 10,

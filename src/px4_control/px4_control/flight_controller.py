@@ -236,18 +236,20 @@ class FlightController:
             self._land_start_time = time.time()
             self._land_mode_requested = False
             # 水平悬停, 缓慢下降
-            self._bridge.set_velocity_target(0.0, 0.0, 0.3)  # 0.3 m/s 下降
+            # PX4 LNDMC_Z_VEL_MAX=0.25, 下降速度必须 < 此阈值
+            # 才能提前进入 maybe_landed 状态, 避免单靠触地瞬间 IMU 信号
+            self._bridge.set_velocity_target(0.0, 0.0, 0.2)  # 0.2 m/s (< 0.25)
             return False
 
         # 下降中
         if self._bridge.is_landed():
             self._landing = False
-            # 着陆后上锁
-            self._bridge.disarm()
+            # 着陆确认后用 force_disarm 避免被"非手动 disarm"拒绝
+            self._bridge.force_disarm()
             return True
 
-        # 超时保护
-        if time.time() - self._land_start_time > 30.0:
+        # 超时保护: 15s 后切 LAND mode (原来 30s 太长)
+        if time.time() - self._land_start_time > 15.0:
             if not self._land_mode_requested:
                 self._bridge.land_at_current()
                 self._land_mode_requested = True
