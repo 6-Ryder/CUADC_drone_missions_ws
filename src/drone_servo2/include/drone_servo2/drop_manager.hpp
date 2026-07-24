@@ -15,7 +15,9 @@
 
 #include "drone_servo2/servo_interface.hpp"
 
+#include <algorithm>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -63,13 +65,13 @@ public:
   /// 注册投放完成回调
   void set_on_drop_done(DropDoneCb cb) {on_drop_done_ = std::move(cb);}
 
-  // ---- 只读属性 ----
-  DropState         state()          const {return state_;}
-  int               drop_count()     const {return drop_count_;}
-  int               drops_remaining() const {return max_drops_ - drop_count_;}
+  // ---- 只读属性 (thread-safe via mutex_) ----
+  DropState         state()          const {std::lock_guard<std::mutex> lk(mutex_); return state_;}
+  int               drop_count()     const {std::lock_guard<std::mutex> lk(mutex_); return drop_count_;}
+  int               drops_remaining() const {std::lock_guard<std::mutex> lk(mutex_); return std::max(0, max_drops_ - drop_count_);}
   int               max_drops()      const {return max_drops_;}
-  bool              last_result()    const {return last_result_;}
-  double            current_pwm()    const {return positions_[drop_count_];}
+  bool              last_result()    const {std::lock_guard<std::mutex> lk(mutex_); return last_result_;}
+  double            current_pwm()    const {std::lock_guard<std::mutex> lk(mutex_); return positions_[drop_count_];}
   const std::vector<double> & positions() const {return positions_;}
 
 private:
@@ -80,6 +82,7 @@ private:
   int max_drops_;
   double delay_ms_;
 
+  mutable std::mutex mutex_;
   DropState state_{DropState::IDLE};
   int drop_count_{0};
   bool last_result_{false};

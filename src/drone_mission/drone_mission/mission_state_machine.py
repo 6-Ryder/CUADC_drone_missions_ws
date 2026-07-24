@@ -42,7 +42,7 @@ from drone_mission.states.state_precision_land import PrecisionLandState
 from px4_control.px4_bridge import PX4Bridge
 from px4_control.flight_controller import FlightController
 from px4_control.standalone_bridge import StandaloneBridge
-from px4_control.telemetry import ned_to_world
+from px4_control.telemetry import configure_home, ned_to_world
 
 from drone_mission.cylinder_selector import CylinderSelector
 from drone_mission.path_planner import PathPlanner
@@ -109,10 +109,7 @@ class MissionFSM(Node):
     以 20Hz 频率驱动状态执行.
     """
 
-    # 投放区坐标 (World)
-    DROP_ZONE = (42.5, 4.0, 5.0)   # (x, y, z) — 投放区中心
-    # 侦察区坐标 (World)
-    RECON_ZONE = (67.5, 4.0, 5.0)  # (x, y, z) — 侦察区中心
+    TARGET_ALTITUDE = 5.0            # 巡航高度 (m)
 
     def __init__(self):
         super().__init__("mission_state_machine")
@@ -173,13 +170,7 @@ class MissionFSM(Node):
         self._markers_timestamp: float = 0.0
         self._hazards_timestamp: float = 0.0
 
-        # ---- 遥测缓存 (standalone mode, 通过 ROS2 话题获取) ----
-        self._standalone_pose = None  # (x, y, z, qx, qy, qz, qw)
         self._standalone_odom_ready = False
-        self._standalone_armed = False
-        self._standalone_landed = True
-        self._standalone_battery = 1.0
-        self._standalone_battery_ready = False
 
         # ---- 初始化延迟 ----
         self._init_timer = self.create_timer(1.0, self._lazy_init)
@@ -192,6 +183,13 @@ class MissionFSM(Node):
     def _declare_params(self):
         """声明所有 YAML 参数."""
         # 全局
+        self.declare_parameter("sim_mode", True)
+        self.declare_parameter("home_x", 10.0)
+        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_z", 0.0)
+        self.declare_parameter("flight_axis", "north")
+        self.declare_parameter("drop_distance", 32.5)
+        self.declare_parameter("recon_distance", 57.5)
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
@@ -206,17 +204,17 @@ class MissionFSM(Node):
         self.declare_parameter("return_speed", 3.0)
         self.declare_parameter("max_acceleration", 0.2)
         # Area 1
-        self.declare_parameter("area1_north_min", -4.0)
-        self.declare_parameter("area1_north_max", 4.0)
-        self.declare_parameter("area1_east_min", 30.0)
-        self.declare_parameter("area1_east_max", 35.0)
+        self.declare_parameter("area1_north_min", 30.0)
+        self.declare_parameter("area1_north_max", 35.0)
+        self.declare_parameter("area1_east_min", -4.0)
+        self.declare_parameter("area1_east_max", 4.0)
         self.declare_parameter("area1_altitude", 2.0)
         self.declare_parameter("area1_search_altitude", 5.0)
         # Area 2
-        self.declare_parameter("area2_north_min", -4.0)
-        self.declare_parameter("area2_north_max", 4.0)
-        self.declare_parameter("area2_east_min", 55.0)
-        self.declare_parameter("area2_east_max", 60.0)
+        self.declare_parameter("area2_north_min", 55.0)
+        self.declare_parameter("area2_north_max", 60.0)
+        self.declare_parameter("area2_east_min", -4.0)
+        self.declare_parameter("area2_east_max", 4.0)
         self.declare_parameter("area2_altitude", 5.0)
         # 覆盖
         self.declare_parameter("grid_spacing", 1.0)
@@ -310,6 +308,31 @@ class MissionFSM(Node):
         if self._initialized:
             return
 
+        hx = self.get_param("home_x", 10.0)
+        hy = self.get_param("home_y", 4.0)
+        hz = self.get_param("home_z", 0.0)
+        configure_home(hx, hy, hz)
+
+        # 从参数动态计算投放区/侦察区的 World 坐标
+        flight_axis = self.get_param("flight_axis", "north")
+        drop_dist = float(self.get_param("drop_distance", 32.5))
+        recon_dist = float(self.get_param("recon_distance", 57.5))
+
+        if flight_axis == "north":
+            drop_north, drop_east = drop_dist, 0.0
+            recon_north, recon_east = recon_dist, 0.0
+        else:  # east (默认, 向后兼容)
+            drop_north, drop_east = 0.0, drop_dist
+            recon_north, recon_east = 0.0, recon_dist
+
+        # NED east → World x, NED north → World y（仿真/真机相对关系一致）
+        drop_world_x = hx + drop_east
+        drop_world_y = hy + drop_north
+        recon_world_x = hx + recon_east
+        recon_world_y = hy + recon_north
+        drop_zone = (drop_world_x, drop_world_y, self.TARGET_ALTITUDE)
+        recon_zone = (recon_world_x, recon_world_y, self.TARGET_ALTITUDE)
+
         # 检查 PX4 Bridge 是否可以获取
         # 在真实部署中, PX4Bridge 是独立节点; 此处通过 ros2 话题检查
         # 为简化 integration, 此处创建桥接的引用 (实际需通过 DDS)
@@ -347,14 +370,14 @@ class MissionFSM(Node):
         transit_drop = self._state_handlers.get(MissionState.TRANSIT_TO_DROP_ZONE)
         if isinstance(transit_drop, TransitState):
             transit_drop.configure(
-                target_world_xyz=self.DROP_ZONE,
+                target_world_xyz=drop_zone,
                 target_state="CYLINDER_SEARCH",
                 label="TRANSIT_TO_DROP_ZONE",
             )
         transit_recon = self._state_handlers.get(MissionState.TRANSIT_TO_RECON_ZONE)
         if isinstance(transit_recon, TransitState):
             transit_recon.configure(
-                target_world_xyz=self.RECON_ZONE,
+                target_world_xyz=recon_zone,
                 target_state="RECON_PATROL",
                 label="TRANSIT_TO_RECON_ZONE",
             )
@@ -571,10 +594,10 @@ class MissionFSM(Node):
                 self._next_known_marker_id += 1
 
     def _drop_zone_world_bounds(self, margin: float = 1.0):
-        n_min = float(self.get_param("area1_north_min", -4.0))
-        n_max = float(self.get_param("area1_north_max", 4.0))
-        e_min = float(self.get_param("area1_east_min", 30.0))
-        e_max = float(self.get_param("area1_east_max", 35.0))
+        n_min = float(self.get_param("area1_north_min", 30.0))
+        n_max = float(self.get_param("area1_north_max", 35.0))
+        e_min = float(self.get_param("area1_east_min", -4.0))
+        e_max = float(self.get_param("area1_east_max", 4.0))
         corners = [
             ned_to_world(n_min, e_min, 0.0),
             ned_to_world(n_min, e_max, 0.0),
@@ -598,10 +621,10 @@ class MissionFSM(Node):
         if wx_min <= raw_x <= wx_max and wy_min <= raw_y <= wy_max:
             return raw_x, raw_y
 
-        n_min = float(self.get_param("area1_north_min", -4.0))
-        n_max = float(self.get_param("area1_north_max", 4.0))
-        e_min = float(self.get_param("area1_east_min", 30.0))
-        e_max = float(self.get_param("area1_east_max", 35.0))
+        n_min = float(self.get_param("area1_north_min", 30.0))
+        n_max = float(self.get_param("area1_north_max", 35.0))
+        e_min = float(self.get_param("area1_east_min", -4.0))
+        e_max = float(self.get_param("area1_east_max", 4.0))
         if e_min - 1.0 <= raw_x <= e_max + 1.0 and n_min - 1.0 <= raw_y <= n_max + 1.0:
             wx, wy, _ = ned_to_world(raw_y, raw_x, 0.0)
             if wx_min <= wx <= wx_max and wy_min <= wy <= wy_max:
@@ -636,9 +659,6 @@ class MissionFSM(Node):
 
     def _pose_cb(self, msg):
         """Standalone mode: receive /drone/pose from px4_bridge."""
-        p = msg.pose.position
-        q = msg.pose.orientation
-        self._standalone_pose = (p.x, p.y, p.z, q.x, q.y, q.z, q.w)
         self._standalone_odom_ready = True
         self._watchdog.feed("px4_odom")
 
@@ -819,7 +839,9 @@ class MissionFSM(Node):
         if self._bridge is not None:
             return self._bridge
         if self._standalone_bridge is None:
-            self._standalone_bridge = StandaloneBridge(self)
+            self._standalone_bridge = StandaloneBridge(
+                self, sim_mode=self.get_param("sim_mode", True)
+            )
         return self._standalone_bridge
 
     @bridge.setter
@@ -844,6 +866,11 @@ class MissionFSM(Node):
     def vision_node(self, vn):
         self._vision_node = vn
 
+    # Vision mode mapping (must match vision_pipeline service handler)
+    _VISION_MODE_NONE = 0
+    _VISION_MODE_LANDING = 2
+    _VISION_MODE_ALL = 3
+
     def set_vision_mode(self, mode: str) -> None:
         """Switch the separately running vision pipeline through its ROS service."""
         if self._vision_node is not None:
@@ -855,8 +882,18 @@ class MissionFSM(Node):
 
         from drone_interfaces.srv import SetVisionMode
         request = SetVisionMode.Request()
-        request.mode = 2 if mode == "landing" else 3
-        request.enable = mode != "none"
+
+        if mode == "landing":
+            request.mode = self._VISION_MODE_LANDING
+            request.enable = True
+        elif mode == "none":
+            request.mode = self._VISION_MODE_NONE
+            request.enable = False
+        else:
+            # "all" / default — full detection mode
+            request.mode = self._VISION_MODE_ALL
+            request.enable = True
+
         self._vision_mode_client.call_async(request)
 
     # -- 工具 --
@@ -909,6 +946,10 @@ class MissionFSM(Node):
         try:
             return self.get_parameter(key).value
         except Exception:
+            if default is None:
+                self.get_logger().warn(
+                    f"参数 '{key}' 未声明且无默认值, 返回 None, 可能导致运行时错误"
+                )
             return default
 
     # -- 视觉数据获取 --

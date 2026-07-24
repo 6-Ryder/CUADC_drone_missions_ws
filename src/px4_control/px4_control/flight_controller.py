@@ -50,7 +50,8 @@ class FlightController:
         # 状态
         self._current_waypoint: Optional[Position] = None
         self._waypoint_start_time: float = 0.0
-        self._waypoint_timeout: float = bridge.get_parameter("waypoint_timeout").value
+        self._default_waypoint_timeout: float = bridge.get_parameter("waypoint_timeout").value
+        self._waypoint_timeout: float = self._default_waypoint_timeout
         self._target_speed: float = 1.0
 
         self._landing = False
@@ -124,6 +125,7 @@ class FlightController:
         self._bridge.set_position_target(north, east, down, yaw)
         self._current_waypoint = Position(north, east, down)
         self._waypoint_start_time = time.time()
+        self._waypoint_timeout = self._default_waypoint_timeout
 
     def goto_world(self, x: float, y: float, z: float,
                    yaw: float = 0.0, speed: float = 1.0):
@@ -158,6 +160,7 @@ class FlightController:
         self._bridge.set_position_target(pos.north, pos.east, pos.down)
         self._current_waypoint = pos
         self._waypoint_start_time = time.time()
+        # 使用 loiter 专用超时, 不影响后续航点的默认超时
         self._waypoint_timeout = duration if duration > 0 else 3600.0
 
     def set_velocity_ned(self, vn: float, ve: float, vd: float, yaw_rate: float = 0.0):
@@ -201,8 +204,13 @@ class FlightController:
         """Return current PX4 yaw in NED if available."""
         if hasattr(self._bridge, "_current_yaw"):
             return float(getattr(self._bridge, "_current_yaw"))
+        # Fallback: compute yaw from attitude quaternion
         attitude = self._bridge.get_current_attitude()
-        return float(getattr(attitude, "yaw", 0.0))
+        try:
+            w, x, y, z = attitude.q_w, attitude.q_x, attitude.q_y, attitude.q_z
+            return float(math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
+        except Exception:
+            return 0.0
 
     # ================================================================
     # 着陆
@@ -228,18 +236,20 @@ class FlightController:
             self._land_start_time = time.time()
             self._land_mode_requested = False
             # 水平悬停, 缓慢下降
-            self._bridge.set_velocity_target(0.0, 0.0, 0.3)  # 0.3 m/s 下降
+            # PX4 LNDMC_Z_VEL_MAX=0.25, 下降速度必须 < 此阈值
+            # 才能提前进入 maybe_landed 状态, 避免单靠触地瞬间 IMU 信号
+            self._bridge.set_velocity_target(0.0, 0.0, 0.2)  # 0.2 m/s (< 0.25)
             return False
 
         # 下降中
         if self._bridge.is_landed():
             self._landing = False
-            # 着陆后上锁
-            self._bridge.disarm()
+            # 着陆确认后用 force_disarm 避免被"非手动 disarm"拒绝
+            self._bridge.force_disarm()
             return True
 
-        # 超时保护
-        if time.time() - self._land_start_time > 30.0:
+        # 超时保护: 15s 后切 LAND mode (原来 30s 太长)
+        if time.time() - self._land_start_time > 15.0:
             if not self._land_mode_requested:
                 self._bridge.land_at_current()
                 self._land_mode_requested = True

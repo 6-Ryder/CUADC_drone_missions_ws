@@ -21,12 +21,47 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import LogInfo, TimerAction
+from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch_ros.actions import Node
-
+from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
     """生成 SITL 全系统启动配置."""
+    
+    home_x_args = DeclareLaunchArgument(
+        "home_x",
+        default_value="10.0",
+        description="Home position X coordinate (meters, world frame)",
+    )
+
+    home_y_args = DeclareLaunchArgument(
+        "home_y",
+        default_value="4.0",
+        description="Home position Y coordinate (meters, world frame)",
+    )
+
+    home_z_args = DeclareLaunchArgument(
+        "home_z",
+        default_value="0.0",
+        description="Home position Z coordinate (meters, world frame)",
+    )
+
+    flight_axis_arg = DeclareLaunchArgument(
+        "flight_axis",
+        default_value="north",
+        description="主飞行轴朝向: 'east' | 'north'",
+    )
+    drop_distance_arg = DeclareLaunchArgument(
+        "drop_distance",
+        default_value="32.5",
+        description="Home → 投放区距离 (m)",
+    )
+    recon_distance_arg = DeclareLaunchArgument(
+        "recon_distance",
+        default_value="57.5",
+        description="Home → 侦察区距离 (m)",
+    )
+
     # ---- 包路径 ----
     pkg_control = get_package_share_directory("px4_control")
     pkg_vision = get_package_share_directory("drone_vision")
@@ -50,7 +85,11 @@ def generate_launch_description():
         name="px4_bridge",
         output="screen",
         emulate_tty=True,
-        parameters=[px4_param_file],
+        parameters=[px4_param_file, {
+            "home_x": LaunchConfiguration("home_x"),
+            "home_y": LaunchConfiguration("home_y"),
+            "home_z": LaunchConfiguration("home_z"),
+        }],
         arguments=["--ros-args", "--log-level", "info"],
     )
 
@@ -88,7 +127,14 @@ def generate_launch_description():
         name="mission_state_machine",
         output="screen",
         emulate_tty=True,
-        parameters=[mission_param_file],
+        parameters=[mission_param_file, {
+            "home_x": LaunchConfiguration("home_x"),
+            "home_y": LaunchConfiguration("home_y"),
+            "home_z": LaunchConfiguration("home_z"),
+            "flight_axis": LaunchConfiguration("flight_axis"),
+            "drop_distance": LaunchConfiguration("drop_distance"),
+            "recon_distance": LaunchConfiguration("recon_distance"),
+        }],
         arguments=["--ros-args", "--log-level", "info"],
     )
 
@@ -115,6 +161,12 @@ def generate_launch_description():
         LogInfo(msg="  2. Vision Pipeline (YOLO + OpenCV)"),
         LogInfo(msg="  3. Servo Controller (SITL Mock)"),
         LogInfo(msg="  4. Mission FSM (任务状态机 + 低空投放视觉校准)"),
+        home_x_args,
+        home_y_args,
+        home_z_args,
+        flight_axis_arg,
+        drop_distance_arg,
+        recon_distance_arg,
         px4_bridge_node,
         vision_delayed,
         servo_delayed,

@@ -15,5 +15,5 @@
     # --- 速度与加速度参数 ---
     sweep_speed: 0.8              # 区域内部遍历速度 (m/s)
     transit_speed: 3.0            # 区域之间中转速度 (m/s)
-    return_speed: 3.0             # 返航速度 (m/s)
+    return_speed: 4.0             # 返航速度 (m/s)
     max_acceleration: 2.0         # setpoint 斜坡速率 (m/s), 需 >= transit_speed

@@ -38,6 +38,10 @@ class PX4CommandServo:
         self._current_pwm = init_pwm_us
         self._pwm_min = pwm_min
         self._pwm_max = pwm_max
+        if pwm_max <= pwm_min:
+            raise ValueError(
+                f"pwm_max ({pwm_max}) must be greater than pwm_min ({pwm_min})"
+            )
         self._pwm_center = (pwm_min + pwm_max) / 2.0
         self._pwm_half_range = (pwm_max - pwm_min) / 2.0
         self._actuator_index = actuator_index
@@ -46,9 +50,9 @@ class PX4CommandServo:
         self._cmd_pub = node.create_publisher(
             VehicleCommand, "/drone/cmd/vehicle_command_relay", 10)
 
-        # 初始化: 舵机置为初始位置
-        self.set_pwm(init_pwm_us)
+        # 初始化: 先标记就绪, 再发送初始 PWM (避免 _ready=False 导致 set_pwm 空转)
         self._ready = True
+        self.set_pwm(init_pwm_us)
 
     def _pwm_to_normalized(self, pwm_us: float) -> float:
         """PWM μs → normalized [-1.0, +1.0]."""
@@ -115,16 +119,35 @@ class ServoController(Node):
         self._declare_params()
 
         platform = self.get_parameter("platform").value
+        if platform not in ("sitl", "jetson"):
+            self.get_logger().error(
+                f"不支持的 platform '{platform}', 仅支持 sitl/jetson"
+            )
+            raise ValueError(f"不支持的 platform: {platform}")
+
         is_sitl = (platform == "sitl")
 
-        positions = self.get_parameter("pwm_positions").value
+        positions = list(self.get_parameter("pwm_positions").value)
         if len(positions) < 2:
             self.get_logger().error("pwm_positions 至少需要 2 个值")
-            return
+            rclpy.shutdown()
+            raise ValueError("pwm_positions 至少需要 2 个值")
 
-        init_pwm = positions[0]
-        pwm_min = positions[0]
-        pwm_max = positions[-1]
+        init_pwm = float(positions[0])
+        pwm_min = float(min(positions))
+        pwm_max = float(max(positions))
+
+        # 验证 PWM 值在合理范围内 (500-2500μs)
+        if pwm_min < 500.0 or pwm_max > 2500.0:
+            self.get_logger().warn(
+                f"PWM 范围 [{pwm_min:.0f}, {pwm_max:.0f}] 超出常见范围 [500, 2500]μs"
+            )
+
+        actuator_idx = self.get_parameter("actuator_index").value
+        if not (0 <= actuator_idx <= 6):
+            self.get_logger().error(f"actuator_index ({actuator_idx}) 必须在 [0, 6] 范围")
+            rclpy.shutdown()
+            raise ValueError(f"actuator_index 超出范围: {actuator_idx}")
 
         if is_sitl:
             self._servo = ServoMock(init_pwm)
@@ -132,13 +155,13 @@ class ServoController(Node):
         else:
             self._servo = PX4CommandServo(
                 self, init_pwm, pwm_min, pwm_max,
-                actuator_index=self.get_parameter("actuator_index").value,
+                actuator_index=actuator_idx,
                 actuator_set=self.get_parameter("actuator_set").value,
             )
             self.get_logger().info(
                 f"舵机: PX4 VehicleCommand 模式 "
                 f"(set={self.get_parameter('actuator_set').value} "
-                f"idx={self.get_parameter('actuator_index').value} "
+                f"idx={actuator_idx} "
                 f"pwm=[{pwm_min:.0f}..{pwm_max:.0f}] init={init_pwm:.0f}μs)"
             )
 

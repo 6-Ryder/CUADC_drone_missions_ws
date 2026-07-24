@@ -36,6 +36,7 @@ from px4_msgs.msg import (
 
 from px4_control.telemetry import (
     Position, Attitude, Velocity, Telemetry, ned_to_world_pose,
+    configure_home,
 )
 from drone_utils.logger import TaskLogger
 from drone_utils.watchdog import Watchdog
@@ -101,6 +102,13 @@ class PX4Bridge(Node):
         # ---- 参数 ----
         self._declare_params()
 
+        # ---- 坐标变换: 配置 Home 点偏移 ----
+        configure_home(
+            float(self.get_parameter("home_x").value),
+            float(self.get_parameter("home_y").value),
+            float(self.get_parameter("home_z").value),
+        )
+
         # ---- QoS ----
         qos = px4_qos()
 
@@ -118,7 +126,7 @@ class PX4Bridge(Node):
             VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, qos,
         )
         self._battery_sub = self.create_subscription(
-            BatteryStatus, "/fmu/out/battery_status", self._battery_cb, qos,
+            BatteryStatus, "/fmu/out/battery_status_v1", self._battery_cb, qos,
         )
         self._gps_sub = self.create_subscription(
             SensorGps, "/fmu/out/vehicle_gps_position", self._gps_cb, qos,
@@ -163,6 +171,7 @@ class PX4Bridge(Node):
         self._current_setpoint = Position(0.0, 0.0, -5.0)
         self._target_yaw: float = 0.0
         self._current_yaw: float = 0.0
+        self._smoothed_yaw: float = 0.0  # 平滑后的 yaw setpoint, 避免与物理 yaw 冲突
         self._setpoint_lock = threading.Lock()
 
         # 组件ID (注册用)
@@ -173,7 +182,7 @@ class PX4Bridge(Node):
         self._offboard_active: bool = False
         self._velocity_mode: bool = False  # True=速度控制, False=位置控制
         self._last_velocity_cmd = (0.0, 0.0, 0.0)  # 缓存速度指令, 避免心跳覆写
-
+        
         # ---- 订阅 Mission FSM 的 setpoint 指令 (NED) ----
         self._cmd_sp_sub = self.create_subscription(
             Point, "/drone/cmd_setpoint_ned", self._cmd_setpoint_cb, 10,
@@ -201,6 +210,8 @@ class PX4Bridge(Node):
         self._watchdog = Watchdog()
         self._watchdog.register("px4_odom", timeout=3.0,
                                 on_timeout=lambda n: self.get_logger().warn(f"{n} 超时"))
+        self._watchdog.register("px4_status", timeout=3.0,
+                                on_timeout=lambda n: self.get_logger().warn(f"{n} 超时"))
 
         self.get_logger().info("PX4 Bridge 已启动 (等待 DDS 连接...)")
 
@@ -216,6 +227,9 @@ class PX4Bridge(Node):
         self.declare_parameter("transit_speed", 2.0)
         self.declare_parameter("return_speed", 3.0)
         self.declare_parameter("max_acceleration", 0.2)
+        self.declare_parameter("home_x", 10.0)
+        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_z", 0.0)
 
     # ================================================================
     # 订阅回调
@@ -248,15 +262,6 @@ class PX4Bridge(Node):
         self._current_telemetry.status.armed = (msg.arming_state == 2)
         self._current_telemetry.status.offboard_mode = (msg.nav_state == self.NAV_STATE_OFFBOARD)
         self._current_telemetry.status.navigation_state = msg.nav_state
-        # battery_remaining/gps no longer in VehicleStatus (use dedicated topics)
-        self._current_telemetry.status.battery_remaining = 1.0
-        self._current_telemetry.status.gps_fix_type = 0
-        self._current_telemetry.status.gps_satellites = 0
-
-        # 更新着陆状态
-        self._current_telemetry.status.landed = (
-            msg.nav_state == self.NAV_STATE_LAND and not self._current_telemetry.status.armed
-        )
 
         self._armed = (msg.arming_state == 2)
 
@@ -280,7 +285,7 @@ class PX4Bridge(Node):
         self._current_telemetry.status.battery_remaining = float(msg.remaining)
 
     def _gps_cb(self, msg: SensorGps):
-        """订阅真实 GPS 状态 (替代 SITL 硬编码假值)."""
+        """订阅真实 GPS 状态."""
         self._current_telemetry.status.gps_fix_type = msg.fix_type
         self._current_telemetry.status.gps_satellites = msg.satellites_used
 
@@ -316,6 +321,8 @@ class PX4Bridge(Node):
 
     def _vision_velocity_cb(self, msg: TwistStamped):
         """Forward visual-servo velocity, which is expressed in NED."""
+        with self._setpoint_lock:
+            self._velocity_mode = True
         self.publish_velocity_cmd(
             float(msg.twist.linear.x),
             float(msg.twist.linear.y),
@@ -412,7 +419,7 @@ class PX4Bridge(Node):
 
         with self._setpoint_lock:
             sp = self._current_setpoint
-            yaw = self._current_yaw
+            yaw = self._smoothed_yaw
             is_vel_mode = self._velocity_mode
 
         if is_vel_mode:
@@ -462,14 +469,14 @@ class PX4Bridge(Node):
             new_east = target.east
             new_down = target.down
 
-        # 平滑偏航
-        dyaw = target_yaw - self._current_yaw
+        # 平滑偏航 (使用独立的 smoothed 变量, 不与物理 _current_yaw 冲突)
+        dyaw = target_yaw - self._smoothed_yaw
         dyaw = math.atan2(math.sin(dyaw), math.cos(dyaw))  # normalize
-        new_yaw = self._current_yaw + dyaw * 0.3  # low-pass
+        new_yaw = self._smoothed_yaw + dyaw * 0.3  # low-pass
 
         with self._setpoint_lock:
             self._current_setpoint = Position(new_north, new_east, new_down)
-            self._current_yaw = new_yaw
+            self._smoothed_yaw = new_yaw
 
     # ================================================================
     # 公开接口 (供 FlightController 和 Mission 层调用)

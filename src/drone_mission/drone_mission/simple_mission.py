@@ -11,11 +11,11 @@
   - World(ENU): x=east, y=north, z=up. 仿真以 Gazebo 世界为准,
     真机以 Home(解锁点) 为原点.
   - NED: north=World_y-Home_y, east=World_x-Home_x, down=-World_z
-  - 坐标变换统一由 px4_control.telemetry 处理
 
 用法:
   仿真: ros2 launch drone_bringup simple_mission.launch.py
-  真机: ros2 launch drone_bringup simple_mission.launch.py home_x:=0.0 home_y:=0.0 drop_x:=20.0 drop_y:=2.0
+  真机: ros2 launch drone_bringup simple_mission.launch.py \
+          sim_mode:=false home_x:=0.0 home_y:=0.0 drop_x:=2.0 drop_y:=20.0
 """
 
 import time
@@ -48,42 +48,40 @@ class MissionState(Enum):
 # ============================================================
 
 class SimpleMission(Node):
-    """
-    简化版无人机任务 — 起飞 → 飞往投放区 → 悬停 → 返航 → 降落.
-
-    使用 StandaloneBridge + FlightController, 代码大幅简化.
-    """
+    """简化版无人机任务 — 起飞 → 飞往投放区 → 悬停 → 返航 → 降落."""
 
     def __init__(self):
         super().__init__("simple_mission")
 
         # ---- 参数 ----
         self.declare_parameter("cruise_altitude", 5.0)
-        self.declare_parameter("takeoff_height", 5.0)         # FlightController 需要
-        self.declare_parameter("drop_x", 42.5)
-        self.declare_parameter("drop_y", 4.0)
+        self.declare_parameter("takeoff_height", 5.0)
+        self.declare_parameter("drop_x", 10.0)
+        self.declare_parameter("drop_y", 36.5)
         self.declare_parameter("home_x", 10.0)
         self.declare_parameter("home_y", 4.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
-        self.declare_parameter("waypoint_timeout", 120.0)      # FlightController 需要
+        self.declare_parameter("waypoint_timeout", 120.0)
         self.declare_parameter("loiter_time", 5.0)
         self.declare_parameter("state_timeout", 180.0)
-        self.declare_parameter("sim_mode", True)  # True=SITL, False=真机
+        self.declare_parameter("sim_mode", True)
 
-        # ---- 配置坐标变换 ----
-        hx = self.param("home_x")
-        hy = self.param("home_y")
-        configure_home(hx, hy, 0.0)
+        # ---- 坐标变换 ----
+        configure_home(
+            self.get_param("home_x", 10.0),
+            self.get_param("home_y", 4.0),
+            0.0,
+        )
 
         # ---- 控制层 ----
-        sim_mode = self.param("sim_mode")
+        sim_mode = self.get_param("sim_mode", True)
         self._bridge = StandaloneBridge(self, sim_mode=sim_mode)
         self._fc = FlightController(self._bridge)
 
         # ---- 状态机 ----
         self._state: MissionState = MissionState.INIT
-        self._state_start: float = 0.0
+        self._state_start: float = time.time()
         self._command_sent: bool = False
         self._stable_count: int = 0
 
@@ -92,20 +90,26 @@ class SimpleMission(Node):
 
         self.get_logger().info("=" * 60)
         self.get_logger().info("  SimpleMission — 简单任务节点已启动")
-        self.get_logger().info(f"  Home:     World({hx}, {hy})")
-        self.get_logger().info(f"  投放区:   World({self.param('drop_x')}, {self.param('drop_y')})")
-        self.get_logger().info(f"  巡航高度: {self.param('cruise_altitude')}m")
+        self.get_logger().info(f"  sim_mode:  {sim_mode}")
+        self.get_logger().info(f"  Home:      World({self.get_param('home_x')}, {self.get_param('home_y')})")
+        self.get_logger().info(f"  投放区:    World({self.get_param('drop_x')}, {self.get_param('drop_y')})")
+        self.get_logger().info(f"  巡航高度:  {self.get_param('cruise_altitude')}m")
+        self.get_logger().info("  流程: INIT → TAKEOFF → TRANSIT → LOITER → RETURN → LAND → COMPLETE")
         self.get_logger().info("=" * 60)
 
     # ================================================================
     # 参数快捷方法
     # ================================================================
 
-    def param(self, key: str):
+    def get_param(self, key: str, default=None):
         try:
             return self.get_parameter(key).value
         except Exception:
-            return None
+            if default is None:
+                self.get_logger().warn(
+                    f"参数 '{key}' 未声明且无默认值, 返回 None, 可能导致运行时错误"
+                )
+            return default
 
     # ================================================================
     # 主控制循环 (20Hz)
@@ -117,8 +121,8 @@ class SimpleMission(Node):
             return
 
         elapsed = time.time() - self._state_start
-        tol = self.param("waypoint_tolerance")
-        cruise_alt = self.param("cruise_altitude")
+        tol = self.get_param("waypoint_tolerance", 0.5)
+        cruise_alt = self.get_param("cruise_altitude", 5.0)
 
         # ---- INIT: 等待遥测就绪 ----
         if self._state == MissionState.INIT:
@@ -133,7 +137,7 @@ class SimpleMission(Node):
             target_down = -cruise_alt
             pos = self._bridge.get_current_position()
 
-            if abs(pos.down - target_down) < self.param("takeoff_tolerance"):
+            if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.3):
                 self._stable_count += 1
             else:
                 self._stable_count = 0
@@ -142,55 +146,60 @@ class SimpleMission(Node):
                 self.get_logger().info(f"TAKEOFF: 到达巡航高度 {cruise_alt}m → TRANSIT_TO_DROP")
                 self._transition(MissionState.TRANSIT_TO_DROP)
             elif elapsed > 30.0:
-                self.get_logger().warn("TAKEOFF: 爬升超时, 强制下一状态")
+                self.get_logger().warn("TAKEOFF: 爬升超时 (30s), 强制下一状态")
                 self._transition(MissionState.TRANSIT_TO_DROP)
 
         # ---- TRANSIT_TO_DROP: 飞往投放区 ----
         elif self._state == MissionState.TRANSIT_TO_DROP:
             if not self._command_sent:
-                dx = self.param("drop_x")
-                dy = self.param("drop_y")
+                dx = self.get_param("drop_x", 10.0)
+                dy = self.get_param("drop_y", 36.5)
                 self.get_logger().info(f"TRANSIT: 飞往投放区 World({dx}, {dy}, {cruise_alt})")
                 self._fc.goto_world(dx, dy, cruise_alt, speed=2.0)
                 self._command_sent = True
 
             n, e, d = world_to_ned(
-                self.param("drop_x"), self.param("drop_y"), cruise_alt,
+                self.get_param("drop_x", 10.0),
+                self.get_param("drop_y", 36.5),
+                cruise_alt,
             )
             if self._fc.reached((n, e, d), tol):
-                self.get_logger().info(f"TRANSIT: 到达投放区 → LOITER ({self.param('loiter_time')}s)")
+                loiter_t = self.get_param("loiter_time", 5.0)
+                self.get_logger().info(f"TRANSIT: 到达投放区 → LOITER ({loiter_t}s)")
                 self._transition(MissionState.LOITER)
-            elif elapsed > self.param("waypoint_timeout"):
+            elif elapsed > self.get_param("waypoint_timeout", 120.0):
                 self.get_logger().warn("TRANSIT: 超时, 强制进入 LOITER")
                 self._transition(MissionState.LOITER)
 
         # ---- LOITER: 悬停 ----
         elif self._state == MissionState.LOITER:
             self._fc.loiter()
-            if elapsed > self.param("loiter_time"):
+            if elapsed > self.get_param("loiter_time", 5.0):
                 self.get_logger().info("LOITER: 悬停完成 → RETURN")
                 self._transition(MissionState.RETURN)
 
         # ---- RETURN: 返航 ----
         elif self._state == MissionState.RETURN:
             if not self._command_sent:
-                hx = self.param("home_x")
-                hy = self.param("home_y")
+                hx = self.get_param("home_x", 10.0)
+                hy = self.get_param("home_y", 4.0)
                 self.get_logger().info(f"RETURN: 返航至 World({hx}, {hy}, {cruise_alt})")
                 self._fc.goto_world(hx, hy, cruise_alt, speed=3.0)
                 self._command_sent = True
 
             n, e, d = world_to_ned(
-                self.param("home_x"), self.param("home_y"), cruise_alt,
+                self.get_param("home_x", 10.0),
+                self.get_param("home_y", 4.0),
+                cruise_alt,
             )
             if self._fc.reached((n, e, d), tol):
                 self.get_logger().info("RETURN: 到达起降点上方 → LAND")
                 self._transition(MissionState.LAND)
-            elif elapsed > self.param("waypoint_timeout"):
+            elif elapsed > self.get_param("waypoint_timeout", 120.0):
                 self.get_logger().warn("RETURN: 超时, 强制进入 LAND")
                 self._transition(MissionState.LAND)
 
-        # ---- LAND: 降落 (使用 FlightController.land) ----
+        # ---- LAND: 降落 ----
         elif self._state == MissionState.LAND:
             landed = self._fc.land()
             if landed:

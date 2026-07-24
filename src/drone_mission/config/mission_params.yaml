@@ -1,8 +1,19 @@
 # 无人机自主任务飞行 — 任务参数
 # 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
 # 原点: 起飞点 H (world: 10, 4, 0)
+# 飞行方向: 向北 (NED north 正方向)
 /mission_state_machine:
   ros__parameters:
+    # --- 坐标系原点 ---
+    home_x: 10.0
+    home_y: 4.0
+    home_z: 0.0
+
+    # --- 飞行方向 (PX4 NED 主飞行轴) ---
+    flight_axis: "north"          # "east" | "north" — 主飞行轴朝向
+    drop_distance: 32.5           # Home → 投放区距离 (m, NED 沿 flight_axis)
+    recon_distance: 57.5          # Home → 侦察区距离 (m, NED 沿 flight_axis)
+
     # --- 任务全局参数 ---
     takeoff_height: 5.0           # 巡航飞行高度 (m, NED z 负值)
     waypoint_tolerance: 0.5       # 航点到达容差 (m)
@@ -22,20 +33,20 @@
     max_drops: 2                  # 最大投放次数 (需与 servo pwm_positions 长度-1 一致)
 
     # --- Area 1: 投放区 ---
-    # Gazebo x:40~45, y:0~8 → NED: north=[-4,4], east=[30,35]
-    area1_north_min: -4.0
-    area1_north_max: 4.0
-    area1_east_min: 30.0
-    area1_east_max: 35.0
+    # NED: north=[30,35], east=[-4,4] (Home 北 32.5m, 左右 ±4m)
+    area1_north_min: 30.0
+    area1_north_max: 35.0
+    area1_east_min: -4.0
+    area1_east_max: 4.0
     area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
     area1_search_altitude: 5.0    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
-    # Gazebo x:65~70, y:0~8 → NED: north=[-4,4], east=[55,60]
-    area2_north_min: -4.0
-    area2_north_max: 4.0
-    area2_east_min: 55.0
-    area2_east_max: 60.0
+    # NED: north=[55,60], east=[-4,4] (Home 北 57.5m, 左右 ±4m)
+    area2_north_min: 55.0
+    area2_north_max: 60.0
+    area2_east_min: -4.0
+    area2_east_max: 4.0
     area2_altitude: 2.5           # 侦察区低空扫描高度 (m, NED z 负值)
 
     # --- 弓字形覆盖参数 ---

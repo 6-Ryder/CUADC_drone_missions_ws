@@ -98,28 +98,17 @@ class Telemetry:
 # 坐标变换
 # ============================================================
 
-# World(ENU) 原点在 NED 坐标系中的偏移.
-# 仿真: H 在 Gazebo World 中位于 (10, 4, 0) — 通过 configure_home(10,4,0) 设置.
-# 真机: Home=解锁点, World(ENU) 以 Home 为原点 → 偏移 (0, 0, 0).
 _home_world_x: float = 0.0
 _home_world_y: float = 0.0
 _home_world_z: float = 0.0
 
-# 保留旧名称作为兼容别名 (deprecated, 请用 configure_home)
-H_WORLD_X = 0.0
-H_WORLD_Y = 0.0
-H_WORLD_Z = 0.0
+
+H_WORLD_X = 0.0   # east
+H_WORLD_Y = 0.0    # north
+H_WORLD_Z = 0.0    # up
 
 
 def configure_home(world_x: float = 0.0, world_y: float = 0.0, world_z: float = 0.0) -> None:
-    """
-    设置 World(ENU) 原点对应的 NED 偏移.
-
-    仿真调用: configure_home(10.0, 4.0, 0.0)
-    真机调用: configure_home(0.0, 0.0, 0.0)  # Home=原点
-
-    会影响 world_to_ned / ned_to_world / ned_to_world_pose 的行为.
-    """
     global _home_world_x, _home_world_y, _home_world_z, H_WORLD_X, H_WORLD_Y, H_WORLD_Z
     _home_world_x = H_WORLD_X = float(world_x)
     _home_world_y = H_WORLD_Y = float(world_y)
