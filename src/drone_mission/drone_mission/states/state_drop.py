@@ -77,6 +77,9 @@ class DropState:
         self._descent_initial_error = 0.0
         self._visual_aligner.reset()
         self._precision_aligner.reset()
+        # 停滞检测: pixel_error 在低值附近振荡但无法收敛 → 提前触发最终下降
+        self._stall_start_time: float = 0.0
+        self._stall_ref_error: float = float("inf")
 
         if self._sub_state == "DESCEND_TO_DROP":
             self._enter_descend()
@@ -152,6 +155,54 @@ class DropState:
                     return None
                 self._fsm.get_logger().info("DESCEND: 到达投放高度且目标居中")
                 return "EXECUTE_DROP"
+
+            # ── 停滞检测: pixel_error 在低值振荡但无法收敛 → 提前触发最终下降 ──
+            stall_threshold = 25.0
+            stall_stable_band = 5.0
+            stall_duration = 2.0
+            if (math.isfinite(status.pixel_error)
+                    and status.pixel_error < stall_threshold
+                    and not self._final_descent_started):
+                now_stall = time.time()
+                if self._stall_start_time == 0.0:
+                    self._stall_start_time = now_stall
+                    self._stall_ref_error = status.pixel_error
+                elif abs(status.pixel_error - self._stall_ref_error) > stall_stable_band:
+                    self._stall_start_time = now_stall
+                    self._stall_ref_error = status.pixel_error
+                elif now_stall - self._stall_start_time > stall_duration:
+                    self._fsm.get_logger().info(
+                        f"DESCEND: pixel_error={status.pixel_error:.1f}px 停滞 "
+                        f"{now_stall - self._stall_start_time:.1f}s, 提前触发最终下降"
+                    )
+                    self._stall_start_time = 0.0
+                    self._stall_ref_error = float("inf")
+                    if self._start_final_descent_if_needed():
+                        return None
+                    # 已在最终下降阶段 → 直接投
+                    self._fsm.get_logger().info("DESCEND: 最终下降停滞, 直接执行投放")
+                    return "EXECUTE_DROP"
+            elif self._final_descent_started:
+                # 已在最终下降, 停滞 → 直接投放
+                now_stall = time.time()
+                if self._stall_start_time == 0.0:
+                    self._stall_start_time = now_stall
+                    self._stall_ref_error = status.pixel_error
+                elif abs(status.pixel_error - self._stall_ref_error) > stall_stable_band:
+                    self._stall_start_time = now_stall
+                    self._stall_ref_error = status.pixel_error
+                elif now_stall - self._stall_start_time > stall_duration:
+                    self._fsm.get_logger().info(
+                        "DESCEND: 最终下降停滞, 直接执行投放 "
+                        f"pixel_error={status.pixel_error:.1f}px"
+                    )
+                    self._stall_start_time = 0.0
+                    self._stall_ref_error = float("inf")
+                    return "EXECUTE_DROP"
+            else:
+                self._stall_start_time = 0.0
+                self._stall_ref_error = float("inf")
+            # ── 停滞检测结束 ──
 
             align_timeout = self._align_timeout()
             if elapsed > align_timeout:
@@ -391,11 +442,26 @@ class DropState:
         return self._visual_aligner.command_alignment(drop_h)
 
     def _drop_target_is_centered(self) -> bool:
-        """投放许可: 当前帧必须看到目标, 且像素中心稳定接近画面中心."""
+        """投放许可: release_ready 锁存 + 当前帧像素误差仍在阈值内."""
         if self._precision_enabled():
             status = self._precision_aligner.last_status
             stable_frames = int(self._fsm.get_param("precision_align_stable_frames", 4))
             centered = status.release_ready and status.stable_count >= stable_frames
+            if centered:
+                # release_ready 锁存后到投放执行有 ~1s 窗口,
+                # 必须复查当前帧像素误差仍在阈值内, 防止锁存后漂移
+                raw_tol = float(
+                    self._fsm.get_param("precision_align_raw_pixel_tolerance", 9.0))
+                smooth_tol = float(
+                    self._fsm.get_param("precision_align_smooth_pixel_tolerance", 7.0))
+                if (status.pixel_error > raw_tol
+                        or status.smooth_pixel_error > smooth_tol):
+                    self._warn_descend_throttled(
+                        "DESCEND: 投放许可锁存后像素误差超标 "
+                        f"raw={status.pixel_error:.1f}>{raw_tol:.0f}px "
+                        f"smooth={status.smooth_pixel_error:.1f}>{smooth_tol:.0f}px"
+                    )
+                    return False
             if not centered:
                 self._warn_descend_throttled(
                     "DESCEND: 精校投放许可失败 "
