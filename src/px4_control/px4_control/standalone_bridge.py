@@ -118,6 +118,11 @@ class StandaloneBridge:
         self._velocity_mode: bool = False
         self._vel_target: Tuple[float, float, float] = (0.0, 0.0, 0.0)
 
+        # ---- 指令限流: 防止 DDS 丢包/节点重启时以 20Hz 轰炸飞控 ----
+        self._last_arm_cmd_time: float = 0.0
+        self._last_offboard_cmd_time: float = 0.0
+        self._telemetry_ready: bool = False  # 收到第一条 VehicleStatus 后才允许发指令
+
         # ---- Publishers (relay topics → px4_bridge) ----
         self._sp_pub = node.create_publisher(Point, "/drone/cmd_setpoint_ned", 10)
         self._vel_pub = node.create_publisher(Twist, "/drone/cmd_velocity_ned", 10)
@@ -183,6 +188,7 @@ class StandaloneBridge:
     def _status_cb(self, msg: VehicleStatus) -> None:
         self._armed = (msg.arming_state == 2)
         self._offboard = (msg.nav_state == self.NAV_STATE_OFFBOARD)
+        self._telemetry_ready = True  # 收到状态后允许发送指令
 
     def _land_cb(self, msg: VehicleLandDetected) -> None:
         self._landed = msg.landed
@@ -258,10 +264,34 @@ class StandaloneBridge:
     # -- Commands --
 
     def set_offboard_mode(self) -> None:
+        """请求 Offboard 模式 (限流: 1Hz, 遥测就绪后)."""
+        if not self._telemetry_ready:
+            self._node.get_logger().warn(
+                "[StandaloneBridge] 跳过 set_offboard: 遥测未就绪"
+            )
+            return
+        if self._offboard:
+            return  # 已在 Offboard, 不重复发
+        now = time.time()
+        if now - self._last_offboard_cmd_time < 1.0:
+            return  # 1Hz 限流
+        self._last_offboard_cmd_time = now
         self._node.get_logger().info("[StandaloneBridge] 请求 Offboard 模式")
         self._send_command(self.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
 
     def arm(self) -> None:
+        """解锁请求 (限流: 1Hz, 遥测就绪后, 已解锁则跳过)."""
+        if not self._telemetry_ready:
+            self._node.get_logger().warn(
+                "[StandaloneBridge] 跳过 arm: 遥测未就绪"
+            )
+            return
+        if self._armed:
+            return  # 已解锁, 不重复发
+        now = time.time()
+        if now - self._last_arm_cmd_time < 1.0:
+            return  # 1Hz 限流
+        self._last_arm_cmd_time = now
         if self._sim_mode:
             self._node.get_logger().info("[StandaloneBridge] 解锁请求 (SITL force)")
             self._send_command(self.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
