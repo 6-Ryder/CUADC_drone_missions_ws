@@ -1,6 +1,6 @@
 # 无人机自主任务飞行 — 任务参数
 # 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
-# 原点: 起飞点 H (world: 10, 4, 0)
+# 原点: 起飞点 H (world: 4, 10, 0)
 # 飞行方向: 向北 (NED north 正方向)
 /mission_state_machine:
   ros__parameters:

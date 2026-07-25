@@ -118,7 +118,7 @@ def world_to_ned(world_x: float, world_y: float, world_z: float) -> Tuple[float,
     World: x=east, y=north, z=up
     NED:   x=north, y=east, z=down
 
-    仿真:  Home 在 Gazebo (10,4,0) → north=world_y-4, east=world_x-10
+    仿真:  Home 在 Gazebo (4,10,0) → north=world_y-10, east=world_x-4
     真机:  Home=原点(0,0,0) → north=world_y, east=world_x
     """
     north = world_y - _home_world_y
