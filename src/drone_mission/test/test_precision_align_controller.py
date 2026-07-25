@@ -25,6 +25,23 @@ class _Logger:
         pass
 
 
+class _Velocity:
+    def __init__(self, vn=0.0, ve=0.0, vd=0.0):
+        self.vn = vn
+        self.ve = ve
+        self.vd = vd
+
+
+class _Telemetry:
+    def __init__(self, velocity=None):
+        self.velocity = velocity or _Velocity()
+
+
+class _Bridge:
+    def get_telemetry(self):
+        return _Telemetry(_Velocity(0.0, 0.0, 0.0))
+
+
 class _Flight:
     def __init__(self):
         self.body_commands = []
@@ -71,6 +88,7 @@ class _Fsm:
         self.fc = _Flight()
         self.cylinder_selector = _Selector()
         self.clock = _Clock()
+        self.bridge = _Bridge()
 
     def get_param(self, key, default=None):
         return self.params.get(key, default)

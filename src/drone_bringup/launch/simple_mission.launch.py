@@ -39,20 +39,20 @@ def generate_launch_description():
         description="巡航飞行高度 (m)",
     )
     drop_x_arg = DeclareLaunchArgument(
-        "drop_x", default_value="10.0",
+        "drop_x", default_value="4.0",
         description="投放区 World X 坐标 (m)",
     )
     drop_y_arg = DeclareLaunchArgument(
-        "drop_y", default_value="36.5",
+        "drop_y", default_value="42.5",
         description="投放区 World Y 坐标 (m)",
     )
     home_x_arg = DeclareLaunchArgument(
-        "home_x", default_value="10.0",
-        description="起降点 World X 坐标 (m)",
+        "home_x", default_value="4.0",
+        description="起降点 World X (East) 坐标 (m)",
     )
     home_y_arg = DeclareLaunchArgument(
-        "home_y", default_value="4.0",
-        description="起降点 World Y 坐标 (m)",
+        "home_y", default_value="10.0",
+        description="起降点 World Y (North) 坐标 (m)",
     )
     loiter_time_arg = DeclareLaunchArgument(
         "loiter_time", default_value="5.0",
@@ -61,6 +61,14 @@ def generate_launch_description():
     sim_mode_arg = DeclareLaunchArgument(
         "sim_mode", default_value="true",
         description="true=SITL force arm(21196) / false=真机标准解锁(0)",
+    )
+    rc_require_arg = DeclareLaunchArgument(
+        "rc_require_arm_signal", default_value="true",
+        description="是否强制等待遥控器连接 (真机必须为 true)",
+    )
+    rc_min_channels_arg = DeclareLaunchArgument(
+        "rc_min_channels", default_value="4",
+        description="RC 最少有效通道数",
     )
 
     # ---- 节点 ----
@@ -96,6 +104,8 @@ def generate_launch_description():
             "home_y": LaunchConfiguration("home_y"),
             "loiter_time": LaunchConfiguration("loiter_time"),
             "sim_mode": LaunchConfiguration("sim_mode"),
+            "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
+            "rc_min_channels": LaunchConfiguration("rc_min_channels"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -121,6 +131,8 @@ def generate_launch_description():
         home_y_arg,
         loiter_time_arg,
         sim_mode_arg,
+        rc_require_arg,
+        rc_min_channels_arg,
         px4_bridge_node,
         mission_delayed,
     ])

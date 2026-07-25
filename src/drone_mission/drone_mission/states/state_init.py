@@ -47,16 +47,19 @@ class InitState:
         vision_alive = self._fsm.watchdog.is_alive("vision")
         servo_alive = self._fsm.watchdog.is_alive("servo")
         battery_ready = self._fsm.battery_ready
+        rc_ready = self._fsm.rc_ready
 
         elapsed = time.time() - self._start_time
 
         # 诊断日志
-        if int(elapsed) % 5 == 0 and elapsed > 0:
+        if elapsed - getattr(self, '_last_diag_log', 0) > 5.0:
+            self._last_diag_log = elapsed
             self._fsm.get_logger().info(
                 f"INIT: odom={self._odom_ready_count}, "
                 f"vision={'OK' if vision_alive else 'WAIT'}, "
                 f"servo={'OK' if servo_alive else 'WAIT'}, "
                 f"battery={'OK' if battery_ready else 'WAIT'}, "
+                f"rc={'OK' if rc_ready else 'WAIT'}, "
                 f"elapsed={elapsed:.0f}s"
             )
 
@@ -67,8 +70,9 @@ class InitState:
             and servo_alive
             and self._fsm.servo_ready
             and battery_ready
+            and rc_ready
         ):
-            self._fsm.get_logger().info("INIT: 系统就绪, 进入 ARM")
+            self._fsm.get_logger().info("INIT: 系统就绪 (含遥控器确认), 进入 ARM")
             return "ARM"
 
         # 关键节点未就绪时禁止解锁飞行.

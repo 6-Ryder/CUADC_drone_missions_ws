@@ -389,6 +389,15 @@ class PrecisionAlignController:
 
             # CUADC-style locked tracking: pixel continuity dominates; center
             # distance helps reacquire after altitude changes or short loss.
+            #
+            # 评分权重设计原则 (越小越好):
+            #   0.68 continuity_ratio  — 主项: 同一目标的帧间像素位移, 防止锁定跳变
+            #   0.32 center_ratio       — 辅项: 距画面中心的归一化距离, 倾向选居中的目标
+            #   0.08 world_ratio        — 弱项: 距预期 World 位置的距离, 仅在未锁定时生效
+            #  -0.04 confidence         — 微调: 轻微偏好高置信度 (负权重→置信度越高 score 越低)
+            #
+            # continuity_ratio 占主导 (~65%) 确保锁定的目标不会被画面边缘的新目标"抢走".
+            # world_ratio 权重很小 (~7%) 因为 World 坐标在高空时噪声大, 仅作弱先验.
             score = (
                 0.68 * continuity_ratio
                 + 0.32 * center_ratio

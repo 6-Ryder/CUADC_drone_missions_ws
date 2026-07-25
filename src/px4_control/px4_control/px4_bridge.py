@@ -35,6 +35,11 @@ from px4_msgs.msg import (
 )
 
 from px4_control.telemetry import (
+    NAV_STATE_OFFBOARD,
+    VEHICLE_CMD_COMPONENT_ARM_DISARM,
+    VEHICLE_CMD_DO_SET_MODE,
+    VEHICLE_CMD_NAV_LAND,
+    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH,
     Position, Attitude, Velocity, Telemetry, ned_to_world_pose,
     configure_home,
 )
@@ -79,22 +84,6 @@ class PX4Bridge(Node):
       /drone/pose                     → World 位姿 (50Hz, PoseStamped)
       /drone/telemetry                → 综合遥测 (10Hz)
     """
-
-    # PX4 Navigation State 常量
-    NAV_STATE_MANUAL = 0
-    NAV_STATE_ALTCTL = 1
-    NAV_STATE_POSCTL = 2
-    NAV_STATE_AUTO_MISSION = 3
-    NAV_STATE_AUTO_LOITER = 4
-    NAV_STATE_AUTO_RTL = 5
-    NAV_STATE_OFFBOARD = 14
-    NAV_STATE_LAND = 16
-
-    # VehicleCommand 常量
-    VEHICLE_CMD_DO_SET_MODE = 176
-    VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
-    VEHICLE_CMD_NAV_RETURN_TO_LAUNCH = 20
-    VEHICLE_CMD_NAV_LAND = 21
 
     def __init__(self):
         super().__init__("px4_bridge")
@@ -182,7 +171,7 @@ class PX4Bridge(Node):
         self._offboard_active: bool = False
         self._velocity_mode: bool = False  # True=速度控制, False=位置控制
         self._last_velocity_cmd = (0.0, 0.0, 0.0)  # 缓存速度指令, 避免心跳覆写
-
+        
         # ---- 订阅 Mission FSM 的 setpoint 指令 (NED) ----
         self._cmd_sp_sub = self.create_subscription(
             Point, "/drone/cmd_setpoint_ned", self._cmd_setpoint_cb, 10,
@@ -227,8 +216,8 @@ class PX4Bridge(Node):
         self.declare_parameter("transit_speed", 2.0)
         self.declare_parameter("return_speed", 3.0)
         self.declare_parameter("max_acceleration", 0.2)
-        self.declare_parameter("home_x", 10.0)
-        self.declare_parameter("home_y", 4.0)
+        self.declare_parameter("home_x", 4.0)
+        self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)
 
     # ================================================================
@@ -260,7 +249,7 @@ class PX4Bridge(Node):
         self._watchdog.feed("px4_status")
 
         self._current_telemetry.status.armed = (msg.arming_state == 2)
-        self._current_telemetry.status.offboard_mode = (msg.nav_state == self.NAV_STATE_OFFBOARD)
+        self._current_telemetry.status.offboard_mode = (msg.nav_state == NAV_STATE_OFFBOARD)
         self._current_telemetry.status.navigation_state = msg.nav_state
 
         self._armed = (msg.arming_state == 2)
@@ -567,7 +556,7 @@ class PX4Bridge(Node):
         """切换到 Offboard 模式."""
         self.get_logger().info("请求切换到 Offboard 模式...")
         self.send_command(
-            self.VEHICLE_CMD_DO_SET_MODE,
+            VEHICLE_CMD_DO_SET_MODE,
             param1=1.0,  # custom mode
             param2=6.0,  # offboard
         )
@@ -576,7 +565,7 @@ class PX4Bridge(Node):
         """解锁无人机."""
         self.get_logger().info("发送解锁指令...")
         self.send_command(
-            self.VEHICLE_CMD_COMPONENT_ARM_DISARM,
+            VEHICLE_CMD_COMPONENT_ARM_DISARM,
             param1=1.0,  # arm
         )
 
@@ -584,28 +573,32 @@ class PX4Bridge(Node):
         """上锁无人机."""
         self.get_logger().info("发送上锁指令...")
         self.send_command(
-            self.VEHICLE_CMD_COMPONENT_ARM_DISARM,
+            VEHICLE_CMD_COMPONENT_ARM_DISARM,
             param1=0.0,  # disarm
         )
 
     def force_disarm(self):
-        """强制上锁 (紧急)."""
+        """强制上锁 (紧急).
+
+        PX4 Offboard 模式下会拒绝非手动来源的 disarm, 必须传 magic=21196
+        才能绕过此限制, 仿真和真机都是如此.
+        """
         self.get_logger().warn("强制上锁!")
         self.send_command(
-            self.VEHICLE_CMD_COMPONENT_ARM_DISARM,
+            VEHICLE_CMD_COMPONENT_ARM_DISARM,
             param1=0.0,
-            param2=21196.0,  # force
+            param2=21196.0,
         )
 
     def land_at_current(self):
         """原地降落."""
         self.get_logger().info("请求着陆...")
-        self.send_command(self.VEHICLE_CMD_NAV_LAND)
+        self.send_command(VEHICLE_CMD_NAV_LAND)
 
     def return_to_launch(self):
         """RTL 返航."""
         self.get_logger().info("请求 RTL 返航...")
-        self.send_command(self.VEHICLE_CMD_NAV_RETURN_TO_LAUNCH)
+        self.send_command(VEHICLE_CMD_NAV_RETURN_TO_LAUNCH)
 
 
 # ============================================================

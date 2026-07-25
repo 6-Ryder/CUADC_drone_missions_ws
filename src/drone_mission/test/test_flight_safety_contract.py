@@ -251,12 +251,30 @@ def test_navigation_timeouts_do_not_advance_the_mission():
 
 
 def test_landing_timeout_never_reports_success_or_force_disarms():
+    """
+    超时路径用 land_at_current 而非 force_disarm.
+
+    force_disarm 出现在 land() 中是正确设计 — 着陆检测成功后 PX4 需要
+    force_disarm(magic=21196) 才能上锁, 否则会被"非手动 disarm"拒绝.
+    本测试仅验证超时路径的安全契约: 15s 超时后切入 PX4 LAND 模式,
+    不调用 force_disarm, 也不返回 True.
+    """
     source = (
         SOURCE_ROOT / "px4_control/px4_control/flight_controller.py"
     ).read_text(encoding="utf-8")
-    land_source = source.split("    def land(self)", 1)[1].split(
+    land_method = source.split("    def land(self)", 1)[1].split(
         "    def force_disarm", 1,
     )[0]
 
-    assert "force_disarm" not in land_source
-    assert "land_at_current" in land_source
+    # 正常着陆路径包含 force_disarm — 这是正确行为
+    assert "force_disarm" in land_method, \
+        "land() 必须在着陆检测成功后调用 force_disarm"
+
+    # 超时路径: 只使用 land_at_current, 不使用 force_disarm
+    _, _, after_descending_branch = land_method.partition(
+        "self._bridge.force_disarm()"
+    )
+    assert "land_at_current" in after_descending_branch, \
+        "超时路径必须调用 land_at_current"
+    assert "force_disarm" not in after_descending_branch, \
+        "超时路径不得调用 force_disarm"

@@ -4,9 +4,9 @@
 # 飞行方向: 向北 (NED north 正方向)
 /mission_state_machine:
   ros__parameters:
-    # --- 坐标系原点 ---
-    home_x: 10.0
-    home_y: 4.0
+    # --- 坐标系原点 (北向场地: World X=East, Y=North) ---
+    home_x: 4.0
+    home_y: 10.0
     home_z: 0.0
 
     # --- 飞行方向 (PX4 NED 主飞行轴) ---
@@ -33,7 +33,7 @@
     max_drops: 2                  # 最大投放次数 (需与 servo pwm_positions 长度-1 一致)
 
     # --- Area 1: 投放区 ---
-    # NED: north=[30,35], east=[-4,4] (Home 北 32.5m, 左右 ±4m)
+    # NED: north=[30,35], east=[-4,4] (Home 北 32.5m, 横跨 X:0~8m)
     area1_north_min: 30.0
     area1_north_max: 35.0
     area1_east_min: -4.0
@@ -42,7 +42,7 @@
     area1_search_altitude: 5.0    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
-    # NED: north=[55,60], east=[-4,4] (Home 北 57.5m, 左右 ±4m)
+    # NED: north=[55,60], east=[-4,4] (Home 北 57.5m, 横跨 X:0~8m)
     area2_north_min: 55.0
     area2_north_max: 60.0
     area2_east_min: -4.0

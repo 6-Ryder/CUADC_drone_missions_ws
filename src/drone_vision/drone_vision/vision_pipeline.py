@@ -215,6 +215,10 @@ class VisionPipelineNode(Node):
         self.declare_parameter("landing_circle_min_area", 80)
         self.declare_parameter("landing_H_orientation_enable", True)
         # 覆盖
+        self.declare_parameter("coverage_zone_x_min", 6.0)
+        self.declare_parameter("coverage_zone_x_max", 14.0)
+        self.declare_parameter("coverage_zone_y_min", 59.0)
+        self.declare_parameter("coverage_zone_y_max", 64.0)
         self.declare_parameter("coverage_grid_resolution", 0.5)
         self.declare_parameter("coverage_fov_half_angle", 35.0)
         self.declare_parameter("coverage_complete_ratio", 0.95)

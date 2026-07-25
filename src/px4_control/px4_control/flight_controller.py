@@ -29,20 +29,22 @@ class FlightController:
     所有速度使用 NED 坐标系 (vn, ve, vd).
     """
 
-    def __init__(self, bridge: PX4Bridge):
+    def __init__(self, bridge):
         """
         初始化飞行控制接口.
 
         Parameters
         ----------
-        bridge : PX4Bridge
-            PX4 通信桥接实例
+        bridge : PX4Bridge or StandaloneBridge
+            PX4 通信桥接实例. 两种实现共享相同接口:
+            is_armed / arm / set_offboard_mode / get_current_position /
+            set_position_target / set_velocity_target / is_landed / force_disarm /
+            land_at_current / get_current_attitude / get_parameter / get_telemetry
 
         """
         self._bridge = bridge
-        self._node = bridge  # PX4Bridge 本身是 Node
 
-        # 参数缓存
+        # 参数缓存 (bridge 通过 get_parameter 委托到所属 ROS2 Node)
         self._takeoff_height = bridge.get_parameter("takeoff_height").value
         self._waypoint_tolerance = bridge.get_parameter("waypoint_tolerance").value
         self._takeoff_tolerance = bridge.get_parameter("takeoff_tolerance").value
@@ -236,18 +238,20 @@ class FlightController:
             self._land_start_time = time.time()
             self._land_mode_requested = False
             # 水平悬停, 缓慢下降
-            self._bridge.set_velocity_target(0.0, 0.0, 0.3)  # 0.3 m/s 下降
+            # PX4 LNDMC_Z_VEL_MAX=0.25, 下降速度必须 < 此阈值
+            # 才能提前进入 maybe_landed 状态, 避免单靠触地瞬间 IMU 信号
+            self._bridge.set_velocity_target(0.0, 0.0, 0.2)  # 0.2 m/s (< 0.25)
             return False
 
         # 下降中
         if self._bridge.is_landed():
             self._landing = False
-            # 着陆后上锁
-            self._bridge.disarm()
+            # 着陆确认后用 force_disarm 避免被"非手动 disarm"拒绝
+            self._bridge.force_disarm()
             return True
 
-        # 超时保护
-        if time.time() - self._land_start_time > 30.0:
+        # 超时保护: 15s 后切 LAND mode (原来 30s 太长)
+        if time.time() - self._land_start_time > 15.0:
             if not self._land_mode_requested:
                 self._bridge.land_at_current()
                 self._land_mode_requested = True

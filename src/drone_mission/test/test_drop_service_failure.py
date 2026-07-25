@@ -9,7 +9,8 @@ from drone_mission.states.state_init import InitState
 class _Context:
     def __init__(self):
         self._drop_result_consumed = False
-        self._drop_future = None
+        self._drop_service_failed = True  # 模拟舵机服务不可用
+        self._drop_sent_ok = False
         self._drop_count = 0
         self._drop_success_count = 0
 
@@ -58,6 +59,7 @@ class _InitContext:
     odom_ready = True
     servo_ready = False
     battery_ready = True
+    rc_ready = True
     logger = type("TaskLogger", (), {"log_state": lambda *_args: None})()
 
     @staticmethod

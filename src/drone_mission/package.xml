@@ -8,6 +8,7 @@
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
+  <depend>px4_msgs</depend>
   <depend>drone_interfaces</depend>
   <depend>px4_control</depend>
   <depend>drone_vision</depend>

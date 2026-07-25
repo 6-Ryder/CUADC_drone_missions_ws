@@ -63,7 +63,7 @@ class PX4CommandServo:
         """发送 DO_SET_ACTUATOR VehicleCommand."""
         cmd = VehicleCommand()
         cmd.timestamp = self._node.get_clock().now().nanoseconds // 1000
-        cmd.command = 187  # VEHICLE_CMD_DO_SET_ACTUATOR
+        cmd.command = VehicleCommand.VEHICLE_CMD_DO_SET_ACTUATOR
 
         # 将 value 填入对应的 param 槽位, 其余为 NaN
         params = [float('nan')] * 7
@@ -240,11 +240,14 @@ class ServoController(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = ServoController()
+    executor = rclpy.executors.MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()
 

@@ -351,7 +351,7 @@ class PathPlanner:
     def plan_return(
         self,
         from_xyz: Tuple[float, float, float],
-        home_xyz: Tuple[float, float, float] = (10.0, 4.0, 5.0),
+        home_xyz: Tuple[float, float, float] = (4.0, 10.0, 5.0),
     ) -> List[dict]:
         """
         生成返航航点 (World 坐标).

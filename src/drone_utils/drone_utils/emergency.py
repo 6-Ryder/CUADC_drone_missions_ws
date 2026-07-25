@@ -89,6 +89,11 @@ class EmergencyHandler:
         self._timeout_active: bool = False
         self._gps_active: bool = False
 
+        # 电池 debounce: 防止瞬时电流波动触发误报
+        self._battery_critical_count: int = 0
+        self._battery_critical_debounce_ticks: int = 10  # 20Hz 下=0.5s
+        self._battery_warning_active: bool = False  # 只在首次触发时计数
+
     # ================================================================
     # 更新接口
     # ================================================================
@@ -143,16 +148,26 @@ class EmergencyHandler:
         """
         now = time.time()
 
-        # 1. 严重低电量 → 强制返航 (无 debounce, 立即触发)
+        # 1. 严重低电量 → debounce 后再触发 RTL, 防止瞬时电流波动误判
         if self._battery_remaining <= self.battery_critical:
-            self._last_level = EmergencyLevel.RTL
-            return EmergencyLevel.RTL
-
-        # 2. 低电量告警 (无 debounce, 每次 check 都报)
-        if self._battery_remaining <= self.battery_warning:
-            self._warning_count += 1
+            self._battery_critical_count += 1
+            if self._battery_critical_count >= self._battery_critical_debounce_ticks:
+                self._last_level = EmergencyLevel.RTL
+                return EmergencyLevel.RTL
             self._last_level = EmergencyLevel.WARN
             return EmergencyLevel.WARN
+        else:
+            self._battery_critical_count = max(0, self._battery_critical_count - 1)
+
+        # 2. 低电量告警 — 仅在首次触发时计一次, 防止 20Hz 循环炸穿计数器
+        if self._battery_remaining <= self.battery_warning:
+            if not self._battery_warning_active:
+                self._battery_warning_active = True
+                self._warning_count += 1
+            self._last_level = EmergencyLevel.WARN
+            return EmergencyLevel.WARN
+        else:
+            self._battery_warning_active = False
 
         # 3. Offboard 丢失 → 只在首次触发时计一次 error
         if not self._offboard_alive:

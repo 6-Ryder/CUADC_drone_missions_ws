@@ -72,6 +72,9 @@ class DropManager:
         """
         执行一次投放: 舵机移动到 positions[drop_count + 1].
 
+        注意: 舵机动作后需要等待 delay_ms 确保机械到位.
+        调用方应使用 MultiThreadedExecutor 避免此处的同步等待阻塞其他回调.
+
         Returns
         -------
         bool: 投放是否成功
@@ -92,7 +95,7 @@ class DropManager:
 
         try:
             success = self._servo.set_pwm(target_pwm)
-            if success:
+            if success and self._delay_s > 0:
                 time.sleep(self._delay_s)
         except Exception:
             success = False

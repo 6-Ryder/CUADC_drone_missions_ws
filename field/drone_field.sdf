@@ -3,27 +3,27 @@
   <!--
     无人机飞行场地 - Drone Flight Field
     =====================================
-    场地总尺寸: 70m (长) × 8m (宽)
+    场地总尺寸: 70m (长/North) × 8m (宽/East) — 北向布局
 
-    子区域划分 (从左到右):
-      准备区 (Preparation):    x:  0m ~  7m, 长 7m,  绿色
-      起降区 (Takeoff/Landing): x:  7m ~ 40m, 长 33m, 深灰色
-        - 起降点: 直径 80cm 圆形, 圆心 x=10m, y=4m, 中心有 "H" 标识
-        - 起飞线: 虚线, x=12m, 贯穿场地宽边
-      投放区 (Drop):           x: 40m ~ 45m, 长 5m, 宽 8m
-        - 起降点(x=10m)前 30m
+    子区域划分 (从南到北, World Y 轴方向):
+      准备区 (Preparation):    y:  0m ~  7m, 长 7m,  绿色
+      起降区 (Takeoff/Landing): y:  7m ~ 40m, 长 33m, 深灰色
+        - 起降点: 直径 80cm 圆形, 圆心 x=4m, y=10m (World: East=4, North=10), 中心有 "H" 标识
+        - 起飞线: 虚线, y=12m, 贯穿场地宽边 (East 方向, X: 0~8m)
+      投放区 (Drop):           y: 40m ~ 45m (North偏移 32.5m), 长 5m, 横跨 X:0~8m
+        - 起降点(y=10m) 北 32.5m (NED North=32.5)
         - 3 个白色圆筒 (h=30cm): 1号Ø15cm, 2号Ø20cm, 3号Ø25cm, 随机放置
         - A 区 (有效): 筒内区域
         - B 区 (有效): 筒心向外延伸直径 1m 的圆环区域 → 蓝色
         - 无效区: 投放区中除 A、B 区以外的区域 → 黄色
-      间隔区 (Gap):            x: 45m ~ 65m, 长 20m, 地面原色
-      侦察区 (Reconnaissance): x: 65m ~ 70m, 长 5m,  橙色
+      间隔区 (Gap):            y: 45m ~ 65m, 长 20m, 横跨 X:0~8m
+      侦察区 (Reconnaissance): y: 65m ~ 70m (North偏移 57.5m), 长 5m, 横跨 X:0~8m
         - 5 个中空白色圆筒 (Ø20cm, h=15cm, 壁厚 0.5cm), 随机放置
         - 其中 3 个筒内各放 12×12cm 危险品标识板 (贴地朝上)
         - 标识: 易燃(橙)/健康危害(蓝)/危险(红) — 来自 PDF
       投放区/侦察区圆筒均为开口杯形中空圆柱筒, 外壁厚 0.5cm
 
-    区域分界线 (细红线): x = 0m, 7m, 40m, 45m, 65m, 70m
+    区域分界线: y = 0m, 7m, 40m, 45m, 65m, 70m (沿 World Y / North 轴)
 
     启动命令:
       gz sim drone_field.sdf
@@ -39,10 +39,10 @@
       <sky></sky>
     </scene>
 
-    <!-- GUI 默认相机 — 对准无人机初始位置 (10, 4) 上方 -->
+    <!-- GUI 默认相机 — 对准无人机初始位置 (4, 10) 上方 (World X=4,Y=10) -->
     <gui fullscreen="false">
       <camera name="user_camera">
-        <pose>10 -6 6 0 1.0 -1.57</pose>
+        <pose>-6 10 6 0 1.0 -1.57</pose>
         <view_controller>orbit</view_controller>
         <projection_type>perspective</projection_type>
       </camera>
@@ -50,7 +50,7 @@
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
-      <pose>35 4 20 0 0 0</pose>
+      <pose>4 35 20 0 0 0</pose>
       <diffuse>0.9 0.9 0.8 1</diffuse>
       <specular>0.3 0.3 0.3 1</specular>
       <attenuation>
@@ -123,12 +123,12 @@
     <!-- ============================================================ -->
     <model name="field_base">
       <static>true</static>
-      <pose>35 4 0.001 0 0 0</pose>
+      <pose>4 35 0.001 0 0 0</pose>
       <link name="base_link">
         <visual name="base_visual">
           <geometry>
             <box>
-              <size>70 8 0.01</size>
+              <size>8 70 0.01</size>
             </box>
           </geometry>
           <material>
@@ -146,9 +146,9 @@
       <static>true</static>
       <!-- 底边 (y=0) -->
       <link name="border_bottom">
-        <pose>35 0 0.25 0 0 0</pose>
+        <pose>0 35 0.25 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>70.1 0.1 0.5</size></box></geometry>
+          <geometry><box><size>0.1 70.1 0.5</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -157,9 +157,9 @@
       </link>
       <!-- 顶边 (y=8) -->
       <link name="border_top">
-        <pose>35 8 0.25 0 0 0</pose>
+        <pose>8 35 0.25 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>70.1 0.1 0.5</size></box></geometry>
+          <geometry><box><size>0.1 70.1 0.5</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -168,9 +168,9 @@
       </link>
       <!-- 左边 (x=0) -->
       <link name="border_left">
-        <pose>0 4 0.25 0 0 1.5708</pose>
+        <pose>4 0 0.25 0 0 1.5708</pose>
         <visual name="visual">
-          <geometry><box><size>8.1 0.1 0.5</size></box></geometry>
+          <geometry><box><size>0.1 8.1 0.5</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -179,9 +179,9 @@
       </link>
       <!-- 右边 (x=70) -->
       <link name="border_right">
-        <pose>70 4 0.25 0 0 1.5708</pose>
+        <pose>4 70 0.25 0 0 1.5708</pose>
         <visual name="visual">
-          <geometry><box><size>8.1 0.1 0.5</size></box></geometry>
+          <geometry><box><size>0.1 8.1 0.5</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -195,12 +195,12 @@
     <!-- ============================================================ -->
     <model name="zone_preparation">
       <static>true</static>
-      <pose>3.5 4 0.006 0 0 0</pose>
+      <pose>4 3.5 0.006 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <box>
-              <size>7 8 0.01</size>
+              <size>8 7 0.01</size>
             </box>
           </geometry>
           <material>
@@ -216,12 +216,12 @@
     <!-- ============================================================ -->
     <model name="zone_takeoff_landing">
       <static>true</static>
-      <pose>23.5 4 0.006 0 0 0</pose>
+      <pose>4 23.5 0.006 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <box>
-              <size>33 8 0.01</size>
+              <size>8 33 0.01</size>
             </box>
           </geometry>
           <material>
@@ -238,7 +238,7 @@
     <!-- ============================================================ -->
     <model name="landing_pad">
       <static>true</static>
-      <pose>10 4 0.010 0 0 0</pose>
+      <pose>4 10 0.010 0 0 0</pose>
       <link name="pad_base">
         <!-- 白色外圆, 直径 80cm = 半径 0.4m -->
         <visual name="pad_base_visual">
@@ -278,11 +278,11 @@
       <static>true</static>
       <!-- H 左竖条: center at (9.87, 4, 0.012), size=(0.04, 0.35, 0.004) -->
       <link name="h_left_bar">
-        <pose>9.87 4 0.020 0 0 0</pose>
+        <pose>4 9.87 0.020 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
-              <size>0.04 0.35 0.004</size>
+              <size>0.35 0.04 0.004</size>
             </box>
           </geometry>
           <material>
@@ -293,11 +293,11 @@
       </link>
       <!-- H 右竖条: center at (10.13, 4, 0.012), size=(0.04, 0.35, 0.004) -->
       <link name="h_right_bar">
-        <pose>10.13 4 0.020 0 0 0</pose>
+        <pose>4 10.13 0.020 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
-              <size>0.04 0.35 0.004</size>
+              <size>0.35 0.04 0.004</size>
             </box>
           </geometry>
           <material>
@@ -308,11 +308,11 @@
       </link>
       <!-- H 横条: center at (10, 4, 0.012), size=(0.30, 0.04, 0.004) -->
       <link name="h_cross_bar">
-        <pose>10 4 0.020 0 0 0</pose>
+        <pose>4 10 0.020 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
-              <size>0.30 0.04 0.004</size>
+              <size>0.04 0.30 0.004</size>
             </box>
           </geometry>
           <material>
@@ -332,9 +332,9 @@
       <static>true</static>
       <!-- 段 1: y=0.55 -->
       <link name="seg_01">
-        <pose>12 0.55 0.012 0 0 0</pose>
+        <pose>0.55 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -343,9 +343,9 @@
       </link>
       <!-- 段 2: y=1.35 -->
       <link name="seg_02">
-        <pose>12 1.35 0.012 0 0 0</pose>
+        <pose>1.35 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -354,9 +354,9 @@
       </link>
       <!-- 段 3: y=2.15 -->
       <link name="seg_03">
-        <pose>12 2.15 0.012 0 0 0</pose>
+        <pose>2.15 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -365,9 +365,9 @@
       </link>
       <!-- 段 4: y=2.95 -->
       <link name="seg_04">
-        <pose>12 2.95 0.012 0 0 0</pose>
+        <pose>2.95 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -376,9 +376,9 @@
       </link>
       <!-- 段 5: y=3.75 -->
       <link name="seg_05">
-        <pose>12 3.75 0.012 0 0 0</pose>
+        <pose>3.75 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -387,9 +387,9 @@
       </link>
       <!-- 段 6: y=4.55 -->
       <link name="seg_06">
-        <pose>12 4.55 0.012 0 0 0</pose>
+        <pose>4.55 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -398,9 +398,9 @@
       </link>
       <!-- 段 7: y=5.35 -->
       <link name="seg_07">
-        <pose>12 5.35 0.012 0 0 0</pose>
+        <pose>5.35 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -409,9 +409,9 @@
       </link>
       <!-- 段 8: y=6.15 -->
       <link name="seg_08">
-        <pose>12 6.15 0.012 0 0 0</pose>
+        <pose>6.15 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -420,9 +420,9 @@
       </link>
       <!-- 段 9: y=6.95 -->
       <link name="seg_09">
-        <pose>12 6.95 0.012 0 0 0</pose>
+        <pose>6.95 12 0.012 0 0 0</pose>
         <visual name="visual">
-          <geometry><box><size>0.04 0.5 0.005</size></box></geometry>
+          <geometry><box><size>0.5 0.04 0.005</size></box></geometry>
           <material>
             <ambient>1 1 1 1</ambient>
             <diffuse>1 1 1 1</diffuse>
@@ -440,12 +440,12 @@
     <!-- 投放区底板 (黄色 — 无效区) -->
     <model name="zone_drop">
       <static>true</static>
-      <pose>42.5 4 0.006 0 0 0</pose>
+      <pose>4 42.5 0.006 0 0 0</pose>
       <link name="base_link">
         <visual name="base_visual">
           <geometry>
             <box>
-              <size>5 8 0.01</size>
+              <size>8 5 0.01</size>
             </box>
           </geometry>
           <material>
@@ -464,7 +464,7 @@
       <static>true</static>
       <!-- 1号筒 B区: 圆心 (41.5, 3.0), r=0.5m -->
       <link name="b_zone_1">
-        <pose>41.5 3.0 0.010 0 0 0</pose>
+        <pose>3.0 41.5 0.010 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <cylinder>
@@ -480,7 +480,7 @@
       </link>
       <!-- 2号筒 B区: 圆心 (43.0, 5.5), r=0.5m -->
       <link name="b_zone_2">
-        <pose>43.0 5.5 0.010 0 0 0</pose>
+        <pose>5.5 43.0 0.010 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <cylinder>
@@ -496,7 +496,7 @@
       </link>
       <!-- 3号筒 B区: 圆心 (44.0, 2.0), r=0.5m -->
       <link name="b_zone_3">
-        <pose>44.0 2.0 0.010 0 0 0</pose>
+        <pose>2.0 44.0 0.010 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <cylinder>
@@ -528,7 +528,7 @@
     <model name="drop_cylinders">
       <static>true</static>
       <link name="cylinder_1">
-        <pose>41.5 3.0 0.1500 0 0 0</pose>
+        <pose>3.0 41.5 0.1500 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.0750</radius><length>0.3000</length></cylinder></geometry>
         </collision>
@@ -550,7 +550,7 @@
         </visual>
       </link>
       <link name="cylinder_2">
-        <pose>43.0 5.5 0.1500 0 0 0</pose>
+        <pose>5.5 43.0 0.1500 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.1000</radius><length>0.3000</length></cylinder></geometry>
         </collision>
@@ -572,7 +572,7 @@
         </visual>
       </link>
       <link name="cylinder_3">
-        <pose>44.0 2.0 0.1500 0 0 0</pose>
+        <pose>2.0 44.0 0.1500 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.1250</radius><length>0.3000</length></cylinder></geometry>
         </collision>
@@ -601,12 +601,12 @@
     <!-- ============================================================ -->
     <model name="zone_reconnaissance">
       <static>true</static>
-      <pose>67.5 4 0.006 0 0 0</pose>
+      <pose>4 67.5 0.006 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <box>
-              <size>5 8 0.01</size>
+              <size>8 5 0.01</size>
             </box>
           </geometry>
           <material>
@@ -623,7 +623,7 @@
     <model name="recon_cylinders">
       <static>true</static>
       <link name="recon_cyl_1">
-        <pose>66.0 2.0 0.0750 0 0 0</pose>
+        <pose>2.0 66.0 0.0750 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
         </collision>
@@ -645,7 +645,7 @@
         </visual>
       </link>
       <link name="recon_cyl_2">
-        <pose>67.5 5.5 0.0750 0 0 0</pose>
+        <pose>5.5 67.5 0.0750 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
         </collision>
@@ -667,7 +667,7 @@
         </visual>
       </link>
       <link name="recon_cyl_3">
-        <pose>68.5 7.0 0.0750 0 0 0</pose>
+        <pose>7.0 68.5 0.0750 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
         </collision>
@@ -689,7 +689,7 @@
         </visual>
       </link>
       <link name="recon_cyl_4">
-        <pose>66.5 3.5 0.0750 0 0 0</pose>
+        <pose>3.5 66.5 0.0750 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
         </collision>
@@ -711,7 +711,7 @@
         </visual>
       </link>
       <link name="recon_cyl_5">
-        <pose>69.0 1.5 0.0750 0 0 0</pose>
+        <pose>1.5 69.0 0.0750 0 0 0</pose>
         <collision name="collision">
           <geometry><cylinder><radius>0.1000</radius><length>0.1500</length></cylinder></geometry>
         </collision>
@@ -743,7 +743,7 @@
       <static>true</static>
       <!-- 易燃标识 — 橙底, 筒1 (66.0, 2.0) -->
       <link name="hazard_plate_1">
-        <pose>66.0 2.0 0.010 0 0 0</pose>
+        <pose>2.0 66.0 0.010 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
@@ -766,7 +766,7 @@
       </link>
       <!-- 健康危害标识 — 蓝底, 筒3 (68.5, 7.0) -->
       <link name="hazard_plate_2">
-        <pose>68.5 7.0 0.010 0 0 0</pose>
+        <pose>7.0 68.5 0.010 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
@@ -789,7 +789,7 @@
       </link>
       <!-- 危险标识 — 红底, 筒5 (69.0, 1.5) -->
       <link name="hazard_plate_3">
-        <pose>69.0 1.5 0.010 0 0 0</pose>
+        <pose>1.5 69.0 0.010 0 0 0</pose>
         <visual name="visual">
           <geometry>
             <box>
@@ -839,7 +839,7 @@
       </link>
       <!-- 左上角 (0, 8) -->
       <link name="corner_08">
-        <pose>0 8 0.5 0 0 0</pose>
+        <pose>8 0 0.5 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.0</size></box></geometry>
           <material>
@@ -850,7 +850,7 @@
       </link>
       <!-- 右下角 (70, 0) -->
       <link name="corner_70_0">
-        <pose>70 0 0.5 0 0 0</pose>
+        <pose>0 70 0.5 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.0</size></box></geometry>
           <material>
@@ -861,7 +861,7 @@
       </link>
       <!-- 右上角 (70, 8) -->
       <link name="corner_70_8">
-        <pose>70 8 0.5 0 0 0</pose>
+        <pose>8 70 0.5 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.0</size></box></geometry>
           <material>
@@ -877,7 +877,7 @@
       <static>true</static>
       <!-- 投放区左下 (40, 0) -->
       <link name="drop_corner_40_0">
-        <pose>40 0 0.75 0 0 0</pose>
+        <pose>0 40 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>
@@ -889,7 +889,7 @@
       </link>
       <!-- 投放区左上 (40, 8) -->
       <link name="drop_corner_40_8">
-        <pose>40 8 0.75 0 0 0</pose>
+        <pose>8 40 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>
@@ -901,7 +901,7 @@
       </link>
       <!-- 投放区右下 (45, 0) -->
       <link name="drop_corner_45_0">
-        <pose>45 0 0.75 0 0 0</pose>
+        <pose>0 45 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>
@@ -913,7 +913,7 @@
       </link>
       <!-- 投放区右上 (45, 8) -->
       <link name="drop_corner_45_8">
-        <pose>45 8 0.75 0 0 0</pose>
+        <pose>8 45 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>
@@ -925,7 +925,7 @@
       </link>
       <!-- 侦察区左下 (65, 0) -->
       <link name="recon_corner_65_0">
-        <pose>65 0 0.75 0 0 0</pose>
+        <pose>0 65 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>
@@ -937,7 +937,7 @@
       </link>
       <!-- 侦察区左上 (65, 8) -->
       <link name="recon_corner_65_8">
-        <pose>65 8 0.75 0 0 0</pose>
+        <pose>8 65 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>
@@ -949,7 +949,7 @@
       </link>
       <!-- 侦察区右下 (70, 0) — 与右下角共用位置但更高 -->
       <link name="recon_corner_70_0">
-        <pose>70 0 0.75 0 0 0</pose>
+        <pose>0 70 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>
@@ -961,7 +961,7 @@
       </link>
       <!-- 侦察区右上 (70, 8) — 与右上角共用位置但更高 -->
       <link name="recon_corner_70_8">
-        <pose>70 8 0.75 0 0 0</pose>
+        <pose>8 70 0.75 0 0 0</pose>
         <visual name="visual">
           <geometry><box><size>0.3 0.3 1.5</size></box></geometry>
           <material>

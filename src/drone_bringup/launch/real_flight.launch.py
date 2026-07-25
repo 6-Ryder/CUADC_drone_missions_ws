@@ -69,6 +69,14 @@ def generate_launch_description():
         "recon_distance", default_value="57.5",
         description="Home → 侦察区距离 (m)",
     )
+    rc_require_arg = DeclareLaunchArgument(
+        "rc_require_arm_signal", default_value="true",
+        description="是否强制等待遥控器连接 (真机必须为 true)",
+    )
+    rc_min_channels_arg = DeclareLaunchArgument(
+        "rc_min_channels", default_value="4",
+        description="RC 最少有效通道数",
+    )
 
     xrce_agent = ExecuteProcess(
         cmd=[
@@ -169,6 +177,8 @@ def generate_launch_description():
                 "flight_axis": LaunchConfiguration("flight_axis"),
                 "drop_distance": LaunchConfiguration("drop_distance"),
                 "recon_distance": LaunchConfiguration("recon_distance"),
+                "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
+                "rc_min_channels": LaunchConfiguration("rc_min_channels"),
             },
         ],
         additional_env={"RCUTILS_COLORIZED_OUTPUT": "1"},
@@ -190,6 +200,8 @@ def generate_launch_description():
         flight_axis_arg,
         drop_distance_arg,
         recon_distance_arg,
+        rc_require_arg,
+        rc_min_channels_arg,
         xrce_agent,
         camera_node,
         px4_bridge_node,

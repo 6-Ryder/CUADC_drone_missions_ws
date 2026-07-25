@@ -30,14 +30,14 @@ def generate_launch_description():
     
     home_x_args = DeclareLaunchArgument(
         "home_x",
-        default_value="10.0",
-        description="Home position X coordinate (meters, world frame)",
+        default_value="4.0",
+        description="Home position X coordinate (meters, world frame, East offset)",
     )
 
     home_y_args = DeclareLaunchArgument(
         "home_y",
-        default_value="4.0",
-        description="Home position Y coordinate (meters, world frame)",
+        default_value="10.0",
+        description="Home position Y coordinate (meters, world frame, North offset)",
     )
 
     home_z_args = DeclareLaunchArgument(

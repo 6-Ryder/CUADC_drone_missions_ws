@@ -36,8 +36,8 @@ class CoverageMonitor:
 
     def __init__(
         self,
-        zone_x_range: Tuple[float, float] = (6.0, 14.0),
-        zone_y_range: Tuple[float, float] = (59.0, 64.0),
+        zone_x_range: Tuple[float, float] = (0.0, 8.0),
+        zone_y_range: Tuple[float, float] = (65.0, 70.0),
         grid_resolution: float = 0.5,
         fov_half_angle_deg: float = 35.0,
         complete_ratio: float = 0.95,
@@ -157,8 +157,8 @@ class CoverageMonitorNode(Node):
 
         # 侦察区范围 (从 mission_params 获取, 这里硬编码默认值)
         self._monitor = CoverageMonitor(
-            zone_x_range=(6.0, 14.0),
-            zone_y_range=(59.0, 64.0),
+            zone_x_range=(0.0, 8.0),
+            zone_y_range=(65.0, 70.0),
             grid_resolution=self.get_parameter("coverage_grid_resolution").value,
             fov_half_angle_deg=self.get_parameter("coverage_fov_half_angle").value,
             complete_ratio=self.get_parameter("coverage_complete_ratio").value,
