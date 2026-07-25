@@ -18,7 +18,7 @@ Jetson 上电 → 飞控上电 → QGC 连接飞控 → 确认 MAIN5 配置:
 
 ```bash
 ssh jetson
-cd ~/drone_tasks_ws
+cd ~/CUADC_drone_missions_ws
 source install/setup.bash
 ros2 run px4_control px4_bridge
 ```

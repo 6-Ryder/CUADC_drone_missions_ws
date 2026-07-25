@@ -14,7 +14,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='ryder',
+    maintainer='nvidia',
     maintainer_email='ruidel2@illinois.edu',
     description='分阶段真机实飞测试脚本包',
     license='Apache-2.0',

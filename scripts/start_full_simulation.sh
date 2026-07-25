@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# drone_tasks_ws — 无人机自主任务全仿真启动脚本
+# CUADC_drone_missions_ws — 无人机自主任务全仿真启动脚本
 #
 # 启动顺序:
 #   1. MicroXRCEAgent  (PX4 ↔ ROS2 DDS 桥梁, UDP 8888)
@@ -66,7 +66,7 @@ else
 fi
 
 if [ ! -f "$PROJ/install/setup.bash" ]; then
-    error "drone_tasks_ws 未编译, 请先运行: colcon build --symlink-install"
+    error "CUADC_drone_missions_ws 未编译, 请先运行: colcon build --symlink-install"
     exit 1
 fi
 source "$PROJ/install/setup.bash"

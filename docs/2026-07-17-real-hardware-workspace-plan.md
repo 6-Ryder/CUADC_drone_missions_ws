@@ -29,7 +29,7 @@
 ## 三、推荐的工作空间布局
 
 ```
-drone_tasks_ws/
+CUADC_drone_missions_ws/
 ├── src/                            # 不变：核心代码共用
 │   └── (7 个 ROS2 包)
 ├── docs/                           # 不变

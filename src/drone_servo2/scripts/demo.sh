@@ -1,7 +1,7 @@
 #!/bin/bash
 # 舵机多位置步进投放演示 — 一条命令看完整投放序列
 set -e
-source ~/drone_tasks_ws/install/setup.bash
+source ~/CUADC_drone_missions_ws/install/setup.bash
 
 echo "╔══════════════════════════════════════════════╗"
 echo "║  投放序列: 1150 → 1700 → 2150 μs            ║"

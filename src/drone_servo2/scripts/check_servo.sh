@@ -4,11 +4,11 @@ which ros2 || echo "❌ ros2 未找到！先运行: source /opt/ros/humble/setup
 
 echo ""
 echo "=== 2. 工作空间 ==="
-if [ -f ~/drone_tasks_ws/install/setup.bash ]; then
-    source ~/drone_tasks_ws/install/setup.bash
+if [ -f ~/CUADC_drone_missions_ws/install/setup.bash ]; then
+    source ~/CUADC_drone_missions_ws/install/setup.bash
     echo "✅ workspace sourced"
 else
-    echo "❌ ~/drone_tasks_ws/install/setup.bash 不存在"
+    echo "❌ ~/CUADC_drone_missions_ws/install/setup.bash 不存在"
 fi
 
 echo ""
@@ -22,7 +22,7 @@ echo "(exit: $?)"
 
 echo ""
 echo "=== 5. 如果上面没有输出, 试试直接执行二进制 ==="
-~/drone_tasks_ws/install/drone_servo2/lib/drone_servo2/servo_controller --ros-args -p platform:=jetson &
+~/CUADC_drone_missions_ws/install/drone_servo2/lib/drone_servo2/servo_controller --ros-args -p platform:=jetson &
 PID=$!
 sleep 2
 kill $PID 2>/dev/null

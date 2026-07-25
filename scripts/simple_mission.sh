@@ -29,7 +29,7 @@ mkdir -p "$ROS_LOG_DIR"
 # ============================================================================
 # 环境检测
 # ============================================================================
-PX4_DIR="/home/ryder/PX4-Autopilot"
+PX4_DIR="/home/nvidia/PX4-Autopilot"
 PX4_BLD="$PX4_DIR/build/px4_sitl_default"
 PX4_WORLD="$PX4_DIR/Tools/simulation/gz/worlds/drone_field.sdf"
 
@@ -60,7 +60,7 @@ else
 fi
 
 if [ ! -f "$PROJ/install/setup.bash" ]; then
-    error "drone_tasks_ws 未编译, 请先运行: colcon build --symlink-install"
+    error "CUADC_drone_missions_ws 未编译, 请先运行: colcon build --symlink-install"
     exit 1
 fi
 source "$PROJ/install/setup.bash"

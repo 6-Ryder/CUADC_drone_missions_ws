@@ -4,7 +4,7 @@
   <name>test_mission</name>
   <version>0.0.0</version>
   <description>分阶段真机实飞测试脚本包</description>
-  <maintainer email="ruidel2@illinois.edu">ryder</maintainer>
+  <maintainer email="ruidel2@illinois.edu">nvidia</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>

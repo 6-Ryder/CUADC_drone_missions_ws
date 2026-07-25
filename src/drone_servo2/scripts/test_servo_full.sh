@@ -1,5 +1,5 @@
 #!/bin/bash
-source ~/drone_tasks_ws/install/setup.bash
+source ~/CUADC_drone_missions_ws/install/setup.bash
 
 echo "=== 启动节点 ==="
 ros2 run drone_servo2 servo_controller --ros-args -p platform:=jetson &
