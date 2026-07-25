@@ -142,6 +142,7 @@ echo "│  解锁:     标准 ARM (非 SITL force)                      │"
 echo "│  Home:     解锁点 (0, 0)                                 │"
 echo "│  投放区:   (20.0, 2.0)                                   │"
 echo "│  巡航高度: 5.0m                                          │"
+echo "│  安全:     等待遥控器连接确认 → 解锁                       │"
 echo "│  任务:     TAKEOFF -> 航点 -> LOITER -> RETURN -> LAND   │"
 echo "├──────────────────────────────────────────────────────────┤"
 echo "│  日志:     $LOG_DIR                                      │"
@@ -158,6 +159,7 @@ ros2 launch drone_bringup simple_mission.launch.py \
     drop_y:=20.0 \
     cruise_altitude:=5.0 \
     loiter_time:=5.0 \
+    rc_require_arm_signal:=true \
     "$@" 2>&1 | tee "$LOG_DIR/mission.log"
 
 # ---- 清理 ----

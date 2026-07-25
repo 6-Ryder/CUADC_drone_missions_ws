@@ -25,6 +25,10 @@ from typing import Any, Dict, List, Optional, Protocol
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import (
+    QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy,
+)
+from px4_msgs.msg import InputRc
 from std_msgs.msg import String
 
 # 状态处理器
@@ -191,6 +195,13 @@ class MissionFSM(Node):
 
         self._standalone_odom_ready = False
 
+        # ---- 遥控器状态缓存 ----
+        self._rc_lost: bool = True
+        self._rc_failsafe: bool = True
+        self._rc_channel_count: int = 0
+        self._rc_rssi: int = -1
+        self._rc_last_msg_time: float = 0.0
+
         # ---- 初始化延迟 ----
         self._init_timer = self.create_timer(1.0, self._lazy_init)
         self._initialized = False
@@ -212,6 +223,9 @@ class MissionFSM(Node):
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
+        # 遥控器安全
+        self.declare_parameter("rc_require_arm_signal", True)
+        self.declare_parameter("rc_min_channels", 4)
         self.declare_parameter("control_frequency", 20.0)
         self.declare_parameter("max_error_count", 5)
         self.declare_parameter("waypoint_timeout", 120.0)
@@ -481,6 +495,17 @@ class MissionFSM(Node):
             String, "/drone/vision/status", self._vision_status_cb, 10,
         )
 
+        # 遥控器状态订阅
+        rc_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=5,
+        )
+        self._rc_sub = self.create_subscription(
+            InputRc, "/fmu/out/input_rc", self._rc_cb, rc_qos,
+        )
+
         from drone_interfaces.srv import SetVisionMode
         self._vision_mode_client = self.create_client(
             SetVisionMode, "/drone/vision/set_mode",
@@ -496,6 +521,14 @@ class MissionFSM(Node):
         self._vision_ready = "ready=1" in msg.data
         if self._vision_ready:
             self._watchdog.feed("vision")
+
+    def _rc_cb(self, msg: InputRc) -> None:
+        """缓存最新的 RC 接收机状态."""
+        self._rc_lost = msg.rc_lost
+        self._rc_failsafe = msg.rc_failsafe
+        self._rc_channel_count = msg.channel_count
+        self._rc_rssi = msg.rssi
+        self._rc_last_msg_time = time.time()
 
     # ================================================================
     # 视觉数据回调
@@ -949,6 +982,19 @@ class MissionFSM(Node):
     @property
     def battery_ready(self) -> bool:
         return self.bridge.battery_ready
+
+    @property
+    def rc_ready(self) -> bool:
+        """遥控器已连接且信号正常."""
+        if not self.get_param("rc_require_arm_signal", True):
+            return True
+        if self._rc_lost or self._rc_failsafe:
+            return False
+        if self._rc_channel_count < self.get_param("rc_min_channels", 4):
+            return False
+        if time.time() - self._rc_last_msg_time > 2.0:
+            return False
+        return True
 
     @property
     def emergency(self) -> EmergencyHandler:

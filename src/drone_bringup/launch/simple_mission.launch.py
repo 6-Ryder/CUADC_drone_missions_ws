@@ -62,6 +62,14 @@ def generate_launch_description():
         "sim_mode", default_value="true",
         description="true=SITL force arm(21196) / false=真机标准解锁(0)",
     )
+    rc_require_arg = DeclareLaunchArgument(
+        "rc_require_arm_signal", default_value="true",
+        description="是否强制等待遥控器连接 (真机必须为 true)",
+    )
+    rc_min_channels_arg = DeclareLaunchArgument(
+        "rc_min_channels", default_value="4",
+        description="RC 最少有效通道数",
+    )
 
     # ---- 节点 ----
 
@@ -96,6 +104,8 @@ def generate_launch_description():
             "home_y": LaunchConfiguration("home_y"),
             "loiter_time": LaunchConfiguration("loiter_time"),
             "sim_mode": LaunchConfiguration("sim_mode"),
+            "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
+            "rc_min_channels": LaunchConfiguration("rc_min_channels"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -121,6 +131,8 @@ def generate_launch_description():
         home_y_arg,
         loiter_time_arg,
         sim_mode_arg,
+        rc_require_arg,
+        rc_min_channels_arg,
         px4_bridge_node,
         mission_delayed,
     ])

@@ -578,12 +578,16 @@ class PX4Bridge(Node):
         )
 
     def force_disarm(self):
-        """强制上锁 (紧急)."""
+        """强制上锁 (紧急).
+
+        PX4 Offboard 模式下会拒绝非手动来源的 disarm, 必须传 magic=21196
+        才能绕过此限制, 仿真和真机都是如此.
+        """
         self.get_logger().warn("强制上锁!")
         self.send_command(
             VEHICLE_CMD_COMPONENT_ARM_DISARM,
             param1=0.0,
-            param2=21196.0,  # force
+            param2=21196.0,
         )
 
     def land_at_current(self):

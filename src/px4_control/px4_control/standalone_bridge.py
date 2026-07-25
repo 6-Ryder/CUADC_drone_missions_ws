@@ -303,12 +303,13 @@ class StandaloneBridge:
         self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
 
     def force_disarm(self) -> None:
-        if self._sim_mode:
-            self._node.get_logger().warn("[StandaloneBridge] 强制上锁! (SITL force)")
-            self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
-        else:
-            self._node.get_logger().warn("[StandaloneBridge] 强制上锁!")
-            self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 0.0)
+        """强制上锁 (紧急).
+
+        PX4 Offboard 模式下会拒绝非手动来源的 disarm, 必须传 magic=21196
+        才能绕过此限制, 仿真和真机都是如此.
+        """
+        self._node.get_logger().warn("[StandaloneBridge] 强制上锁!")
+        self._send_command(VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0, 21196.0)
 
     def land_at_current(self) -> None:
         """原地降落 (MAV_CMD_NAV_LAND = 21)."""
