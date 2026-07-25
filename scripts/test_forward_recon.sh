@@ -64,7 +64,7 @@ SERIAL_BAUD="${SERIAL_BAUD:-921600}"
 step "Step 0/3 — 清理旧进程"
 pkill -9 -f "MicroXRCEAgent" 2>/dev/null || true
 pkill -9 -f "px4_bridge" 2>/dev/null || true
-pkill -9 -f "test_forward_recon" 2>/dev/null || true
+#pkill -9 -f "test_forward_recon" 2>/dev/null || true
 sleep 1
 info "旧进程已清理"
 
