@@ -108,6 +108,7 @@ class StandaloneBridge:
         self._armed: bool = False
         self._offboard: bool = False
         self._landed: bool = True
+        self._preflight_ok: bool = False
         self._current_yaw: float = 0.0
         self._battery_remaining: float = 1.0
         self._battery_ready: bool = False
@@ -187,6 +188,7 @@ class StandaloneBridge:
     def _status_cb(self, msg: VehicleStatus) -> None:
         self._armed = (msg.arming_state == 2)
         self._offboard = (msg.nav_state == NAV_STATE_OFFBOARD)
+        self._preflight_ok = msg.pre_flight_checks_pass
         self._telemetry_ready = True  # 收到状态后允许发送指令
 
     def _land_cb(self, msg: VehicleLandDetected) -> None:
@@ -245,6 +247,11 @@ class StandaloneBridge:
     @property
     def battery_ready(self) -> bool:
         return self._battery_ready
+
+    @property
+    def preflight_ok(self) -> bool:
+        """PX4 飞控自检通过 (含 RC/GPS/传感器等所有 arming check)."""
+        return self._preflight_ok
 
     # -- Setpoints --
 

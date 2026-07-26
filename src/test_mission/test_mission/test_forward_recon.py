@@ -5,13 +5,14 @@ Phase 1: 起飞 → 向北直飞 20m → 验证航点到达
 Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 回升 → 返航 → 降落
 
 状态流:
-  INIT → WAIT_RC_ARM → TAKEOFF → TRANSIT_FORWARD → DESCEND_TO_RECON
+  INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FORWARD → DESCEND_TO_RECON
   → RECON_SWEEP → ASCEND_TO_CRUISE → RETURN → LAND → COMPLETE
 
-安全:
-  - WAIT_RC_ARM: 起飞前必须确认遥控器已连接且信号正常
-  - 遥控器通电 = 操作员已就位; PX4 解锁时还会再次校验
-  - 无超时跳过 — 硬性安全要求
+安全 (RC 硬件解锁模式):
+  - 遥控器 Arm Switch → SBus → PX4 自检 → PX4 解锁
+  - ROS 侧不发送 arm 指令, 只检测 preflight_ok + is_armed()
+  - COM_RC_IN_MODE=0 保证无物理 RC 信号时 PX4 拒绝解锁
+  - rc_require_arm_signal:=false 可跳过等待 (无遥控器场景)
 
 坐标系:
   - World(ENU): x=east, y=north, z=up. 真机以 Home(解锁点) 为原点.
@@ -29,7 +30,6 @@ from enum import Enum
 import rclpy
 from rclpy.node import Node
 
-from px4_msgs.msg import InputRc
 from px4_control.standalone_bridge import StandaloneBridge
 from px4_control.flight_controller import FlightController
 from px4_control.telemetry import configure_home, world_to_ned
@@ -43,7 +43,7 @@ from drone_mission.path_planner import PathPlanner
 
 class MissionState(Enum):
     INIT = "INIT"
-    WAIT_RC_ARM = "WAIT_RC_ARM"               # 等待遥控器解锁信号 (安全硬性要求)
+    WAIT_ARMED = "WAIT_ARMED"                 # 等待遥控器解锁 (人拨动 Arm Switch)
     TAKEOFF = "TAKEOFF"
     TRANSIT_FORWARD = "TRANSIT_FORWARD"       # Phase 1: 向北直飞 20m
     DESCEND_TO_RECON = "DESCEND_TO_RECON"      # Phase 2: 降至侦察高度
@@ -61,6 +61,11 @@ class MissionState(Enum):
 class TestForwardRecon(Node):
     """
     分阶段真机测试 — 向前直飞 20m + 侦察区弓字形全覆盖扫描.
+
+    RC 解锁模式:
+      - 遥控器 Arm Switch → SBus → PX4 解锁 → ROS 检测 is_armed()
+      - 代码不发送 arm 指令, 由人通过硬件遥控器完成解锁
+      - preflight_ok (含 RC/GPS/传感器自检) 作为辅助状态提示
 
     Phase 1 — 基础飞行验证:
       - 起飞至巡航高度 (5m)
@@ -112,9 +117,8 @@ class TestForwardRecon(Node):
         # 返航
         self.declare_parameter("return_speed", 3.0)
 
-        # 遥控器安全 — 起飞前必须确认 RC 连接正常
-        self.declare_parameter("rc_require_arm_signal", True)  # 是否强制等待 RC
-        self.declare_parameter("rc_min_channels", 4)           # 最少有效通道数
+        # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
+        self.declare_parameter("rc_require_arm_signal", True)
 
         # ---- 坐标变换 ----
         configure_home(
@@ -144,27 +148,9 @@ class TestForwardRecon(Node):
         self._command_sent: bool = False
         self._stable_count: int = 0
 
-        # ---- 遥控器状态缓存 ----
-        self._rc_lost: bool = True          # 默认认为丢失, 直到收到有效消息
-        self._rc_failsafe: bool = True
-        self._rc_channel_count: int = 0
-        self._rc_rssi: int = -1
-        self._rc_values: list = []          # 18 通道 PWM 值 (μs)
-        self._rc_last_msg_time: float = 0.0
-
-        # ---- RC 状态订阅 ----
-        from rclpy.qos import (
-            QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy,
-        )
-        rc_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=5,
-        )
-        self._rc_sub = self.create_subscription(
-            InputRc, "/fmu/out/input_rc", self._rc_cb, rc_qos,
-        )
+        # ---- arming 状态 (由 StandaloneBridge vehicle_status 回调驱动) ----
+        # self._bridge.is_armed()  → PX4 解锁态 (RC Arm Switch 触发)
+        # self._bridge.preflight_ok → PX4 自检通过 (含 RC/GPS/传感器)
 
         # ---- 侦察区航点 ----
         self._recon_waypoints: list = []
@@ -194,7 +180,8 @@ class TestForwardRecon(Node):
         self.get_logger().info(f"  Phase 2: 侦察区 "
                                f"N[{fwd - half_n}:{fwd + half_n}] ×"
                                f" E[{-half_e}:{half_e}] @ {ralt}m")
-        self.get_logger().info("  流程: INIT → WAIT_RC_ARM → TAKEOFF → TRANSIT_FWD")
+        self.get_logger().info("  解锁: 遥控器 Arm Switch → PX4 → is_armed() → TAKEOFF")
+        self.get_logger().info("  流程: INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FWD")
         self.get_logger().info("         → DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND")
         self.get_logger().info("=" * 60)
 
@@ -223,40 +210,40 @@ class TestForwardRecon(Node):
         tol = self.get_param("waypoint_tolerance", 0.5)
         cruise_alt = self.get_param("cruise_altitude", 5.0)
 
-        # ---- INIT: 等待遥测就绪 → WAIT_RC_ARM ----
+        # ---- INIT: 等待遥测就绪 → WAIT_ARMED ----
         if self._state == MissionState.INIT:
             pos = self._bridge.get_current_position()
             if pos.norm_xy() > 0.01 or abs(pos.down) > 0.01 or elapsed > 2.0:
-                self.get_logger().info("INIT: 遥测就绪 → WAIT_RC_ARM")
-                self._transition(MissionState.WAIT_RC_ARM)
+                self.get_logger().info("INIT: 遥测就绪 → WAIT_ARMED")
+                self._transition(MissionState.WAIT_ARMED)
 
-        # ---- WAIT_RC_ARM: 等待遥控器连接 (安全硬性要求) ----
-        elif self._state == MissionState.WAIT_RC_ARM:
+        # ---- WAIT_ARMED: 等待人用遥控器解锁 ----
+        elif self._state == MissionState.WAIT_ARMED:
             require_rc = self.get_param("rc_require_arm_signal", True)
             if not require_rc:
-                self.get_logger().info("WAIT_RC_ARM: RC 检查已禁用 → TAKEOFF")
+                self.get_logger().info("WAIT_ARMED: RC 检查已禁用 → TAKEOFF")
                 self._transition(MissionState.TAKEOFF)
                 return
 
-            if self._check_rc_ready():
+            # PX4 已由人通过遥控器 Arm Switch 解锁
+            if self._bridge.is_armed():
                 self.get_logger().info(
-                    f"WAIT_RC_ARM: ✓ RC 连接正常"
-                    f" (ch={self._rc_channel_count} rssi={self._rc_rssi})"
-                    f" → TAKEOFF"
+                    "WAIT_ARMED: ✓ 已解锁 (遥控器 Arm Switch) → TAKEOFF"
                 )
                 self._transition(MissionState.TAKEOFF)
                 return
 
-            # 每 3s 输出 RC 状态
+            # 每 3s 输出状态
             if elapsed - self._last_progress_log > 3.0:
                 self._last_progress_log = elapsed
-                min_ch = self.get_param("rc_min_channels", 4)
+                preflight = self._bridge.preflight_ok
+                if preflight:
+                    hint = "自检通过! 请拨动遥控器解锁开关..."
+                else:
+                    hint = "等待飞控自检 (请检查遥控器/GPS/传感器)..."
                 self.get_logger().info(
-                    f"WAIT_RC_ARM: 等待 RC 连接..."
-                    f" rc_lost={self._rc_lost}"
-                    f" failsafe={self._rc_failsafe}"
-                    f" channels={self._rc_channel_count}/{min_ch}"
-                    f" rssi={self._rc_rssi}"
+                    f"WAIT_ARMED: {hint}"
+                    f" armed=False preflight_ok={preflight}"
                 )
 
         # ---- TAKEOFF: 起飞至巡航高度 ----
@@ -497,42 +484,6 @@ class TestForwardRecon(Node):
                 self.get_logger().error("LAND: 着陆超时 (30s), 强制上锁")
                 self._fc.force_disarm()
                 self._transition(MissionState.COMPLETE)
-
-    # ================================================================
-    # 遥控器状态
-    # ================================================================
-
-    def _rc_cb(self, msg: InputRc) -> None:
-        """缓存最新的 RC 接收机状态."""
-        self._rc_lost = msg.rc_lost
-        self._rc_failsafe = msg.rc_failsafe
-        self._rc_channel_count = msg.channel_count
-        self._rc_rssi = msg.rssi
-        self._rc_values = list(msg.values)
-        self._rc_last_msg_time = time.time()
-
-    def _check_rc_ready(self) -> bool:
-        """
-        验证遥控器状态是否满足起飞条件.
-
-        条件:
-          1. RC 接收机未丢失 (rc_lost=False)
-          2. 未触发失控保护 (rc_failsafe=False)
-          3. 通道数 >= rc_min_channels (接收机正常工作)
-          4. 最近 2s 内收到过 RC 消息 (数据新鲜)
-
-        遥控器通电且信号正常 = 操作员已就位确认.
-        PX4 自身也会在解锁时再次校验 RC 状态.
-        """
-        if self._rc_lost:
-            return False
-        if self._rc_failsafe:
-            return False
-        if self._rc_channel_count < self.get_param("rc_min_channels", 4):
-            return False
-        if time.time() - self._rc_last_msg_time > 2.0:
-            return False
-        return True
 
     # ================================================================
     # 侦察区航点生成

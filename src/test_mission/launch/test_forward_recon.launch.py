@@ -79,11 +79,7 @@ def generate_launch_description():
     )
     rc_require_arg = DeclareLaunchArgument(
         "rc_require_arm_signal", default_value="true",
-        description="是否强制等待遥控器连接 (真机必须为 true)",
-    )
-    rc_min_channels_arg = DeclareLaunchArgument(
-        "rc_min_channels", default_value="4",
-        description="RC 最少有效通道数",
+        description="true=等待人用遥控器Arm Switch解锁, false=代码arm直接起飞",
     )
 
     # ---- 节点 ----
@@ -125,7 +121,6 @@ def generate_launch_description():
             "sweep_speed": LaunchConfiguration("sweep_speed"),
             "grid_spacing": LaunchConfiguration("grid_spacing"),
             "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
-            "rc_min_channels": LaunchConfiguration("rc_min_channels"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -138,7 +133,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         LogInfo(msg="=== 分阶段真机测试: 前飞 20m + 侦察区 ==="),
-        LogInfo(msg="  安全: WAIT_RC_ARM → 确认遥控器连接 → TAKEOFF"),
+        LogInfo(msg="  安全: WAIT_ARMED → 遥控器 Arm Switch 解锁 → TAKEOFF"),
         LogInfo(msg="  Phase 1: TAKEOFF → TRANSIT_FORWARD (向北 20m)"),
         LogInfo(msg="  Phase 2: DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND"),
         sim_mode_arg,
@@ -154,7 +149,6 @@ def generate_launch_description():
         sweep_speed_arg,
         grid_spacing_arg,
         rc_require_arg,
-        rc_min_channels_arg,
         px4_bridge_node,
         test_delayed,
     ])
