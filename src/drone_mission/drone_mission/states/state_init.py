@@ -51,15 +51,22 @@ class InitState:
 
         elapsed = time.time() - self._start_time
 
-        # 诊断日志
+        # 诊断日志 — RC 模式时显示 armed/preflight 明细
         if elapsed - getattr(self, '_last_diag_log', 0) > 5.0:
             self._last_diag_log = elapsed
+            require_rc = self._fsm.get_param("rc_require_arm_signal", True)
+            if require_rc:
+                armed = self._fsm.bridge.is_armed()
+                preflight = self._fsm.bridge.preflight_ok
+                rc_detail = f"armed={'Y' if armed else 'N'} preflight={'Y' if preflight else 'N'}"
+            else:
+                rc_detail = "skip"
             self._fsm.get_logger().info(
                 f"INIT: odom={self._odom_ready_count}, "
                 f"vision={'OK' if vision_alive else 'WAIT'}, "
                 f"servo={'OK' if servo_alive else 'WAIT'}, "
                 f"battery={'OK' if battery_ready else 'WAIT'}, "
-                f"rc={'OK' if rc_ready else 'WAIT'}, "
+                f"rc=[{rc_detail}], "
                 f"elapsed={elapsed:.0f}s"
             )
 

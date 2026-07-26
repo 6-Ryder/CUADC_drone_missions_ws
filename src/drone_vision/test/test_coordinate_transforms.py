@@ -36,7 +36,10 @@ def _transformer():
 
 
 def test_downward_camera_center_projects_to_drone_world_xy():
+    """中心像素 (640,480) 投影到无人机正下方的世界坐标."""
     tf = _transformer()
+    # 使用默认 home=(0,0,0), NED(0, 32.5, -5) → World(32.5, 0, 5)
+    # 水平姿态下, 中心像素对应正下方 → World(32.5, 0, 0)
     pose = ned_to_world_pose(
         north=0.0,
         east=32.5,
@@ -56,11 +59,18 @@ def test_downward_camera_center_projects_to_drone_world_xy():
     )
 
     assert world_xy is not None
-    assert math.isclose(world_xy[0], 42.5, abs_tol=1e-6)
-    assert math.isclose(world_xy[1], 4.0, abs_tol=1e-6)
+    assert math.isclose(world_xy[0], 32.5, abs_tol=1e-6)
+    assert math.isclose(world_xy[1], 0.0, abs_tol=1e-6)
 
 
 def test_downward_camera_pixel_axes_match_world_enu_axes():
+    """像素 x→世界东, 像素 y→世界北.
+
+    无人机 World(32.5, 0, 5), 水平下视.
+    - 图像 u+dx (右) → 世界东移 → (32.5 + Δ, 0)
+    - 图像 v+dy (下) → 世界北移 → (32.5, 0 + Δ)
+    1m 对应像素 = fx / altitude = 539.9 / 5.0
+    """
     tf = _transformer()
     pose = ned_to_world_pose(
         north=0.0,
@@ -90,7 +100,8 @@ def test_downward_camera_pixel_axes_match_world_enu_axes():
 
     assert east_xy is not None
     assert north_xy is not None
-    assert math.isclose(east_xy[0], 43.5, abs_tol=1e-6)
-    assert math.isclose(east_xy[1], 4.0, abs_tol=1e-6)
-    assert math.isclose(north_xy[0], 42.5, abs_tol=1e-6)
-    assert math.isclose(north_xy[1], 5.0, abs_tol=1e-6)
+    # home=(0,0,0): 中心 World(32.5, 0), 东1m→(33.5, 0), 北1m→(32.5, 1.0)
+    assert math.isclose(east_xy[0], 33.5, abs_tol=1e-6)
+    assert math.isclose(east_xy[1], 0.0, abs_tol=1e-6)
+    assert math.isclose(north_xy[0], 32.5, abs_tol=1e-6)
+    assert math.isclose(north_xy[1], 1.0, abs_tol=1e-6)

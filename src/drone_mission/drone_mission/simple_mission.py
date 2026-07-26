@@ -129,6 +129,10 @@ class SimpleMission(Node):
                 self.get_logger().warn(
                     f"参数 '{key}' 未声明且无默认值, 返回 None, 可能导致运行时错误"
                 )
+                return None
+            self.get_logger().warn(
+                f"参数 '{key}' 读取失败, 使用默认值 {default}"
+            )
             return default
 
     # ================================================================

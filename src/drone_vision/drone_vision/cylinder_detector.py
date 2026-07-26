@@ -576,12 +576,11 @@ class CylinderDetectorNode(Node):
                 det_msg.bbox_x1, det_msg.bbox_y1 = bbox[0], bbox[1]
                 det_msg.bbox_x2, det_msg.bbox_y2 = bbox[2], bbox[3]
 
-            # 像素 → World:
-            # dx_world = (cx_px - cx) * altitude / fx   (相机向下, x对应right=east)
-            # dy_world = (cy_px - cy) * altitude / fy   (y对应down=forward=north)
-            # 这里简化: 相机 x→world east, y→world north (取决于安装方向)
-            dx_world = -(t["cy"] - cy) * alt / fy   # 像素行 → world north
-            dy_world = -(t["cx"] - cx) * alt / fx   # 像素列 → world east
+            # 像素 → NED (与 pixel_to_world_simple 一致的符号约定).
+            # 下视相机: u+ (像右) → body right → NED east,
+            #           v+ (像下) → body front → NED north.
+            dx_world = (t["cy"] - cy) * alt / fy   # 像素行 → NED north
+            dy_world = (t["cx"] - cx) * alt / fx   # 像素列 → NED east
 
             det_msg.center_x = drone_ned_x + dy_world  # NED east
             det_msg.center_y = drone_ned_y + dx_world  # NED north

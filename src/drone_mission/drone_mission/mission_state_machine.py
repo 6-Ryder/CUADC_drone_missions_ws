@@ -434,6 +434,15 @@ class MissionFSM(Node):
         # INIT 依赖 PX4 电池/状态消息，必须先创建 standalone 遥测订阅。
         _ = self.bridge
 
+        # 提前创建投放服务客户端, 避免首次投放时 wait_for_service 阻塞控制循环
+        try:
+            from drone_interfaces.srv import TriggerDrop
+            self._drop_client = self.create_client(
+                TriggerDrop, "/drone/servo/trigger_drop"
+            )
+        except Exception as e:
+            self.get_logger().warn(f"投放服务客户端创建失败: {e}")
+
         self.get_logger().info("Mission FSM 初始化完成, 开始任务")
         self._transition_to(MissionState.INIT)
 
@@ -881,6 +890,11 @@ class MissionFSM(Node):
 
     @bridge.setter
     def bridge(self, b: PX4Bridge):
+        # 清理旧的 StandaloneBridge, 避免悬空 timer 继续发布过期 setpoint
+        if self._standalone_bridge is not None:
+            self._standalone_bridge.shutdown()
+            self._standalone_bridge = None
+            self._standalone_fc = None
         self._bridge = b
         self._fc = FlightController(b)
 
@@ -954,10 +968,17 @@ class MissionFSM(Node):
 
     @property
     def rc_ready(self) -> bool:
-        """PX4 飞控自检通过 (含 RC/GPS/传感器等所有 arming check)."""
+        """遥控器已解锁 → 才允许进入自动任务.
+
+        rc_require_arm_signal=True (默认/真机):
+          PX4 必须已被 RC Arm Switch 解锁 (is_armed=True).
+          代码绝不发送 arm 指令.
+        rc_require_arm_signal=False (仿真/无遥控器):
+          只需 preflight_ok, arm 由 TakeoffState 发送.
+        """
         if not self.get_param("rc_require_arm_signal", True):
             return True
-        return self.bridge.preflight_ok
+        return self.bridge.preflight_ok and self.bridge.is_armed()
 
     @property
     def emergency(self) -> EmergencyHandler:
@@ -992,6 +1013,10 @@ class MissionFSM(Node):
                 self.get_logger().warn(
                     f"参数 '{key}' 未声明且无默认值, 返回 None, 可能导致运行时错误"
                 )
+                return None
+            self.get_logger().warn(
+                f"参数 '{key}' 读取失败, 使用默认值 {default}"
+            )
             return default
 
     def _validate_critical_params(self) -> None:
@@ -1112,32 +1137,33 @@ class MissionFSM(Node):
     # -- 服务调用 --
     def start_drop_service(self, cylinder_id: int) -> None:
         """
-        发送投放请求, 固定延时后确认.
+        发送投放请求, 通过 Future 回调获取真实结果.
 
-        不等待 ROS2 服务应答 (跨进程 future 不可靠),
-        不轮询 /drone/servo/status (1Hz topic 回调可能丢失).
-        直接发请求, 1 秒后视为成功.
+        与 check_drop_service_result 配合:
+          - Future 完成 → 读取真实 TriggerDrop.Response.success
+          - Future 超时 → drop_confirmation_timeout 后视为失败
         """
         try:
-            from drone_interfaces.srv import TriggerDrop
+            if not hasattr(self, '_drop_client') or self._drop_client is None:
+                self.get_logger().error("舵机服务客户端未初始化")
+                self._drop_service_failed = True
+                return
 
-            if not hasattr(self, '_drop_client'):
-                self._drop_client = self.create_client(
-                    TriggerDrop, "/drone/servo/trigger_drop"
-                )
-
-            self._drop_pending_cylinder_id = cylinder_id
-            self._drop_result_consumed = False
-            self._drop_service_failed = False
-
-            if not self._drop_client.wait_for_service(timeout_sec=2.0):
+            if not self._drop_client.service_is_ready():
                 self.get_logger().error("舵机服务不可用")
                 self._drop_service_failed = True
                 return
 
+            from drone_interfaces.srv import TriggerDrop
+
+            self._drop_pending_cylinder_id = cylinder_id
+            self._drop_result_consumed = False
+            self._drop_service_failed = False
+            self._drop_future_result: Optional[bool] = None
+
             req = TriggerDrop.Request()
             req.cylinder_id = cylinder_id
-            self._drop_client.call_async(req)
+            self._drop_future = self._drop_client.call_async(req)
             self._drop_request_time = time.time()
             self._drop_sent_ok = True
 
@@ -1147,9 +1173,12 @@ class MissionFSM(Node):
 
     def check_drop_service_result(self) -> Optional[bool]:
         """
-        固定延时确认投放结果.
+        确认投放结果 — Future 优先, 超时回退.
 
-        请求成功发送后等 1 秒, 视为投放成功.
+        Returns:
+            True   — 投放成功 (servo 确认)
+            False  — 投放失败 (servo 拒绝 / 硬件故障 / 超时)
+            None   — 等待中, 下个 tick 再查
         """
         if self._drop_result_consumed:
             return None
@@ -1162,14 +1191,38 @@ class MissionFSM(Node):
         if not getattr(self, '_drop_sent_ok', False):
             return None
 
-        if time.time() - self._drop_request_time < 1.0:
-            return None  # 等舵机执行完成
+        # ── 优先读取真实 Future 结果 ──
+        future = getattr(self, '_drop_future', None)
+        if future is not None and future.done():
+            self._drop_count += 1
+            try:
+                response = future.result()
+                if response is not None and getattr(response, 'success', False):
+                    self._drop_success_count += 1
+                    self._drop_result_consumed = True
+                    self._drop_sent_ok = False
+                    self._drop_future = None
+                    return True
+            except Exception as e:
+                self.get_logger().warn(f"投放 Future 异常: {e}")
+            # 任何非成功路径 → 失败
+            self._drop_result_consumed = True
+            self._drop_sent_ok = False
+            self._drop_future = None
+            return False
 
+        # ── Future 未完成 → 超时回退 ──
+        timeout = self.get_param("drop_confirmation_timeout", 5.0)
+        if time.time() - self._drop_request_time < timeout:
+            return None
+
+        self.get_logger().warn(
+            f"投放确认超时 ({timeout}s), servo 未响应, 视为失败"
+        )
         self._drop_count += 1
-        self._drop_success_count += 1
         self._drop_result_consumed = True
         self._drop_sent_ok = False
-        return True
+        return False
 
     # -- 悬停 --
     def loiter(self, duration: float = 0.0):

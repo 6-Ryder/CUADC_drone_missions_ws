@@ -70,9 +70,15 @@ class FlightController:
 
         策略:
           1. 切换到 Offboard 模式
-          2. 解锁
+          2. 解锁 (仅当 is_armed()=False 时)
           3. 在当前位置上方设置目标高度, 水平位置保持不变
           4. 等待到达目标高度
+
+        .. warning::
+           在 RC 模式 (rc_require_arm_signal=True) 下, 调用方必须在
+           调用本方法前确保 PX4 已被遥控器解锁. 本方法的内部 arm()
+           调用仅在 is_armed()=False 时触发, 正常的 RC 模式流程中
+           这个 guard 为 True, arm() 不会被调用.
 
         Parameters
         ----------
