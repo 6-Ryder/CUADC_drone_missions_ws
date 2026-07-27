@@ -139,6 +139,14 @@ class SimpleMission(Node):
     # 主控制循环 (20Hz)
     # ================================================================
 
+    _FLIGHT_STATES = {
+        MissionState.TAKEOFF,
+        MissionState.TRANSIT_TO_DROP,
+        MissionState.LOITER,
+        MissionState.RETURN,
+        MissionState.LAND,
+    }
+
     def _control_loop(self):
         """20Hz FSM 控制循环."""
         if self._state == MissionState.COMPLETE:
@@ -147,6 +155,14 @@ class SimpleMission(Node):
         elapsed = time.time() - self._state_start
         tol = self.get_param("waypoint_tolerance", 0.5)
         cruise_alt = self.get_param("cruise_altitude", 5.0)
+
+        # ---- 飞行中遥控器上锁 → 立刻中止 ----
+        if self._state in self._FLIGHT_STATES and not self._bridge.is_armed():
+            self.get_logger().warn(
+                f"{self._state.value}: 检测到遥控器上锁 (disarm), 中止任务"
+            )
+            self._transition(MissionState.COMPLETE)
+            return
 
         # ---- INIT: 等待遥测就绪 → WAIT_ARMED ----
         if self._state == MissionState.INIT:

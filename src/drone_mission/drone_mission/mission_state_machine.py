@@ -731,6 +731,17 @@ class MissionFSM(Node):
             self._transition_to(MissionState.ERROR)
             return
 
+        # 飞行中遥控器上锁 → 立刻中止 (仅 RC 模式)
+        if self.get_param("rc_require_arm_signal", True):
+            if self._current_state not in (
+                MissionState.INIT, MissionState.COMPLETE, MissionState.ERROR,
+            ) and not self.bridge.is_armed():
+                self.get_logger().error(
+                    f"遥控器上锁 (disarm) — 飞行中检测到, 中止任务"
+                )
+                self._transition_to(MissionState.ERROR)
+                return
+
         # 执行当前状态
         if self._current_state == MissionState.COMPLETE:
             return

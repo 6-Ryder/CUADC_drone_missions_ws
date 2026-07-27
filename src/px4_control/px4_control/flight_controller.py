@@ -97,10 +97,6 @@ class FlightController:
         if not self._bridge.is_offboard():
             self._bridge.set_offboard_mode()
 
-        # 解锁
-        if not self._bridge.is_armed():
-            self._bridge.arm()
-
         # 从当前位置起飞
         pos = self._bridge.get_current_position()
         target_down = -altitude  # NED: 负值=上升
