@@ -108,6 +108,7 @@ class StandaloneBridge:
         self._armed: bool = False
         self._offboard: bool = False
         self._landed: bool = True
+        self._preflight_ok: bool = False
         self._current_yaw: float = 0.0
         self._battery_remaining: float = 1.0
         self._battery_ready: bool = False
@@ -129,25 +130,28 @@ class StandaloneBridge:
             VehicleCommand, "/drone/cmd/vehicle_command_relay", 10,
         )
 
-        # ---- Subscriptions (PX4 telemetry) ----
-        node.create_subscription(
+        # ---- Subscriptions (PX4 telemetry) — keep refs for shutdown ----
+        self._odom_sub = node.create_subscription(
             VehicleOdometry, "/fmu/out/vehicle_odometry", self._odom_cb, qos,
         )
-        node.create_subscription(
+        self._status_sub = node.create_subscription(
             VehicleStatus, "/fmu/out/vehicle_status_v4", self._status_cb, qos,
         )
-        node.create_subscription(
+        self._land_sub = node.create_subscription(
             VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, qos,
         )
-        node.create_subscription(
+        self._att_sub = node.create_subscription(
             VehicleAttitude, "/fmu/out/vehicle_attitude", self._attitude_cb, qos,
         )
-        node.create_subscription(
+        self._battery_sub = node.create_subscription(
             BatteryStatus, "/fmu/out/battery_status_v1", self._battery_cb, qos,
         )
 
         # ---- Heartbeat timer (10Hz) ----
         self._hb_timer = node.create_timer(0.1, self._heartbeat)
+
+        # ---- Shutdown guard ----
+        self._shutdown: bool = False
 
     # ----------------------------------------------------------------
     # Heartbeat
@@ -155,6 +159,8 @@ class StandaloneBridge:
 
     def _heartbeat(self) -> None:
         """10Hz — publish current setpoint to maintain offboard mode."""
+        if self._shutdown:
+            return
         if self._velocity_mode:
             msg = Twist()
             msg.linear.x = float(self._vel_target[0])
@@ -167,6 +173,47 @@ class StandaloneBridge:
             msg.y = float(self._target_ned[1])
             msg.z = float(self._target_ned[2])
             self._sp_pub.publish(msg)
+
+    # ----------------------------------------------------------------
+    # Lifecycle
+    # ----------------------------------------------------------------
+
+    def shutdown(self) -> None:
+        """
+        Stop periodic work and release resources.
+
+        Call this when the bridge is being replaced by a direct PX4Bridge
+        to avoid a dangling timer continuing to publish stale setpoints
+        on the relay topics after the owning FSM has switched control paths.
+
+        Idempotent: repeated calls are safe.
+        """
+        if self._shutdown:
+            return
+        self._shutdown = True
+        if self._hb_timer is not None:
+            self._hb_timer.cancel()
+            self._hb_timer = None
+        # Destroy subscriptions and publishers to stop callbacks from
+        # writing to stale state and to release topic resources.
+        for attr in ("_odom_sub", "_status_sub", "_land_sub",
+                     "_att_sub", "_battery_sub"):
+            sub = getattr(self, attr, None)
+            if sub is not None:
+                try:
+                    self._node.destroy_subscription(sub)
+                except AttributeError:
+                    pass  # ROS2 pre-Humble compatibility
+                setattr(self, attr, None)
+        for attr in ("_sp_pub", "_vel_pub", "_cmd_pub"):
+            pub = getattr(self, attr, None)
+            if pub is not None:
+                try:
+                    self._node.destroy_publisher(pub)
+                except AttributeError:
+                    pass
+                setattr(self, attr, None)
+        self._node.get_logger().info("[StandaloneBridge] shutdown complete")
 
     # ----------------------------------------------------------------
     # Telemetry callbacks
@@ -187,6 +234,7 @@ class StandaloneBridge:
     def _status_cb(self, msg: VehicleStatus) -> None:
         self._armed = (msg.arming_state == 2)
         self._offboard = (msg.nav_state == NAV_STATE_OFFBOARD)
+        self._preflight_ok = msg.pre_flight_checks_pass
         self._telemetry_ready = True  # 收到状态后允许发送指令
 
     def _land_cb(self, msg: VehicleLandDetected) -> None:
@@ -245,6 +293,11 @@ class StandaloneBridge:
     @property
     def battery_ready(self) -> bool:
         return self._battery_ready
+
+    @property
+    def preflight_ok(self) -> bool:
+        """PX4 飞控自检通过 (含 RC/GPS/传感器等所有 arming check)."""
+        return self._preflight_ok
 
     # -- Setpoints --
 

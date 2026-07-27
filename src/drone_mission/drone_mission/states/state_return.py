@@ -2,7 +2,7 @@
 RETURN 状态 — 返航至 H 点上方 5m.
 
 流程:
-  1. 从当前位置飞向起飞点 H (World: 10, 4, 5)
+  1. 从当前位置飞向起飞点 H (World: 4, 10, 5)
   2. 以 return_speed (3 m/s) 飞行
   3. 到达 H 点上方 → PRECISION_LAND
 """

@@ -107,7 +107,7 @@ def parse_sdf_objects(sdf_path: str) -> Dict[str, List[dict]]:
 
         # 降落标识
         if name == "landing_pad":
-            pose = _parse_pose(model.findtext("pose", "10 4 0.01 0 0 0"))
+            pose = _parse_pose(model.findtext("pose", "4 10 0.01 0 0 0"))
             objects["landing_pad"].append({
                 "x": pose[0], "y": pose[1], "radius": 0.40,
             })

@@ -1,6 +1,6 @@
 # PX4 飞行控制参数
 # 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
-# 原点: 起飞点 H (world: 10, 4, 0)
+# 原点: 解锁点 (真机=0,0,0; SITL Gazebo=4,10,0)
 /px4_bridge:
   ros__parameters:
     # --- 基础飞行参数 ---

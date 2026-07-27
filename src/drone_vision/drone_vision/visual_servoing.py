@@ -124,8 +124,8 @@ class VisualServoController:
         du = target_u - image_center_u
         dv = target_v - image_center_v
 
-        # 下视相机: +u 是机体右侧, +v 是机体后方。
-        body_forward = -dv * altitude / focal_length_v
+        # 下视相机: +u 是机体右侧(东), +v 是机体前方(北)。
+        body_forward = dv * altitude / focal_length_v
         body_right = du * altitude / focal_length_u
         error_north = (
             body_forward * np.cos(current_yaw)
