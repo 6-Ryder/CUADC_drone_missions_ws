@@ -135,7 +135,7 @@ class StandaloneBridge:
             VehicleOdometry, "/fmu/out/vehicle_odometry", self._odom_cb, qos,
         )
         self._status_sub = node.create_subscription(
-            VehicleStatus, "/fmu/out/vehicle_status_v4", self._status_cb, qos,
+            VehicleStatus, "/fmu/out/vehicle_status_v1", self._status_cb, qos,
         )
         self._land_sub = node.create_subscription(
             VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, qos,
