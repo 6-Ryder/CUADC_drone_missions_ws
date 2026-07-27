@@ -106,7 +106,7 @@ class PX4Bridge(Node):
             VehicleOdometry, "/fmu/out/vehicle_odometry", self._odom_cb, qos,
         )
         self._status_sub = self.create_subscription(
-            VehicleStatus, "/fmu/out/vehicle_status_v4", self._status_cb, qos,
+            VehicleStatus, "/fmu/out/vehicle_status_v1", self._status_cb, qos,
         )
         self._att_sub = self.create_subscription(
             VehicleAttitude, "/fmu/out/vehicle_attitude", self._attitude_cb, qos,

@@ -222,7 +222,7 @@ def test_px4_telemetry_uses_versioned_status_topics():
     bridge_py = SOURCE_ROOT / "px4_control/px4_control/standalone_bridge.py"
     source = bridge_py.read_text(encoding="utf-8")
 
-    assert '"/fmu/out/vehicle_status_v4"' in source
+    assert '"/fmu/out/vehicle_status_v1"' in source
     assert '"/fmu/out/battery_status_v1"' in source
 
 
