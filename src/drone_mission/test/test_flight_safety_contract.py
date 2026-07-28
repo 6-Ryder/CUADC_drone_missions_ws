@@ -195,6 +195,7 @@ def test_precision_land_timeout_uses_px4_land_not_force_disarm(monkeypatch):
     fsm = _FSM()
     fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
     fsm.fc.set_velocity_ned = lambda *_args: None
+    fsm.fc.set_velocity_body = lambda *_args: None
     state = PrecisionLandState(fsm)
     state._start_time = 0.0
     monkeypatch.setattr(

@@ -128,6 +128,15 @@
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
     landing_blind_altitude: 0.5   # 盲降切换高度 (m)
     landing_precision_target: 0.1 # 目标水平精度 (m)
+    # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
+    landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)
+    landing_servo_max_horizontal_vel: 0.6  # 最大水平修正速度 (m/s)
+    landing_servo_deadzone_px: 12.0     # 像素死区 (px), 进入后停止水平修正
+    landing_servo_x_to_right_sign: 1.0  # u轴→右移符号
+    landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)
+    landing_descent_fast: 0.4           # >3m 下降速度 (m/s)
+    landing_descent_medium: 0.25        # 1.5-3m 下降速度 (m/s)
+    landing_descent_slow: 0.12          # <1.5m 下降速度 (m/s)
 
     # --- 异常处理参数 ---
     battery_warning: 0.25         # 低电量警告阈值 (比例)

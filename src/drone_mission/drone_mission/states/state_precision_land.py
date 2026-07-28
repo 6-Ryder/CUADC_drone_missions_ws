@@ -3,8 +3,11 @@ PRECISION_LAND 状态 — 视觉伺服 + H 标识检测 + 对心降落.
 
 三阶段:
   Phase 1: 粗定位 (5m 高度, 搜索 H 标识)
-  Phase 2: 视觉伺服对心下降 (5m → 0.5m)
+  Phase 2: 视觉伺服对心下降 (5m → 0.5m), 图像空间 P 控制器
   Phase 3: 近地下降 (< 0.5m, 由 PX4 着陆检测确认)
+
+与投放区精校一致: 闭环在像素层, 不依赖世界坐标转换.
+像素误差 → body 速度 → fc.set_velocity_body()
 
 退出条件:
   - land_detected: 已着陆 → COMPLETE
@@ -12,6 +15,7 @@ PRECISION_LAND 状态 — 视觉伺服 + H 标识检测 + 对心降落.
   - timeout: 请求 PX4 LAND, 等待真实着陆反馈
 """
 
+import math
 import time
 from typing import Optional
 
@@ -31,6 +35,9 @@ class PrecisionLandState:
         self._has_landing_target: bool = False
         self._landing_done: bool = False
         self._land_command_sent: bool = False
+        # 伺服状态
+        self._servo_converged_count: int = 0
+        self._servo_last_log_time: float = 0.0
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -41,6 +48,8 @@ class PrecisionLandState:
         self._has_landing_target = False
         self._landing_done = False
         self._land_command_sent = False
+        self._servo_converged_count = 0
+        self._servo_last_log_time = 0.0
 
         self._fsm.set_vision_mode("landing")
 
@@ -94,6 +103,7 @@ class PrecisionLandState:
         if has_target:
             self._fsm.get_logger().info("PRECISION_LAND: 检测到 H 标识, 开始伺服下降")
             self._phase = self.PHASE_SERVO
+            self._servo_converged_count = 0
             return None
 
         # 没有 H 目标时不得从搜索高度盲降。
@@ -105,25 +115,81 @@ class PrecisionLandState:
         return None
 
     def _execute_servo(self, has_target: bool) -> Optional[str]:
-        """Phase 2: 视觉伺服对心下降."""
+        """Phase 2: 图像空间 P 控制器, 像素误差 → 机体速度, 向 H 对心下降.
+
+        闭环在像素层:
+          du = center_u - img_cx    (+u → 目标在画面右侧 → 机体右移)
+          dv = center_v - img_cy    (+v → 目标在画面下方 → 机体前飞)
+          pixel_error = sqrt(du² + dv²)
+
+          < deadzone → 已对心, 停止水平修正, 仅下降
+          > deadzone → P 控制: body_vel = kp_pixel * pixel_error
+        """
         pos = self._fsm.bridge.get_current_position()
-        altitude = abs(pos.down)  # NED z 的绝对值 = 高度
+        altitude = abs(pos.down)  # NED down 的绝对值 = 高度
 
         if not has_target:
-            # 短时丢失先保持当前位置，禁止无目标继续下降。
-            self._fsm.fc.set_velocity_ned(0.0, 0.0, 0.0)
+            # 目标丢失 → 悬停, 等待恢复
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            self._servo_converged_count = 0
         else:
-            # vision_pipeline 发布完整 NED 水平修正和下降速度。
             target = self._fsm.get_landing_target()
+            if target is None:
+                self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+                self._servo_converged_count = 0
+                return None
+            u = target.get("center_u", 0.0)
+            v = target.get("center_v", 0.0)
             conf = target.get("confidence", 0)
 
-            if altitude < 2.0:
+            # ── 1. 像素误差 ──
+            img_cx = float(self._fsm.get_param("camera_cx", 640.0))
+            img_cy = float(self._fsm.get_param("camera_cy", 480.0))
+            du = u - img_cx   # +du = 目标在画面右侧
+            dv = v - img_cy   # +dv = 目标在画面下方
+            pixel_error = math.hypot(du, dv)
+
+            # ── 2. P 控制: 像素误差 → 机体速度 ──
+            kp = float(self._fsm.get_param("landing_servo_kp_pixel", 0.004))
+            max_vel = float(self._fsm.get_param("landing_servo_max_horizontal_vel", 0.6))
+            deadzone = float(self._fsm.get_param("landing_servo_deadzone_px", 12.0))
+
+            if pixel_error < deadzone:
+                forward = 0.0
+                right = 0.0
+                self._servo_converged_count += 1
+            else:
+                # 符号: x_to_right_sign 和 y_to_forward_sign (与投放精校一致)
+                x_sign = float(self._fsm.get_param("landing_servo_x_to_right_sign", 1.0))
+                y_sign = float(self._fsm.get_param("landing_servo_y_to_forward_sign", -1.0))
+
+                forward = max(-max_vel, min(max_vel, y_sign * kp * dv))
+                right = max(-max_vel, min(max_vel, x_sign * kp * du))
+                self._servo_converged_count = 0
+
+            # ── 3. 高度分层下降速度 ──
+            if altitude > 3.0:
+                descent = float(self._fsm.get_param("landing_descent_fast", 0.4))
+            elif altitude > 1.5:
+                descent = float(self._fsm.get_param("landing_descent_medium", 0.25))
+            else:
+                descent = float(self._fsm.get_param("landing_descent_slow", 0.12))
+
+            self._fsm.fc.set_velocity_body(forward, right, descent)
+
+            # ── 4. 定期日志 (1Hz) ──
+            now = time.time()
+            if now - self._servo_last_log_time > 1.0:
+                self._servo_last_log_time = now
                 self._fsm.get_logger().info(
-                    f"PRECISION_LAND: 高度={altitude:.1f}m conf={conf:.2f}"
+                    f"PRECISION_LAND: alt={altitude:.1f}m "
+                    f"px_err={pixel_error:.0f}px du={du:+.0f} dv={dv:+.0f} "
+                    f"body_vel=(fwd:{forward:.2f},r:{right:.2f},d:{descent:.2f}) "
+                    f"conf={conf:.2f} dead={self._servo_converged_count}"
                 )
 
-        # 下降到盲降高度
-        blind_alt = self._fsm.get_param("landing_blind_altitude", 0.5)
+        # ── 下降到盲降高度 → Phase 3 ──
+        blind_alt = float(self._fsm.get_param("landing_blind_altitude", 0.5))
         if altitude < blind_alt:
             self._fsm.get_logger().info(
                 f"PRECISION_LAND: 到达盲降高度 ({altitude:.2f}m)"
@@ -134,7 +200,7 @@ class PrecisionLandState:
 
     def _execute_blind(self) -> Optional[str]:
         """Phase 3: near-ground descent while waiting for PX4 land detection."""
-        self._fsm.fc.set_velocity_ned(0.0, 0.0, 0.15)
+        self._fsm.fc.set_velocity_body(0.0, 0.0, 0.15)
 
         elapsed = time.time() - self._start_time
         if elapsed > 60.0:
