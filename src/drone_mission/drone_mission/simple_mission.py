@@ -63,10 +63,10 @@ class SimpleMission(Node):
         # ---- 参数 ----
         self.declare_parameter("cruise_altitude", 5.0)
         self.declare_parameter("takeoff_height", 5.0)
-        self.declare_parameter("drop_x", 10.0)
-        self.declare_parameter("drop_y", 36.5)
-        self.declare_parameter("home_x", 4.0)
-        self.declare_parameter("home_y", 10.0)
+        self.declare_parameter("drop_x", 4.0)     # 北向布局: 投放区中心 World X=4
+        self.declare_parameter("drop_y", 42.5)   # 北向布局: 投放区中心 World Y=42.5
+        self.declare_parameter("home_x", 4.0)     # SITL Home World X
+        self.declare_parameter("home_y", 10.0)    # SITL Home World Y
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
         self.declare_parameter("waypoint_timeout", 120.0)
@@ -221,15 +221,15 @@ class SimpleMission(Node):
         # ---- TRANSIT_TO_DROP: 飞往投放区 ----
         elif self._state == MissionState.TRANSIT_TO_DROP:
             if not self._command_sent:
-                dx = self.get_param("drop_x", 10.0)
-                dy = self.get_param("drop_y", 36.5)
+                dx = self.get_param("drop_x", 4.0)
+                dy = self.get_param("drop_y", 42.5)
                 self.get_logger().info(f"TRANSIT: 飞往投放区 World({dx}, {dy}, {cruise_alt})")
                 self._fc.goto_world(dx, dy, cruise_alt, speed=2.0)
                 self._command_sent = True
 
             n, e, d = world_to_ned(
-                self.get_param("drop_x", 10.0),
-                self.get_param("drop_y", 36.5),
+                self.get_param("drop_x", 4.0),
+                self.get_param("drop_y", 42.5),
                 cruise_alt,
             )
             if self._fc.reached((n, e, d), tol):

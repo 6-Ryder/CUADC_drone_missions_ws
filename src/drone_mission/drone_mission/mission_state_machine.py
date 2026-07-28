@@ -236,7 +236,7 @@ class MissionFSM(Node):
         self.declare_parameter("area2_north_max", 60.0)
         self.declare_parameter("area2_east_min", -4.0)
         self.declare_parameter("area2_east_max", 4.0)
-        self.declare_parameter("area2_altitude", 5.0)
+        self.declare_parameter("area2_altitude", 2.5)   # 侦察区低空扫描高度, 与 YAML 一致
         # 覆盖
         self.declare_parameter("grid_spacing", 1.0)
         self.declare_parameter("sweep_passes", 2)

@@ -107,7 +107,7 @@ step "Step 2/4 — 启动 PX4 SITL + Gazebo (drone_field 世界)"
 cd "$PX4_BLD"
 export PX4_SIM_MODEL="gz_x500_mono_cam_down"
 export PX4_GZ_WORLD="drone_field"
-export PX4_GZ_MODEL_POSE="10,4,0.3,0,0,0"
+export PX4_GZ_MODEL_POSE="4,10,0.3,0,0,0"
 export GZ_IP="127.0.0.1"
 export ROS_DOMAIN_ID=0
 export HEADLESS=1

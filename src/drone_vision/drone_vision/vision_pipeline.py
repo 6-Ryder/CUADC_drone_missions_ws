@@ -86,6 +86,8 @@ class VisionPipelineNode(Node):
         # ---- 核心组件 (延迟加载) ----
         self._engine: Optional[YOLOEngine] = None
         self._drop_marker_engine: Optional[YOLOEngine] = None
+        self._landing_engine: Optional[YOLOEngine] = None
+        self._landing_model_loaded: bool = False
         self._bridge = CvBridge()
 
         # 坐标变换 + 姿态补偿
@@ -214,11 +216,13 @@ class VisionPipelineNode(Node):
         self.declare_parameter("landing_adaptive_thresh_block", 11)
         self.declare_parameter("landing_circle_min_area", 80)
         self.declare_parameter("landing_H_orientation_enable", True)
-        # 覆盖
-        self.declare_parameter("coverage_zone_x_min", 6.0)
-        self.declare_parameter("coverage_zone_x_max", 14.0)
-        self.declare_parameter("coverage_zone_y_min", 59.0)
-        self.declare_parameter("coverage_zone_y_max", 64.0)
+        self.declare_parameter("landing_model_path", "landing_h_yolo.onnx")
+        self.declare_parameter("landing_class_names", ["landing_H"])
+        # 覆盖 — 侦察区 World 坐标 (北向布局: Home X=4,Y=10; Recon NED north=55-60 east=±4)
+        self.declare_parameter("coverage_zone_x_min", 0.0)   # World X = east_min + home_x = -4+4
+        self.declare_parameter("coverage_zone_x_max", 8.0)   # World X = east_max + home_x = 4+4
+        self.declare_parameter("coverage_zone_y_min", 65.0)  # World Y = north_min + home_y = 55+10
+        self.declare_parameter("coverage_zone_y_max", 70.0)  # World Y = north_max + home_y = 60+10
         self.declare_parameter("coverage_grid_resolution", 0.5)
         self.declare_parameter("coverage_fov_half_angle", 35.0)
         self.declare_parameter("coverage_complete_ratio", 0.95)
@@ -374,6 +378,7 @@ class VisionPipelineNode(Node):
         elif request.mode == 2:
             self._detection_mode = "landing"
             self.set_servo_mode("landing")
+            self._ensure_landing_engine()
             self._release_detection_models()
         elif request.mode in (0, 3):
             if self._detection_models_released:
@@ -389,6 +394,64 @@ class VisionPipelineNode(Node):
         response.success = True
         response.message = self._detection_mode
         return response
+
+    def _ensure_landing_engine(self) -> bool:
+
+        if self._landing_model_loaded:
+            return self._landing_engine is not None and self._landing_engine.is_loaded
+
+        self._landing_model_loaded = True
+
+        try:
+            landing_path = self._resolve_model_path(
+                self.get_parameter("landing_model_path").value,
+            )
+        except RuntimeError as e:
+            self.get_logger().warn(
+                f"降落模型路径无效: {e}; 回退到OpenCV检测"
+            )
+            return False
+
+        try:
+            self._landing_engine = create_engine(
+                model_path=landing_path,
+                conf_threshold=self.get_parameter("conf_threshold").value,
+                nms_iou_threshold=self.get_parameter("nms_iou_threshold").value,
+                input_size=(
+                    self.get_parameter("model_width").value,
+                    self.get_parameter("model_height").value,
+                ),
+                class_names=list(
+                    self.get_parameter("landing_class_names").value
+                ),
+                device=self.get_parameter("device").value,
+            )
+        except Exception as e:
+            self.get_logger().error(f"降落引擎创建失败: {e}")
+            self._landing_engine = None
+            return False
+
+        if not self._landing_engine.load():
+            self.get_logger().warn(
+                "降落模型加载失败; 回退到OpenCV全图H标识搜索"
+            )
+            self._landing_engine = None
+            return False
+
+        self.get_logger().info(f"降落H标识YOLO已加载: {landing_path}")
+        return True
+
+    def _infer_landing(self, image: np.ndarray) -> List[Detection]:
+
+        if self._landing_engine is None:
+            self._ensure_landing_engine()
+
+        if self._landing_engine is not None and self._landing_engine.is_loaded:
+            try:
+                return self._landing_engine.infer(image)
+            except Exception as e:
+                self.get_logger().error(f"降落引擎推理异常: {e}")
+        return []
 
     def _release_detection_models(self):
         if self._detection_models_released:
@@ -595,7 +658,7 @@ class VisionPipelineNode(Node):
         # 根据任务阶段筛选检测。
         if self._detection_mode == "landing":
             cyl_dets = []
-            landing_dets = []
+            landing_dets = self._infer_landing(image)
         elif self._detection_mode == "all":
             cyl_dets = [
                 d for d in all_dets
@@ -684,22 +747,30 @@ class VisionPipelineNode(Node):
                 det.bbox_x1, det.bbox_y1, det.bbox_x2, det.bbox_y2 = bbox
 
             # ---- 姿态补偿坐标变换 ----
-            world_xy = self._coord_xform.pixel_to_world(
-                t["cx"], t["cy"],
-                (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
-                self._drone_pose[3:7],
-                ground_z=0.0, q_convention="xyzw",
+            # 优先使用 6-DoF 精确投影；debug 模式无位姿时回退 simple 投影
+            cx = self.get_parameter("cx").value
+            cy = self.get_parameter("cy").value
+            selected_xy = CoordinateTransformer.pixel_to_world_simple(
+                t["cx"], t["cy"], alt, fx, fy, cx, cy,
+                drone_world_x=self._drone_pose[0],
+                drone_world_y=self._drone_pose[1],
             )
-            if world_xy is None:
-                continue
-            dx = world_xy[0] - self._drone_pose[0]
-            dy = world_xy[1] - self._drone_pose[1]
-            max_reasonable_offset = max(alt * 1.5, 3.0)
-            if (dx * dx + dy * dy) ** 0.5 > max_reasonable_offset:
-                continue
+            if self._coord_xform:
+                world_xy = self._coord_xform.pixel_to_world(
+                    t["cx"], t["cy"],
+                    (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
+                    self._drone_pose[3:7],
+                    ground_z=0.0, q_convention="xyzw",
+                )
+                if world_xy is not None:
+                    dx = world_xy[0] - self._drone_pose[0]
+                    dy = world_xy[1] - self._drone_pose[1]
+                    max_reasonable_offset = max(alt * 1.5, 3.0)
+                    if (dx * dx + dy * dy) ** 0.5 <= max_reasonable_offset:
+                        selected_xy = world_xy
 
-            det.center_x = world_xy[0]
-            det.center_y = world_xy[1]
+            det.center_x = selected_xy[0]
+            det.center_y = selected_xy[1]
 
             # 真实半径 (像素→米)
             det.radius = t["radius"] * alt / max(fx, fy)
@@ -835,6 +906,9 @@ class VisionPipelineNode(Node):
 
     def destroy_node(self):
         self._release_detection_models()
+        if self._landing_engine is not None:
+            self._landing_engine.close()
+            self._landing_engine = None
         super().destroy_node()
 
 

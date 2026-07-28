@@ -351,7 +351,7 @@ class PathPlanner:
     def plan_return(
         self,
         from_xyz: Tuple[float, float, float],
-        home_xyz: Tuple[float, float, float] = (4.0, 10.0, 5.0),
+        home_xyz: Tuple[float, float, float] = (0.0, 0.0, 5.0),  # 真机默认原点; SITL 由 caller 传入
     ) -> List[dict]:
         """
         生成返航航点 (World 坐标).

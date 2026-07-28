@@ -498,10 +498,10 @@ class TestForwardRecon(Node):
             if landed:
                 self.get_logger().info("LAND: 着陆完成 → COMPLETE")
                 self._transition(MissionState.COMPLETE)
-            elif elapsed > 30.0:
-                self.get_logger().error("LAND: 着陆超时 (30s), 强制上锁")
-                self._fc.force_disarm()
-                self._transition(MissionState.COMPLETE)
+            # elif elapsed > 30.0:
+            #     self.get_logger().error("LAND: 着陆超时 (30s), 强制上锁")
+            #     self._fc.force_disarm()
+            #     self._transition(MissionState.COMPLETE)
 
     # ================================================================
     # 侦察区航点生成

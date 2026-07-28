@@ -41,6 +41,11 @@
     drop_marker_min_scale_ratio: 0.45       # 实测直径/1m理论投影下限
     drop_marker_max_scale_ratio: 1.8        # 实测直径/1m理论投影上限
 
+    # ---- H 降落标识模型 (单类, 按需在降落阶段加载) ----
+    landing_model_path: "landing_h_yolo.onnx"
+    landing_class_names:
+      - "landing_H"                        # 0: H 降落标识
+
     # ============================================================
     # 圆筒检测精确后处理 (OpenCV)
     # ============================================================
