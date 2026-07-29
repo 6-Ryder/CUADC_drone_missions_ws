@@ -44,7 +44,7 @@ class ReconPatrolState:
         area2_n_max = self._fsm.get_param("area2_north_max", 60.0)
         area2_e_min = self._fsm.get_param("area2_east_min", -4.0)
         area2_e_max = self._fsm.get_param("area2_east_max", 4.0)
-        recon_alt = self._fsm.get_param("area2_altitude", 5.0)
+        recon_alt = self._fsm.get_param("area2_altitude", 2.5)
 
         self._waypoints = self._fsm.path_planner.plan_coverage_ned(
             area_north_min=area2_n_min,

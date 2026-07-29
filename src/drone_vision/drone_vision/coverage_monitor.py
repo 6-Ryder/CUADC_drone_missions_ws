@@ -151,14 +151,24 @@ class CoverageMonitorNode(Node):
     def __init__(self):
         super().__init__("coverage_monitor")
 
+        # 侦察区 World 坐标 (北向布局: Home X=4,Y=10; Recon NED north=55-60 east=±4)
+        self.declare_parameter("coverage_zone_x_min", 0.0)
+        self.declare_parameter("coverage_zone_x_max", 8.0)
+        self.declare_parameter("coverage_zone_y_min", 65.0)
+        self.declare_parameter("coverage_zone_y_max", 70.0)
         self.declare_parameter("coverage_grid_resolution", 0.5)
         self.declare_parameter("coverage_fov_half_angle", 35.0)
         self.declare_parameter("coverage_complete_ratio", 0.95)
 
-        # 侦察区范围 (从 mission_params 获取, 这里硬编码默认值)
         self._monitor = CoverageMonitor(
-            zone_x_range=(0.0, 8.0),
-            zone_y_range=(65.0, 70.0),
+            zone_x_range=(
+                self.get_parameter("coverage_zone_x_min").value,
+                self.get_parameter("coverage_zone_x_max").value,
+            ),
+            zone_y_range=(
+                self.get_parameter("coverage_zone_y_min").value,
+                self.get_parameter("coverage_zone_y_max").value,
+            ),
             grid_resolution=self.get_parameter("coverage_grid_resolution").value,
             fov_half_angle_deg=self.get_parameter("coverage_fov_half_angle").value,
             complete_ratio=self.get_parameter("coverage_complete_ratio").value,
