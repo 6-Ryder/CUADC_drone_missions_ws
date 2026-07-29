@@ -64,6 +64,8 @@ SERIAL_BAUD="${SERIAL_BAUD:-921600}"
 step "Step 0/3 — 清理旧进程"
 pkill -9 -f "MicroXRCEAgent" 2>/dev/null || true
 pkill -9 -f "px4_bridge" 2>/dev/null || true
+pkill -9 -f "vision_pipeline" 2>/dev/null || true
+pkill -9 -f "camera_node" 2>/dev/null || true
 #pkill -9 -f "test_forward_recon" 2>/dev/null || true
 sleep 1
 info "旧进程已清理"
@@ -140,7 +142,8 @@ echo "│  解锁:     标准 ARM (非 SITL force)                      │"
 echo "│  Home:     解锁点 (0, 0)                                 │"
 echo "├──────────────────────────────────────────────────────────┤"
 echo "│  Phase 1:  起飞 → 向北直飞 ${forward_distance:-20.0}m         │"
-echo "│  Phase 2:  侦察区扫描 → 返航 → 降落                       │"
+echo "│  Phase 2:  侦察区扫描 → 返航                               │"
+echo "│  LAND:     H 标识视觉伺服精准降落 (vision_pipeline)         │"
 echo "├──────────────────────────────────────────────────────────┤"
 echo "│  日志:     $LOG_DIR                                      │"
 echo "│  紧急停止: 关闭遥控器 或 kill $AGENT_PID                    │"

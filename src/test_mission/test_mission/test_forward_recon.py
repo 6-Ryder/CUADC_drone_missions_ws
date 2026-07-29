@@ -36,6 +36,10 @@ from px4_control.telemetry import configure_home, world_to_ned
 
 from drone_mission.path_planner import PathPlanner
 
+from drone_interfaces.msg import LandingTarget
+from drone_interfaces.srv import SetVisionMode
+from std_msgs.msg import String
+
 
 # ============================================================
 # 任务状态
@@ -120,6 +124,21 @@ class TestForwardRecon(Node):
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
         self.declare_parameter("rc_require_arm_signal", True)
 
+        # ---- 精准降落参数 (与 state_precision_land.py 对齐) ----
+        self.declare_parameter("camera_cx", 640.0)
+        self.declare_parameter("camera_cy", 480.0)
+        self.declare_parameter("landing_search_timeout", 15.0)
+        self.declare_parameter("landing_servo_kp_pixel", 0.004)
+        self.declare_parameter("landing_servo_max_horizontal_vel", 0.6)
+        self.declare_parameter("landing_servo_deadzone_px", 12.0)
+        self.declare_parameter("landing_servo_x_to_right_sign", 1.0)
+        self.declare_parameter("landing_servo_y_to_forward_sign", -1.0)
+        self.declare_parameter("landing_descent_fast", 0.4)
+        self.declare_parameter("landing_descent_medium", 0.25)
+        self.declare_parameter("landing_descent_slow", 0.12)
+        self.declare_parameter("landing_blind_altitude", 0.5)
+        self.declare_parameter("vision_loss_timeout", 3.0)
+
         # ---- 坐标变换 ----
         configure_home(
             self.get_param("home_x", 0.0),
@@ -159,6 +178,36 @@ class TestForwardRecon(Node):
 
         # ---- 进度日志 ----
         self._last_progress_log: float = 0.0
+
+        # ---- 精准降落状态 ----
+        self._LAND_PHASE_SEARCH = 0
+        self._LAND_PHASE_SERVO = 1
+        self._LAND_PHASE_BLIND = 2
+        self._land_phase: int = 0
+        self._landing_target: dict | None = None
+        self._land_vision_lost_start: float = 0.0
+        self._land_has_target: bool = False
+        self._land_servo_converged: int = 0
+        self._land_servo_last_log: float = 0.0
+        self._land_px4_requested: bool = False
+
+        # ---- 视觉订阅 ----
+        try:
+            self._landing_sub = self.create_subscription(
+                LandingTarget, "/drone/vision/landing_target",
+                self._landing_target_cb, 10,
+            )
+            self._vis_status_sub = self.create_subscription(
+                String, "/drone/vision/status", self._vision_status_cb, 10,
+            )
+            self.get_logger().info("已订阅 /drone/vision/landing_target")
+        except Exception as e:
+            self.get_logger().warn(f"视觉话题订阅失败: {e}")
+
+        # ---- 视觉模式切换服务 ----
+        self._vision_mode_client = self.create_client(
+            SetVisionMode, "/drone/vision/set_mode",
+        )
 
         # ---- 控制循环 ----
         freq = self.get_param("control_frequency", 20.0)
@@ -491,17 +540,10 @@ class TestForwardRecon(Node):
                 self._transition(MissionState.LAND)
 
         # ================================================================
-        # LAND: 降落
+        # LAND: H 标识精准降落 (三阶段: SEARCH → SERVO → BLIND)
         # ================================================================
         elif self._state == MissionState.LAND:
-            landed = self._fc.land()
-            if landed:
-                self.get_logger().info("LAND: 着陆完成 → COMPLETE")
-                self._transition(MissionState.COMPLETE)
-            # elif elapsed > 30.0:
-            #     self.get_logger().error("LAND: 着陆超时 (30s), 强制上锁")
-            #     self._fc.force_disarm()
-            #     self._transition(MissionState.COMPLETE)
+            self._handle_precision_land(elapsed)
 
     # ================================================================
     # 侦察区航点生成
@@ -550,11 +592,222 @@ class TestForwardRecon(Node):
         )
 
     # ================================================================
+    # 精准降落 (H 标识视觉伺服, 与 state_precision_land.py 对齐)
+    # ================================================================
+
+    # ---- 回调 ----
+
+    def _landing_target_cb(self, msg):
+        """缓存最新的 H 标识检测结果."""
+        self._landing_target = {
+            "center_u": msg.center_u,
+            "center_v": msg.center_v,
+            "world_x": msg.world_x,
+            "world_y": msg.world_y,
+            "confidence": msg.confidence,
+            "yaw_correction": msg.yaw_correction,
+        }
+
+    def _vision_status_cb(self, msg):
+        """vision pipeline heartbeat (仅日志确认)."""
+        pass
+
+    # ---- 视觉模式切换 ----
+
+    _VISION_MODE_NONE = 0
+    _VISION_MODE_LANDING = 2
+    _VISION_MODE_ALL = 3
+
+    def _set_vision_mode(self, mode: str):
+        """通过 ROS 服务切换视觉管线工作模式."""
+        if not self._vision_mode_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warn("set_vision_mode: 服务不可用")
+            return
+        try:
+            req = SetVisionMode.Request()
+            if mode == "landing":
+                req.mode = self._VISION_MODE_LANDING
+                req.enable = True
+            elif mode == "none":
+                req.mode = self._VISION_MODE_NONE
+                req.enable = False
+            else:
+                req.mode = self._VISION_MODE_ALL
+                req.enable = True
+            self._vision_mode_client.call_async(req)
+        except Exception as e:
+            self.get_logger().warn(f"set_vision_mode 调用失败: {e}")
+
+    # ---- 降落状态管理 ----
+
+    def _reset_landing_state(self):
+        """重置精准降落内部状态."""
+        self._land_phase = self._LAND_PHASE_SEARCH
+        self._landing_target = None
+        self._land_vision_lost_start = 0.0
+        self._land_has_target = False
+        self._land_servo_converged = 0
+        self._land_servo_last_log = 0.0
+        self._land_px4_requested = False
+
+    def _switch_to_blind(self):
+        """转到盲降阶段并关闭视觉检测."""
+        self._land_phase = self._LAND_PHASE_BLIND
+        self.get_logger().info("PRECISION_LAND: Phase 3 - 盲降模式")
+        self._set_vision_mode("none")
+
+    def _request_px4_land(self):
+        """兜底: 请求 PX4 自主着陆 (仅发送一次)."""
+        if not self._land_px4_requested:
+            self.get_logger().warn("PRECISION_LAND: 请求 PX4 自主着陆")
+            self._bridge.land_at_current()
+            self._land_px4_requested = True
+
+    # ---- 主入口 ----
+
+    def _handle_precision_land(self, elapsed: float):
+        """LAND 状态: 三阶段精准降落调度."""
+        # PX4 已检测到着陆 → 完成
+        if self._bridge.is_landed():
+            self.get_logger().info("PRECISION_LAND: 已着陆 → COMPLETE")
+            self._transition(MissionState.COMPLETE)
+            return
+
+        # 检查当前目标
+        lt = self._landing_target
+        has_target = lt is not None and lt.get("confidence", 0) > 0.3
+
+        # 视觉丢失计时
+        if has_target:
+            self._land_has_target = True
+            self._land_vision_lost_start = 0.0
+        elif self._land_has_target:
+            if self._land_vision_lost_start == 0.0:
+                self._land_vision_lost_start = time.time()
+
+        # 视觉丢失超时 → PX4 LAND 兜底
+        vis_loss_to = self.get_param("vision_loss_timeout", 3.0)
+        if self._land_has_target and self._land_vision_lost_start > 0:
+            if time.time() - self._land_vision_lost_start > vis_loss_to:
+                self.get_logger().error("PRECISION_LAND: H 目标持续丢失")
+                self._request_px4_land()
+                self._transition(MissionState.COMPLETE)
+                return
+
+        # 分阶段执行
+        if self._land_phase == self._LAND_PHASE_SEARCH:
+            self._land_phase_search(elapsed, has_target)
+        elif self._land_phase == self._LAND_PHASE_SERVO:
+            self._land_phase_servo(has_target)
+        elif self._land_phase == self._LAND_PHASE_BLIND:
+            self._land_phase_blind(elapsed)
+
+    # ---- Phase 1: 搜索 H 标识 ----
+
+    def _land_phase_search(self, elapsed: float, has_target: bool):
+        """在巡航高度悬停, 等待 H 标识出现."""
+        if has_target:
+            self.get_logger().info(
+                "PRECISION_LAND: 检测到 H 标识, 开始伺服下降"
+            )
+            self._land_phase = self._LAND_PHASE_SERVO
+            self._land_servo_converged = 0
+            return
+
+        timeout = self.get_param("landing_search_timeout", 15.0)
+        if elapsed > timeout:
+            self.get_logger().error("PRECISION_LAND: H 标识搜索超时")
+            self._request_px4_land()
+            self._transition(MissionState.COMPLETE)
+
+    # ---- Phase 2: 像素空间 P 控制伺服下降 ----
+
+    def _land_phase_servo(self, has_target: bool):
+        """图像空间 P 控制器: 像素误差 → 机体速度, 对心下降."""
+        pos = self._bridge.get_current_position()
+        altitude = abs(pos.down)
+
+        if not has_target or self._landing_target is None:
+            # 目标丢失 → 悬停等待恢复
+            self._fc.set_velocity_body(0.0, 0.0, 0.0)
+            self._land_servo_converged = 0
+        else:
+            u = self._landing_target.get("center_u", 0.0)
+            v = self._landing_target.get("center_v", 0.0)
+            conf = self._landing_target.get("confidence", 0)
+
+            # 像素误差
+            img_cx = float(self.get_param("camera_cx", 640.0))
+            img_cy = float(self.get_param("camera_cy", 480.0))
+            du = u - img_cx
+            dv = v - img_cy
+            pixel_error = math.hypot(du, dv)
+
+            # P 控制
+            kp = float(self.get_param("landing_servo_kp_pixel", 0.004))
+            max_vel = float(self.get_param("landing_servo_max_horizontal_vel", 0.6))
+            deadzone = float(self.get_param("landing_servo_deadzone_px", 12.0))
+
+            if pixel_error < deadzone:
+                forward = 0.0
+                right = 0.0
+                self._land_servo_converged += 1
+            else:
+                x_sign = float(self.get_param("landing_servo_x_to_right_sign", 1.0))
+                y_sign = float(self.get_param("landing_servo_y_to_forward_sign", -1.0))
+                forward = max(-max_vel, min(max_vel, y_sign * kp * dv))
+                right = max(-max_vel, min(max_vel, x_sign * kp * du))
+                self._land_servo_converged = 0
+
+            # 高度分层下降速度
+            if altitude > 3.0:
+                descent = float(self.get_param("landing_descent_fast", 0.4))
+            elif altitude > 1.5:
+                descent = float(self.get_param("landing_descent_medium", 0.25))
+            else:
+                descent = float(self.get_param("landing_descent_slow", 0.12))
+
+            self._fc.set_velocity_body(forward, right, descent)
+
+            # 1Hz 日志
+            now = time.time()
+            if now - self._land_servo_last_log > 1.0:
+                self._land_servo_last_log = now
+                self.get_logger().info(
+                    f"PRECISION_LAND: alt={altitude:.1f}m "
+                    f"px_err={pixel_error:.0f}px du={du:+.0f} dv={dv:+.0f} "
+                    f"vel=(fwd:{forward:.2f},r:{right:.2f},d:{descent:.2f}) "
+                    f"conf={conf:.2f} converged={self._land_servo_converged}"
+                )
+
+        # 到达盲降高度 → Phase 3
+        blind_alt = float(self.get_param("landing_blind_altitude", 0.5))
+        if altitude < blind_alt:
+            self.get_logger().info(
+                f"PRECISION_LAND: 到达盲降高度 ({altitude:.2f}m)"
+            )
+            self._switch_to_blind()
+
+    # ---- Phase 3: 近地盲降 ----
+
+    def _land_phase_blind(self, elapsed: float):
+        """近地低速下降, 等待 PX4 着陆检测."""
+        self._fc.set_velocity_body(0.0, 0.0, 0.15)
+
+        if elapsed > 60.0:
+            self._request_px4_land()
+
+    # ================================================================
     # 状态转移
     # ================================================================
 
     def _transition(self, state: MissionState):
         old = self._state
+
+        # ---- 退出 LAND → 关闭视觉 ----
+        if old == MissionState.LAND:
+            self._set_vision_mode("none")
+
         self._state = state
         self._state_start = time.time()
         self._command_sent = False
@@ -564,6 +817,17 @@ class TestForwardRecon(Node):
         if state == MissionState.RECON_SWEEP:
             self._recon_wp_idx = 0
             self._recon_wp_stable = 0
+
+        # ---- 进入 LAND → 初始化精准降落 ----
+        if state == MissionState.LAND:
+            self._reset_landing_state()
+            self.get_logger().info(
+                "LAND: 开始 H 标识精准降落"
+                f" (search={self.get_param('landing_search_timeout', 15.0)}s"
+                f" blind_alt={self.get_param('landing_blind_altitude', 0.5)}m)"
+            )
+            self._set_vision_mode("landing")
+            self._fc.loiter()
 
         self.get_logger().info(f"[FSM] {old.value} → {state.value}")
 
