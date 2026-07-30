@@ -125,8 +125,8 @@ class TestForwardRecon(Node):
         self.declare_parameter("rc_require_arm_signal", True)
 
         # ---- 精准降落参数 (与 state_precision_land.py 对齐) ----
-        self.declare_parameter("camera_cx", 640.0)
-        self.declare_parameter("camera_cy", 480.0)
+        self.declare_parameter("camera_cx", 320.0)
+        self.declare_parameter("camera_cy", 240.0)
         self.declare_parameter("landing_search_timeout", 15.0)
         self.declare_parameter("landing_servo_kp_pixel", 0.004)
         self.declare_parameter("landing_servo_max_horizontal_vel", 0.6)
@@ -737,8 +737,8 @@ class TestForwardRecon(Node):
             conf = self._landing_target.get("confidence", 0)
 
             # 像素误差
-            img_cx = float(self.get_param("camera_cx", 640.0))
-            img_cy = float(self.get_param("camera_cy", 480.0))
+            img_cx = float(self.get_param("camera_cx", 320.0))
+            img_cy = float(self.get_param("camera_cy", 240.0))
             du = u - img_cx
             dv = v - img_cy
             pixel_error = math.hypot(du, dv)

@@ -173,6 +173,8 @@ def generate_launch_description():
             "sweep_speed": LaunchConfiguration("sweep_speed"),
             "grid_spacing": LaunchConfiguration("grid_spacing"),
             "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
+            "camera_cx": 320.0,
+            "camera_cy": 240.0,
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
