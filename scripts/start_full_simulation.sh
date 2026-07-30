@@ -58,27 +58,10 @@ rm -f "$PX4_BLD/rootfs/0/parameters.bson" "$PX4_BLD/rootfs/0/parameters_backup.b
 rm -rf "$PX4_BLD/rootfs/0/dataman"
 rm -f "$PX4_BLD/rootfs/parameters.bson" "$PX4_BLD/rootfs/parameters_backup.bson"
 
-if [ -f /opt/ros/humble/setup.bash ]; then
-    source /opt/ros/humble/setup.bash
-else
-    error "ROS2 Humble 未找到"
+if ! source "$PROJ/scripts/sitl_env.sh"; then
+    error "SITL ROS2 环境初始化失败"
     exit 1
 fi
-
-if [ ! -f "$PROJ/install/setup.bash" ]; then
-    error "drone_tasks_ws 未编译, 请先运行: colcon build --symlink-install"
-    exit 1
-fi
-source "$PROJ/install/setup.bash"
-
-# SITL may use newer PX4 messages than the real vehicle. Overlay a generated
-# SITL interface package without replacing the real-flight src/px4_msgs tree.
-SITL_PX4_MSGS_SETUP="$PROJ/install/sitl_px4_msgs/setup.bash"
-if [ ! -f "$SITL_PX4_MSGS_SETUP" ]; then
-    info "构建与当前 SITL PX4 匹配的 px4_msgs 覆盖层..."
-    "$PROJ/scripts/build_sitl_px4_msgs.sh" "$PX4_DIR"
-fi
-source "$SITL_PX4_MSGS_SETUP"
 
 if ! command -v MicroXRCEAgent &>/dev/null; then
     error "MicroXRCEAgent 未安装"

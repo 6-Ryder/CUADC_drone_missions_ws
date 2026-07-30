@@ -1,6 +1,7 @@
 """PX4 DDS interface contracts for the SITL and real-flight deployments."""
 
 from pathlib import Path
+import subprocess
 
 
 WORKSPACE = Path(__file__).resolve().parents[3]
@@ -14,11 +15,29 @@ def test_sitl_uses_its_own_px4_msgs_overlay():
     startup = (SCRIPTS / "start_full_simulation.sh").read_text(encoding="utf-8")
     builder = (SCRIPTS / "build_sitl_px4_msgs.sh").read_text(encoding="utf-8")
 
-    assert 'install/sitl_px4_msgs/setup.bash' in startup
+    assert 'source "$PROJ/scripts/sitl_env.sh"' in startup
     assert 'mktemp -d' in builder
     assert 'msg/versioned' in builder
     assert 'INSTALL_BASE="$PROJ/install/sitl_px4_msgs"' in builder
     assert '--install-base "$INSTALL_BASE"' in builder
+
+
+def test_sitl_environment_imports_vehicle_status_v4_after_workspace_setup():
+    """SITL must promote v4 even when the workspace already exposes real v1."""
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"source '{SCRIPTS}/sitl_env.sh'; "
+            "python3 -c 'from px4_msgs.msg import VehicleStatus; "
+            "print(VehicleStatus.MESSAGE_VERSION)'",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "4"
 
 
 def test_sitl_px4_msgs_builder_sources_ros_before_enabling_nounset():

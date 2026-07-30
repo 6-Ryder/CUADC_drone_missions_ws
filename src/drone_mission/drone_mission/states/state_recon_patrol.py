@@ -37,7 +37,7 @@ class ReconPatrolState:
         self._waypoint_stable_count = 0
 
         # 侦察阶段只记录覆盖率，不需要运行两套目标检测模型。
-        self._fsm.set_vision_mode("none")
+        self._fsm.set_vision_mode("coverage_reset")
 
         # 生成低空弓字形覆盖路径 (NED 坐标系)
         area2_n_min = self._fsm.get_param("area2_north_min", 55.0)
@@ -108,6 +108,10 @@ class ReconPatrolState:
         if self._waypoint_stable_count >= self._waypoint_stable_required:
             self._waypoint_stable_count = 0
             self._wp_idx += 1
+            if self._wp_idx == 1:
+                # The first waypoint is the strip entry. Start accounting only
+                # after reaching scan altitude, before flying the first strip.
+                self._fsm.set_vision_mode("coverage")
             if self._wp_idx < len(self._waypoints):
                 self._fly_to_wp(self._wp_idx)
 

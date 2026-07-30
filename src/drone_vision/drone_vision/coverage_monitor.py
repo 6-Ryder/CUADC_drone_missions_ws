@@ -54,11 +54,22 @@ class CoverageMonitor:
         self.grid = np.zeros((self.nx, self.ny), dtype=bool)
         self.total_cells = self.nx * self.ny
         self.covered_set: Set[Tuple[int, int]] = set()
+        self._scan_active = False
 
     def reset(self):
         """重置覆盖状态."""
         self.grid.fill(False)
         self.covered_set.clear()
+        self._scan_active = False
+
+    def begin_scan(self):
+        """Start a new reconnaissance scan and discard pre-scan observations."""
+        self.reset()
+        self._scan_active = True
+
+    def end_scan(self):
+        """Freeze the completed scan result while the aircraft leaves the zone."""
+        self._scan_active = False
 
     def update(
         self,
@@ -83,6 +94,9 @@ class CoverageMonitor:
         coverage_ratio : 当前覆盖率 [0, 1].
 
         """
+        if not self._scan_active:
+            return self.coverage_ratio
+
         altitude = drone_z
         if altitude <= 0.1:
             return self.coverage_ratio
