@@ -1,0 +1,85 @@
+[INFO] [launch]: All log files can be found below /home/nvidia/.ros/log/2026-07-27-20-30-42-215150-nvidia-desktop-39207
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: === 分阶段真机测试: 前飞 20m + 侦察区 ===
+[INFO] [launch.user]:   安全: WAIT_ARMED → 遥控器 Arm Switch 解锁 → TAKEOFF
+[INFO] [launch.user]:   Phase 1: TAKEOFF → TRANSIT_FORWARD (向北 20m)
+[INFO] [launch.user]:   Phase 2: DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND
+[INFO] [px4_bridge-1]: process started with pid [39209]
+[px4_bridge-1] [0m[INFO] [1785155443.152612720] [px4_bridge]: PX4 Bridge 已启动 (等待 DDS 连接...)[0m
+[INFO] [test_forward_recon-2]: process started with pid [39232]
+[test_forward_recon-2] [0m[INFO] [1785155446.152975899] [test_forward_recon]: ============================================================[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.153747340] [test_forward_recon]:   TestForwardRecon — 分阶段真机测试[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.154374394] [test_forward_recon]:   sim_mode:     False[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.155010338] [test_forward_recon]:   Home:         World(0.0, 0.0)[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.155623577] [test_forward_recon]:   Phase 1: 向北直飞 20.0m @ 2.0m/s[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.156214878] [test_forward_recon]:   Phase 2: 侦察区 N[16.0:24.0] × E[-3.0:3.0] @ 3.0m[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.156768219] [test_forward_recon]:   解锁: 遥控器 Arm Switch → PX4 → is_armed() → TAKEOFF[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.157321528] [test_forward_recon]:   流程: INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FWD[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.157899781] [test_forward_recon]:          → DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.158479953] [test_forward_recon]: ============================================================[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.991749713] [test_forward_recon]: INIT: 遥测就绪 → WAIT_ARMED[0m
+[test_forward_recon-2] [0m[INFO] [1785155446.993199631] [test_forward_recon]: [FSM] INIT → WAIT_ARMED[0m
+[test_forward_recon-2] [0m[INFO] [1785155450.040798267] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785155453.040724658] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785155456.040753684] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785155456.340898773] [test_forward_recon]: WAIT_ARMED: ✓ 已解锁 (遥控器 Arm Switch) → TAKEOFF[0m
+[test_forward_recon-2] [0m[INFO] [1785155456.342397330] [test_forward_recon]: [FSM] WAIT_ARMED → TAKEOFF[0m
+[test_forward_recon-2] [0m[INFO] [1785155456.392122021] [test_forward_recon]: [StandaloneBridge] 请求 Offboard 模式[0m
+[test_forward_recon-2] [0m[INFO] [1785155467.540706738] [test_forward_recon]: [StandaloneBridge] 请求 Offboard 模式[0m
+[test_forward_recon-2] [0m[INFO] [1785155473.240850661] [test_forward_recon]: [StandaloneBridge] 请求 Offboard 模式[0m
+[test_forward_recon-2] [0m[INFO] [1785155483.440744386] [test_forward_recon]: [StandaloneBridge] 解锁请求 (标准)[0m
+[test_forward_recon-2] [0m[INFO] [1785155484.440707885] [test_forward_recon]: [StandaloneBridge] 解锁请求 (标准)[0m
+[test_forward_recon-2] [33m[WARN] [1785155486.391407180] [test_forward_recon]: TAKEOFF: 爬升超时 (30s), 强制下一状态[0m
+[test_forward_recon-2] [0m[INFO] [1785155486.392975110] [test_forward_recon]: [FSM] TAKEOFF → TRANSIT_FORWARD[0m
+[test_forward_recon-2] [0m[INFO] [1785155486.441007600] [test_forward_recon]: TRANSIT_FORWARD: 向北 20.0m → World(0.0, 20.0, 5.0) @ 2.0m/s[0m
+[test_forward_recon-2] [0m[INFO] [1785155491.440809965] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=17.86m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155496.440950884] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=17.70m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155501.441185389] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=17.60m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155506.441456448] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=17.43m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155511.491610653] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=17.29m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155516.491680889] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=17.20m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155521.540712495] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=17.10m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155526.541202269] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.87m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155531.591234336] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.67m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155536.641035625] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.65m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155541.691046373] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.63m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155546.691561077] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.66m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155551.740830730] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.62m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155556.791509038] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.77m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155561.791574294] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.87m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155566.840739627] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.78m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155571.840758217] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.90m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155576.840850889] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.91m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155581.840829545] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.87m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155586.841160706] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.74m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155591.891954190] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.76m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155596.940778550] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.76m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155601.941243643] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.83m stable=0/40[0m
+[test_forward_recon-2] [33m[WARN] [1785155606.440947436] [test_forward_recon]: TRANSIT_FORWARD: 超时, 强制进入 Phase 2[0m
+[test_forward_recon-2] [0m[INFO] [1785155606.442438007] [test_forward_recon]: [FSM] TRANSIT_FORWARD → DESCEND_TO_RECON[0m
+[test_forward_recon-2] [0m[INFO] [1785155606.443860434] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=16.84m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785155606.490805465] [test_forward_recon]: DESCEND: 降至侦察高度 3.0m → World(0.0, 20.0, 3.0)[0m
+[test_forward_recon-2] [33m[WARN] [1785155636.491774053] [test_forward_recon]: DESCEND: 降高超时 (30s), 强制进入 RECON_SWEEP[0m
+[test_forward_recon-2] [0m[INFO] [1785155636.493283324] [test_forward_recon]: [FSM] DESCEND_TO_RECON → RECON_SWEEP[0m
+[test_forward_recon-2] [0m[INFO] [1785155636.541013652] [test_forward_recon]: RECON_SWEEP: 生成 12 个航点 (6 条带), 区域 NED N[16.0:24.0] E[-3.0:3.0], 高度 3.0m, 间距 1.0m[0m
+[test_forward_recon-2] [0m[INFO] [1785155646.540721393] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=10s[0m
+[test_forward_recon-2] [0m[INFO] [1785155656.540893019] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=20s[0m
+[test_forward_recon-2] [0m[INFO] [1785155666.591565042] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=30s[0m
+[test_forward_recon-2] [0m[INFO] [1785155676.640761395] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=40s[0m
+[test_forward_recon-2] [0m[INFO] [1785155686.691543331] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=50s[0m
+[test_forward_recon-2] [0m[INFO] [1785155696.691592795] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=60s[0m
+[test_forward_recon-2] [0m[INFO] [1785155706.740658598] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=70s[0m
+[test_forward_recon-2] [0m[INFO] [1785155716.740749072] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=80s[0m
+[test_forward_recon-2] [0m[INFO] [1785155726.740824705] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=90s[0m
+[test_forward_recon-2] [0m[INFO] [1785155736.791553725] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=100s[0m
+[test_forward_recon-2] [0m[INFO] [1785155746.841372595] [test_forward_recon]: RECON_SWEEP: wp=0/12 elapsed=110s[0m
+[test_forward_recon-2] [31m[ERROR] [1785155756.591553958] [test_forward_recon]: RECON_SWEEP: 航点超时 wp=0, 跳过[0m
+[test_forward_recon-2] [0m[INFO] [1785155756.892307486] [test_forward_recon]: RECON_SWEEP: wp=1/12 elapsed=120s[0m
+[test_forward_recon-2] [0m[INFO] [1785155766.940872512] [test_forward_recon]: RECON_SWEEP: wp=1/12 elapsed=130s[0m
+[test_forward_recon-2] [0m[INFO] [1785155776.991746059] [test_forward_recon]: RECON_SWEEP: wp=1/12 elapsed=140s[0m
+[test_forward_recon-2] [0m[INFO] [1785155787.040749423] [test_forward_recon]: RECON_SWEEP: wp=1/12 elapsed=151s[0m
+[test_forward_recon-2] [0m[INFO] [1785155797.091471969] [test_forward_recon]: RECON_SWEEP: wp=1/12 elapsed=161s[0m
+[test_forward_recon-2] [0m[INFO] [1785155807.140757253] [test_forward_recon]: RECON_SWEEP: wp=1/12 elapsed=171s[0m
+[test_forward_recon-2] [31m[ERROR] [1785155816.540722260] [test_forward_recon]: RECON_SWEEP: 超时 (180s), 触发 PX4 RTL[0m
+[test_forward_recon-2] [0m[INFO] [1785155816.542284016] [test_forward_recon]: [StandaloneBridge] 请求 RTL[0m
+[test_forward_recon-2] [0m[INFO] [1785155816.544178980] [test_forward_recon]: [FSM] RECON_SWEEP → COMPLETE[0m

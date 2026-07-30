@@ -1,0 +1,104 @@
+[INFO] [launch]: All log files can be found below /home/nvidia/.ros/log/2026-07-23-16-01-48-415324-nvidia-desktop-3149
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: === 无人机简化任务启动 ===
+[INFO] [launch.user]:   1. PX4 Bridge (DDS ↔ ROS2)
+[INFO] [launch.user]:   2. SimpleMission (起飞 → 投放区 → 返航 → 降落)
+[INFO] [launch.user]: 
+[INFO] [launch.user]:   任务流程:
+[INFO] [launch.user]:     INIT → TAKEOFF → TRANSIT_TO_DROP
+[INFO] [launch.user]:     → LOITER → RETURN → LAND → COMPLETE
+[INFO] [px4_bridge-1]: process started with pid [3330]
+[px4_bridge-1] Traceback (most recent call last):
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/install/px4_control/lib/px4_control/px4_bridge", line 33, in <module>
+[px4_bridge-1]     sys.exit(load_entry_point('px4-control', 'console_scripts', 'px4_bridge')())
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/build/px4_control/px4_control/px4_bridge.py", line 617, in main
+[px4_bridge-1]     node = PX4Bridge()
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/build/px4_control/px4_control/px4_bridge.py", line 103, in __init__
+[px4_bridge-1]     self._declare_params()
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/build/px4_control/px4_control/px4_bridge.py", line 232, in _declare_params
+[px4_bridge-1]     self.declare_parameter("home_z", 0.0)
+[px4_bridge-1]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/node.py", line 367, in declare_parameter
+[px4_bridge-1]     return self.declare_parameters('', [args], ignore_override)[0]
+[px4_bridge-1]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/node.py", line 493, in declare_parameters
+[px4_bridge-1]     self._set_parameters(
+[px4_bridge-1]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/node.py", line 738, in _set_parameters
+[px4_bridge-1]     raise InvalidParameterTypeException(
+[px4_bridge-1] rclpy.exceptions.InvalidParameterTypeException: Trying to set parameter 'home_z' to '0.0' of type 'STRING', expecting type 'DOUBLE'
+[ERROR] [px4_bridge-1]: process has died [pid 3330, exit code 1, cmd '/home/nvidia/CUADC_drone_missions_ws/install/px4_control/lib/px4_control/px4_bridge --ros-args --log-level info --ros-args -r __node:=px4_bridge --params-file /home/nvidia/CUADC_drone_missions_ws/install/px4_control/share/px4_control/config/px4_params.yaml --params-file /tmp/launch_params_sjjks8gm'].
+[INFO] [simple_mission-2]: process started with pid [3866]
+[simple_mission-2] [0m[INFO] [1784793712.323222704] [simple_mission]: ============================================================[0m
+[simple_mission-2] [0m[INFO] [1784793712.324024848] [simple_mission]:   SimpleMission — 简单任务节点已启动[0m
+[simple_mission-2] [0m[INFO] [1784793712.324668784] [simple_mission]:   sim_mode:  False[0m
+[simple_mission-2] [0m[INFO] [1784793712.325290800] [simple_mission]:   Home:      World(0.0, 0.0)[0m
+[simple_mission-2] [0m[INFO] [1784793712.325891856] [simple_mission]:   投放区:    World(2.0, 20.0)[0m
+[simple_mission-2] [0m[INFO] [1784793712.326511536] [simple_mission]:   巡航高度:  5.0m[0m
+[simple_mission-2] [0m[INFO] [1784793712.327108656] [simple_mission]:   流程: INIT → TAKEOFF → TRANSIT → LOITER → RETURN → LAND → COMPLETE[0m
+[simple_mission-2] [0m[INFO] [1784793712.327706096] [simple_mission]: ============================================================[0m
+[simple_mission-2] [0m[INFO] [1784793713.358628144] [simple_mission]: INIT: 遥测就绪 → TAKEOFF[0m
+[simple_mission-2] [0m[INFO] [1784793713.360114704] [simple_mission]: [FSM] INIT → TAKEOFF[0m
+[simple_mission-2] [0m[INFO] [1784793713.409429424] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.411292464] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.458681328] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.460328144] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.508436528] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.510080080] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.558560784] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.560214480] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.608360496] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.610019920] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.658598672] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.660291408] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.708476176] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.710177008] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.758705584] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.760388848] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.808610864] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.810473296] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.858502896] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.859863472] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.908280784] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.909853072] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793713.958545520] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793713.960107472] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.008373488] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.010046480] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.059151120] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.060792720] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.108824496] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.110483920] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.158324304] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.159736368] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.209066448] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.210735728] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.258523472] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.260128176] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.308355312] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.309945328] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.358565840] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.360150960] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.408303824] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.409900304] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.458513264] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.460063312] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.508284272] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.509881968] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.558510320] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.560067856] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.608314704] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.609917008] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.658521360] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.660141424] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.708295024] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.709918224] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793714.758557840] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793714.760129008] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793861.780179035] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793861.781159419] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [33m[WARN] [1784793861.782993371] [simple_mission]: TAKEOFF: 爬升超时 (30s), 强制下一状态[0m
+[simple_mission-2] [0m[INFO] [1784793861.784388443] [simple_mission]: [FSM] TAKEOFF → TRANSIT_TO_DROP[0m
+[simple_mission-2] [0m[INFO] [1784793861.808399995] [simple_mission]: TRANSIT: 飞往投放区 World(2.0, 20.0, 5.0)[0m
+[simple_mission-2] [33m[WARN] [1784793981.808810207] [simple_mission]: TRANSIT: 超时, 强制进入 LOITER[0m
+[simple_mission-2] [0m[INFO] [1784793981.810308096] [simple_mission]: [FSM] TRANSIT_TO_DROP → LOITER[0m
+[simple_mission-2] [0m[INFO] [1784793986.858661795] [simple_mission]: LOITER: 悬停完成 → RETURN[0m
+[simple_mission-2] [0m[INFO] [1784793986.860223174] [simple_mission]: [FSM] LOITER → RETURN[0m
+[simple_mission-2] [0m[INFO] [1784793986.908441616] [simple_mission]: RETURN: 返航至 World(0.0, 0.0, 5.0)[0m

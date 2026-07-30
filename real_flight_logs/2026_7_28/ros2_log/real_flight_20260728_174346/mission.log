@@ -1,0 +1,59 @@
+[INFO] [launch]: All log files can be found below /home/nvidia/.ros/log/2026-07-28-17-43-55-993937-nvidia-desktop-3644
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: === 分阶段真机测试: 前飞 20m + 侦察区 ===
+[INFO] [launch.user]:   安全: WAIT_ARMED → 遥控器 Arm Switch 解锁 → TAKEOFF
+[INFO] [launch.user]:   Phase 1: TAKEOFF → TRANSIT_FORWARD (向北 20m)
+[INFO] [launch.user]:   Phase 2: DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND
+[INFO] [px4_bridge-1]: process started with pid [3722]
+[px4_bridge-1] [0m[INFO] [1785231837.033314328] [px4_bridge]: PX4 Bridge 已启动 (等待 DDS 连接...)[0m
+[INFO] [test_forward_recon-2]: process started with pid [3742]
+[test_forward_recon-2] [0m[INFO] [1785231839.900289816] [test_forward_recon]: ============================================================[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.901032440] [test_forward_recon]:   TestForwardRecon — 分阶段真机测试[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.901666584] [test_forward_recon]:   sim_mode:     False[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.902337176] [test_forward_recon]:   Home:         World(0.0, 0.0)[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.902937336] [test_forward_recon]:   Phase 1: 向北直飞 20.0m @ 2.0m/s[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.903556568] [test_forward_recon]:   Phase 2: 侦察区 N[16.0:24.0] × E[-3.0:3.0] @ 3.0m[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.904152824] [test_forward_recon]:   解锁: 遥控器 Arm Switch → PX4 → is_armed() → TAKEOFF[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.904756312] [test_forward_recon]:   流程: INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FWD[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.905359736] [test_forward_recon]:          → DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND[0m
+[test_forward_recon-2] [0m[INFO] [1785231839.905958936] [test_forward_recon]: ============================================================[0m
+[test_forward_recon-2] [0m[INFO] [1785231841.735120024] [test_forward_recon]: INIT: 遥测就绪 → WAIT_ARMED[0m
+[test_forward_recon-2] [0m[INFO] [1785231841.737380664] [test_forward_recon]: [FSM] INIT → WAIT_ARMED[0m
+[test_forward_recon-2] [0m[INFO] [1785231844.785955480] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785231847.836048600] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785232043.016325283] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785232046.036445987] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785232049.085760259] [test_forward_recon]: WAIT_ARMED: 自检通过! 请拨动遥控器解锁开关... armed=False preflight_ok=True[0m
+[test_forward_recon-2] [0m[INFO] [1785232052.136352867] [test_forward_recon]: WAIT_ARMED: ✓ 已解锁 (遥控器 Arm Switch) → TAKEOFF[0m
+[test_forward_recon-2] [0m[INFO] [1785232052.137858755] [test_forward_recon]: [FSM] WAIT_ARMED → TAKEOFF[0m
+[test_forward_recon-2] [0m[INFO] [1785232052.187292387] [test_forward_recon]: [StandaloneBridge] 请求 Offboard 模式[0m
+[test_forward_recon-2] [0m[INFO] [1785232063.485770819] [test_forward_recon]: TAKEOFF: 到达巡航高度 5.0m → TRANSIT_FORWARD[0m
+[test_forward_recon-2] [0m[INFO] [1785232063.487288547] [test_forward_recon]: [FSM] TAKEOFF → TRANSIT_FORWARD[0m
+[test_forward_recon-2] [0m[INFO] [1785232063.536402371] [test_forward_recon]: TRANSIT_FORWARD: 向北 20.0m → World(0.0, 20.0, 5.0) @ 2.0m/s[0m
+[test_forward_recon-2] [0m[INFO] [1785232068.536569283] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=12.69m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785232073.536583043] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=2.67m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785232078.586107942] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=0.54m stable=36/40[0m
+[test_forward_recon-2] [0m[INFO] [1785232083.185804033] [test_forward_recon]: TRANSIT_FORWARD: ✓ Phase 1 完成 — 到达 20.0m 点 → DESCEND_TO_RECON[0m
+[test_forward_recon-2] [0m[INFO] [1785232083.187394017] [test_forward_recon]: [FSM] TRANSIT_FORWARD → DESCEND_TO_RECON[0m
+[test_forward_recon-2] [0m[INFO] [1785232083.188809315] [test_forward_recon]: TRANSIT_FORWARD: dist_to_target=0.39m stable=0/40[0m
+[test_forward_recon-2] [0m[INFO] [1785232083.236457856] [test_forward_recon]: DESCEND: 降至侦察高度 3.0m → World(0.0, 20.0, 3.0)[0m
+[test_forward_recon-2] [0m[INFO] [1785232088.185547716] [test_forward_recon]: DESCEND: 到达侦察高度 → RECON_SWEEP[0m
+[test_forward_recon-2] [0m[INFO] [1785232088.186482401] [test_forward_recon]: [FSM] DESCEND_TO_RECON → RECON_SWEEP[0m
+[test_forward_recon-2] [0m[INFO] [1785232088.235931508] [test_forward_recon]: RECON_SWEEP: 生成 12 个航点 (6 条带), 区域 NED N[16.0:24.0] E[-3.0:3.0], 高度 3.0m, 间距 1.0m[0m
+[test_forward_recon-2] [0m[INFO] [1785232098.236902764] [test_forward_recon]: RECON_SWEEP: wp=1/12 elapsed=10s[0m
+[test_forward_recon-2] [0m[INFO] [1785232108.286355407] [test_forward_recon]: RECON_SWEEP: wp=3/12 elapsed=20s[0m
+[test_forward_recon-2] [0m[INFO] [1785232118.336548674] [test_forward_recon]: RECON_SWEEP: wp=6/12 elapsed=30s[0m
+[test_forward_recon-2] [0m[INFO] [1785232128.336549447] [test_forward_recon]: RECON_SWEEP: wp=8/12 elapsed=40s[0m
+[test_forward_recon-2] [0m[INFO] [1785232138.386037670] [test_forward_recon]: RECON_SWEEP: wp=11/12 elapsed=50s[0m
+[test_forward_recon-2] [0m[INFO] [1785232143.136224141] [test_forward_recon]: RECON_SWEEP: ✓ Phase 2 扫描完成 — 12 个航点全部到达 → ASCEND[0m
+[test_forward_recon-2] [0m[INFO] [1785232143.137730325] [test_forward_recon]: [FSM] RECON_SWEEP → ASCEND_TO_CRUISE[0m
+[test_forward_recon-2] [0m[INFO] [1785232143.185665930] [test_forward_recon]: ASCEND: 回升至巡航高度 5.0m[0m
+[test_forward_recon-2] [0m[INFO] [1785232149.085780714] [test_forward_recon]: ASCEND: 回到巡航高度 5.0m → RETURN[0m
+[test_forward_recon-2] [0m[INFO] [1785232149.087285695] [test_forward_recon]: [FSM] ASCEND_TO_CRUISE → RETURN[0m
+[test_forward_recon-2] [0m[INFO] [1785232149.136475977] [test_forward_recon]: RETURN: 返航至 Home World(0.0, 0.0, 5.0)[0m
+[test_forward_recon-2] [0m[INFO] [1785232171.436607022] [test_forward_recon]: RETURN: 到达 Home 点上方 → LAND[0m
+[test_forward_recon-2] [0m[INFO] [1785232171.438124644] [test_forward_recon]: [FSM] RETURN → LAND[0m
+[test_forward_recon-2] [0m[INFO] [1785232186.536671843] [test_forward_recon]: [StandaloneBridge] 请求着陆[0m
+[test_forward_recon-2] [31m[ERROR] [1785232201.485682209] [test_forward_recon]: LAND: 着陆超时 (30s), 强制上锁[0m
+[test_forward_recon-2] [33m[WARN] [1785232201.487486184] [test_forward_recon]: [StandaloneBridge] 强制上锁![0m
+[test_forward_recon-2] [0m[INFO] [1785232201.489276551] [test_forward_recon]: [FSM] LAND → COMPLETE[0m

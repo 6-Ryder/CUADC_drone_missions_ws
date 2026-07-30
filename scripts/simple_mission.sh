@@ -65,6 +65,13 @@ if [ ! -f "$PROJ/install/setup.bash" ]; then
 fi
 source "$PROJ/install/setup.bash"
 
+SITL_PX4_MSGS_SETUP="$PROJ/install/sitl_px4_msgs/setup.bash"
+if [ ! -f "$SITL_PX4_MSGS_SETUP" ]; then
+    info "构建与当前 SITL PX4 匹配的 px4_msgs 覆盖层..."
+    "$PROJ/scripts/build_sitl_px4_msgs.sh" "$PX4_DIR"
+fi
+source "$SITL_PX4_MSGS_SETUP"
+
 if ! command -v MicroXRCEAgent &>/dev/null; then
     error "MicroXRCEAgent 未安装"
     exit 1

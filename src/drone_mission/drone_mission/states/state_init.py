@@ -84,7 +84,22 @@ class InitState:
 
         # 关键节点未就绪时禁止解锁飞行.
         if elapsed > 30.0:
-            self._fsm.get_logger().error("INIT: 视觉或舵机未就绪, 中止任务")
+            missing = []
+            if self._odom_ready_count < self._odom_stable_threshold:
+                missing.append("odom")
+            if not vision_alive:
+                missing.append("vision")
+            if not servo_alive:
+                missing.append("servo_heartbeat")
+            if not self._fsm.servo_ready:
+                missing.append("servo_hw")
+            if not battery_ready:
+                missing.append("battery")
+            if not rc_ready:
+                missing.append("rc(armed+preflight)")
+            self._fsm.get_logger().error(
+                f"INIT: 初始化超时 (30s), 未就绪: {', '.join(missing) or 'unknown'}"
+            )
             return "ERROR"
 
         return None

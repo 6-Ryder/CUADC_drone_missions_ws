@@ -73,6 +73,7 @@ class SimpleMission(Node):
         self.declare_parameter("loiter_time", 5.0)
         self.declare_parameter("state_timeout", 180.0)
         self.declare_parameter("sim_mode", True)
+        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
 
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
         self.declare_parameter("rc_require_arm_signal", True)

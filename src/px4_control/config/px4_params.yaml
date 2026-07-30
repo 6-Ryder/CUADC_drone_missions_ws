@@ -3,6 +3,10 @@
 # 原点: 解锁点 (真机=0,0,0; SITL Gazebo=4,10,0)
 /px4_bridge:
   ros__parameters:
+    # PX4 DDS message version is deployment-specific: real vehicle uses v1;
+    # SITL launch overrides this to v4 together with a matching px4_msgs overlay.
+    vehicle_status_topic: "/fmu/out/vehicle_status_v1"
+
     # --- 基础飞行参数 ---
     takeoff_height: 5.0           # 巡航飞行高度 (m, NED z 负值)
     waypoint_tolerance: 0.5       # 航点到达容差 (m)

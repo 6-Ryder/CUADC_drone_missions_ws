@@ -1,0 +1,414 @@
+[INFO] [launch]: All log files can be found below /home/nvidia/.ros/log/2026-07-23-15-48-42-337941-nvidia-desktop-3543
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: === 无人机简化任务启动 ===
+[INFO] [launch.user]:   1. PX4 Bridge (DDS ↔ ROS2)
+[INFO] [launch.user]:   2. SimpleMission (起飞 → 投放区 → 返航 → 降落)
+[INFO] [launch.user]: 
+[INFO] [launch.user]:   任务流程:
+[INFO] [launch.user]:     INIT → TAKEOFF → TRANSIT_TO_DROP
+[INFO] [launch.user]:     → LOITER → RETURN → LAND → COMPLETE
+[INFO] [px4_bridge-1]: process started with pid [3679]
+[px4_bridge-1] Traceback (most recent call last):
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/install/px4_control/lib/px4_control/px4_bridge", line 33, in <module>
+[px4_bridge-1]     sys.exit(load_entry_point('px4-control', 'console_scripts', 'px4_bridge')())
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/build/px4_control/px4_control/px4_bridge.py", line 617, in main
+[px4_bridge-1]     node = PX4Bridge()
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/build/px4_control/px4_control/px4_bridge.py", line 103, in __init__
+[px4_bridge-1]     self._declare_params()
+[px4_bridge-1]   File "/home/nvidia/CUADC_drone_missions_ws/build/px4_control/px4_control/px4_bridge.py", line 232, in _declare_params
+[px4_bridge-1]     self.declare_parameter("home_z", 0.0)
+[px4_bridge-1]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/node.py", line 367, in declare_parameter
+[px4_bridge-1]     return self.declare_parameters('', [args], ignore_override)[0]
+[px4_bridge-1]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/node.py", line 493, in declare_parameters
+[px4_bridge-1]     self._set_parameters(
+[px4_bridge-1]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/node.py", line 738, in _set_parameters
+[px4_bridge-1]     raise InvalidParameterTypeException(
+[px4_bridge-1] rclpy.exceptions.InvalidParameterTypeException: Trying to set parameter 'home_z' to '0.0' of type 'STRING', expecting type 'DOUBLE'
+[ERROR] [px4_bridge-1]: process has died [pid 3679, exit code 1, cmd '/home/nvidia/CUADC_drone_missions_ws/install/px4_control/lib/px4_control/px4_bridge --ros-args --log-level info --ros-args -r __node:=px4_bridge --params-file /home/nvidia/CUADC_drone_missions_ws/install/px4_control/share/px4_control/config/px4_params.yaml --params-file /tmp/launch_params_8f1rsv7_'].
+[INFO] [simple_mission-2]: process started with pid [3697]
+[simple_mission-2] [0m[INFO] [1784792926.229057576] [simple_mission]: ============================================================[0m
+[simple_mission-2] [0m[INFO] [1784792926.229823720] [simple_mission]:   SimpleMission — 简单任务节点已启动[0m
+[simple_mission-2] [0m[INFO] [1784792926.230455752] [simple_mission]:   sim_mode:  False[0m
+[simple_mission-2] [0m[INFO] [1784792926.231066952] [simple_mission]:   Home:      World(0.0, 0.0)[0m
+[simple_mission-2] [0m[INFO] [1784792926.231679496] [simple_mission]:   投放区:    World(2.0, 20.0)[0m
+[simple_mission-2] [0m[INFO] [1784792926.232276616] [simple_mission]:   巡航高度:  5.0m[0m
+[simple_mission-2] [0m[INFO] [1784792926.232869608] [simple_mission]:   流程: INIT → TAKEOFF → TRANSIT → LOITER → RETURN → LAND → COMPLETE[0m
+[simple_mission-2] [0m[INFO] [1784792926.233486792] [simple_mission]: ============================================================[0m
+[simple_mission-2] [0m[INFO] [1784792926.264568360] [simple_mission]: INIT: 遥测就绪 → TAKEOFF[0m
+[simple_mission-2] [0m[INFO] [1784792926.265265000] [simple_mission]: [FSM] INIT → TAKEOFF[0m
+[simple_mission-2] [0m[INFO] [1784792926.315789032] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.317292424] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.365361896] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.366981480] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.415155016] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.416805352] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.465339240] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.466933576] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.515128744] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.516728232] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.565340936] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.566944520] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.615138344] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.616748744] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.665329992] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.666917032] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.715160008] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.716771848] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.765378280] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.766979048] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.815141224] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.816760488] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.865379496] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.866988360] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.915155496] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.916797832] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792926.965797160] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792926.967420872] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.015952392] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.017779976] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.065750952] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.067449352] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.115465416] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.117100776] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.165594792] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.167224072] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.215246344] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.216909544] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.265438984] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.267080936] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.315169064] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.316817224] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.365336968] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.366921704] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.415172616] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.416778440] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.465373256] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.466963880] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.515132584] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.516727624] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.565294568] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.566890792] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.615088200] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.616680488] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.665384968] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.666964264] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.715152904] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.716769608] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.765312072] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.766884904] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.815109480] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.816720200] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.865453704] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.867037640] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.915071688] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.916646824] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792927.966046696] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792927.967656008] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.015726120] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.017383016] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.066255912] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.067918728] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.115293416] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.116958152] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.164871208] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.166037256] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.214719944] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.215853704] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.264692968] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.265702760] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.314504136] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.315437256] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.364965480] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.365903656] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.414409800] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.415242312] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.464858056] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.465772648] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.514578408] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.515508744] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.564855176] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.565796840] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.614487240] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.615413992] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.664839560] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.665791432] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.714500872] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.715423048] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.764852808] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.765755496] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.815308840] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.816839656] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.864869608] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.866154792] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.915193512] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.916937768] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792928.966404456] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792928.968092968] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.015198984] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.016879528] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.065512488] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.067163848] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.115237128] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.116870312] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.165560808] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.167281064] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.215257992] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.216933448] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.265482632] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.267140456] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.315213320] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.316826056] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.365502440] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.367137096] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.415176776] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.416838376] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.465495304] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.467176328] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.515197864] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.516807688] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.565493672] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.567134888] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.615272136] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.616968840] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.665697064] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.667349160] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.715351592] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.716976136] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.765971464] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.767626280] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.815455720] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.817108360] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.866176168] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.867833992] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.915959688] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.917639880] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792929.965562664] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792929.967246312] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.015214856] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.016897608] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.065414632] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.067045032] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.115223720] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.116860936] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.165463592] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.167083880] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.215280968] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.216944296] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.265475944] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.267118216] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.315189608] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.316865704] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.365438440] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.367035976] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.415195848] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.416818280] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.465420232] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.467039112] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.515242504] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.516929896] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.565476232] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.567139880] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.615221512] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.616877384] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.665729864] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.667343464] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.715317448] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.716970728] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.765466408] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.767106888] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.816066920] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.817780456] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.865516136] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.867148520] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.915193576] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.916823624] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792930.965484904] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792930.967125736] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.015394376] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.017173800] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.065495624] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.067208616] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.115240648] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.116819816] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.165508648] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.167127784] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.215365128] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.216973416] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.265454024] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.267086184] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.315199752] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.316864552] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.365470088] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.367129800] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.415178824] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.416809096] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.465483048] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.467148200] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.515193448] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.516854184] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.565760520] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.567383432] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.615668776] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.617370632] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.666059240] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.667732808] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.715822696] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.717546792] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.765569384] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.767233096] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.814963112] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.816327944] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.865054920] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.866106952] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.914871528] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.916794376] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792931.966115240] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792931.967986248] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.016086984] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.017919560] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.065795176] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.067455208] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.115374088] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.117105064] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.165631592] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.167312328] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.215220264] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.216827240] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.265438472] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.267086600] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.315231848] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.316892936] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.365531496] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.367185832] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.415208424] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.416859240] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.465470664] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.467133224] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.515210728] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.516841352] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.566029672] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.567717928] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.615298344] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.616957576] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.666147144] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.667841640] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.715267496] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.716895752] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.765536136] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.767208744] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.815246664] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.816845864] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.865630152] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.867305000] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.915188296] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.916902216] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792932.965546696] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792932.967340136] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.015201000] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.016869928] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.065556168] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.067224776] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.115084456] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.116714632] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.165803752] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.167047816] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.215225544] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.216875144] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.265592136] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.267271048] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.315307272] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.317007784] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.365479176] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.367115656] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.415355048] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.417005928] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.465633960] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.467307656] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.515610152] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.517272264] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.565964648] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.567566120] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.615216072] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.616858056] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.665455912] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.667100104] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.715170120] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.716772808] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.765537416] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.767173256] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.815184776] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.816882056] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.865452904] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.867140040] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.915193800] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.916868584] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792933.965442280] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792933.967056168] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.015246024] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.016911688] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.065586376] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.067225832] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.115260136] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.116921992] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.165373672] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.166960328] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.214719048] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.215865128] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.265535816] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.267168328] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.314538696] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.315507592] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.365008616] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.366452744] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.415365704] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.417198536] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.464658792] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.465633512] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.515356712] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.517086952] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.565523336] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.567209800] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.615097384] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.616686792] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.664586984] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.665479944] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.715295304] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.717003752] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.765302472] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.766888456] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.815229832] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.816894376] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.865459240] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.867107304] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.915217000] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.916851432] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792934.965481128] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792934.967140104] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.015103880] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.016699272] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.065458824] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.067116328] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.115214024] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.116864712] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.165442152] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.167079944] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.215314664] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.217056744] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.265870440] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.267494344] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.315371880] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.316999112] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.365443912] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.367090344] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784792935.415575048] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784792935.417213448] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [0m[INFO] [1784793523.663404203] [simple_mission]: [StandaloneBridge] 请求 Offboard 模式[0m
+[simple_mission-2] [0m[INFO] [1784793523.664340555] [simple_mission]: [StandaloneBridge] 解锁请求 (标准)[0m
+[simple_mission-2] [33m[WARN] [1784793523.665264459] [simple_mission]: TAKEOFF: 爬升超时 (30s), 强制下一状态[0m
+[simple_mission-2] [0m[INFO] [1784793523.665901803] [simple_mission]: [FSM] TAKEOFF → TRANSIT_TO_DROP[0m
+[simple_mission-2] [0m[INFO] [1784793523.667414795] [simple_mission]: TRANSIT: 飞往投放区 World(2.0, 20.0, 5.0)[0m
+[simple_mission-2] [33m[WARN] [1784793643.715775564] [simple_mission]: TRANSIT: 超时, 强制进入 LOITER[0m
+[simple_mission-2] [0m[INFO] [1784793643.717297434] [simple_mission]: [FSM] TRANSIT_TO_DROP → LOITER[0m
+[simple_mission-2] [0m[INFO] [1784793648.765524917] [simple_mission]: LOITER: 悬停完成 → RETURN[0m
+[simple_mission-2] [0m[INFO] [1784793648.766991417] [simple_mission]: [FSM] LOITER → RETURN[0m
+[simple_mission-2] [0m[INFO] [1784793648.815174868] [simple_mission]: RETURN: 返航至 World(0.0, 0.0, 5.0)[0m

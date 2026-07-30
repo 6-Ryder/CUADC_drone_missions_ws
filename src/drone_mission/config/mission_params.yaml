@@ -4,6 +4,9 @@
 # 飞行方向: 向北 (NED north 正方向)
 /mission_state_machine:
   ros__parameters:
+    # 真机当前 PX4 固件发布 v1；SITL launch 会覆盖为 v4。
+    vehicle_status_topic: "/fmu/out/vehicle_status_v1"
+
     # --- 坐标系原点 (北向场地: World X=East, Y=North) ---
     home_x: 4.0
     home_y: 10.0

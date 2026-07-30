@@ -105,8 +105,9 @@ class PX4Bridge(Node):
         self._odom_sub = self.create_subscription(
             VehicleOdometry, "/fmu/out/vehicle_odometry", self._odom_cb, qos,
         )
+        status_topic = str(self.get_parameter("vehicle_status_topic").value)
         self._status_sub = self.create_subscription(
-            VehicleStatus, "/fmu/out/vehicle_status_v1", self._status_cb, qos,
+            VehicleStatus, status_topic, self._status_cb, qos,
         )
         self._att_sub = self.create_subscription(
             VehicleAttitude, "/fmu/out/vehicle_attitude", self._attitude_cb, qos,
@@ -205,6 +206,7 @@ class PX4Bridge(Node):
         self.get_logger().info("PX4 Bridge 已启动 (等待 DDS 连接...)")
 
     def _declare_params(self):
+        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)

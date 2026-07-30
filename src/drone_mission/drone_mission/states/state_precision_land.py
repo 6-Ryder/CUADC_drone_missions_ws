@@ -29,7 +29,7 @@ class PrecisionLandState:
 
     def __init__(self, fsm):
         self._fsm = fsm
-        self._phase: int = self.PHASE_SEARCH
+        self._phase = self.PHASE_SEARCH
         self._start_time: float = 0.0
         self._vision_lost_start: float = 0.0
         self._has_landing_target: bool = False

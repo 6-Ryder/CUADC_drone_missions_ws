@@ -29,3 +29,19 @@ def test_main5_uses_actuator_set_one_without_a_param7_offset():
     assert "cmd.param1 = value;" in SOURCE
     assert "cmd.param7 = 0.0F;" in SOURCE
     assert "actuator_set" not in SOURCE
+
+
+def test_drop_completion_callback_runs_after_drop_manager_lock_is_released():
+    """The node callback reads DropManager state, so it must not run under mutex_."""
+    execute_drop = SOURCE[
+        SOURCE.index("bool DropManager::execute_drop"):SOURCE.index(
+            "bool DropManager::can_drop()"
+        )
+    ]
+
+    # The mutation can be protected, but the external callback must be outside
+    # the lock scope or on_drop_done() will deadlock when it calls drop_count().
+    lock_pos = execute_drop.index("std::lock_guard<std::mutex> lock(mutex_);")
+    notify_pos = execute_drop.index("notify_done(success, cylinder_id);")
+    assert "  }\n\n  notify_done(success, cylinder_id);" in execute_drop[lock_pos:]
+    assert lock_pos < notify_pos
