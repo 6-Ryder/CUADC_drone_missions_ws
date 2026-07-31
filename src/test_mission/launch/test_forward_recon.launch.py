@@ -25,6 +25,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     pkg_control = get_package_share_directory("px4_control")
+    pkg_vision = get_package_share_directory("drone_vision")
 
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
 
