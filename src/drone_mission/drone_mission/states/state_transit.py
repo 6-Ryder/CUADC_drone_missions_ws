@@ -15,6 +15,7 @@ import time
 from typing import Optional, Tuple
 
 
+
 class TransitState:
     """
     过渡飞行状态.
@@ -65,7 +66,10 @@ class TransitState:
 
         # 设置航点
         speed = self._fsm.get_param("transit_speed", 2.0)
-        self._fsm.fc.goto_world(tx, ty, tz, speed=speed)
+        from px4_control.telemetry import world_to_ned
+        tn, te, _ = world_to_ned(tx, ty, 0)
+        td = self._fsm.fc.altitude_to_ned(tz)
+        self._fsm.fc.goto_ned(tn, te, td, yaw=0.0, speed=speed)
 
     def execute(self) -> Optional[str]:
         if self._target_world is None:
@@ -76,7 +80,8 @@ class TransitState:
 
         # 导入坐标变换
         from px4_control.telemetry import world_to_ned
-        tn, te, td = world_to_ned(tx, ty, tz)
+        tn, te, _ = world_to_ned(tx, ty, 0)
+        td = self._fsm.fc.altitude_to_ned(tz)
 
         dist = pos.distance_to(type(pos)(tn, te, td))
         tolerance = self._fsm.get_param("waypoint_tolerance", 0.5)

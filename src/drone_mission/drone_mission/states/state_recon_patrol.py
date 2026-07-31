@@ -51,7 +51,7 @@ class ReconPatrolState:
             area_north_max=area2_n_max,
             area_east_min=area2_e_min,
             area_east_max=area2_e_max,
-            altitude=-recon_alt,  # NED: 负值=向上
+            altitude= self._fsm.fc.altitude_to_ned(recon_alt),  # NED: 负值=向上
         )
 
         # 计算预计覆盖参数

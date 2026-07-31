@@ -60,6 +60,31 @@ class FlightController:
         self._land_start_time: float = 0.0
         self._land_mode_requested = False
 
+        self._origin_down: Optional[float] = None
+
+    # ================================================================
+    # 获取初始相对限制
+    # ================================================================
+
+    @property
+    def origin_down(self) -> float:
+        """起飞原点的 NED down 值 (首次访问时自动记录)"""
+        if self._origin_down is None:
+            self._origin_down = self._bridge.get_current_position().down
+        return self._origin_down
+
+    def reset_origin(self) -> None:
+        """着陆后重置原点，下次起飞重新标定"""
+        self._origin_down = None
+
+    def altitude_to_ned(self, altitude_m: float) -> float:
+        """物理高度(m, 距离起飞点) -> NED down"""
+        return self.origin_down - altitude_m
+
+    def ned_to_altitude(self, ned_down: float) -> float:
+        """NED down -> 物理高度（m, 离起飞点)"""
+        return self.origin_down - ned_down
+
     # ================================================================
     # 起飞
     # ================================================================
@@ -83,7 +108,7 @@ class FlightController:
         Parameters
         ----------
         altitude : float or None
-            目标高度 (NED down, 负值=上升). None 则使用默认值.
+            目标高度 (NED down, 相对于起飞点). None 则使用默认值.
 
         Returns
         -------
@@ -99,7 +124,7 @@ class FlightController:
 
         # 从当前位置起飞
         pos = self._bridge.get_current_position()
-        target_down = -altitude  # NED: 负值=上升
+        target_down = self.altitude_to_ned(altitude)  # NED: 负值=上升
         self._bridge.set_position_target(pos.north, pos.east, target_down)
         self._current_waypoint = Position(pos.north, pos.east, target_down)
         self._waypoint_start_time = time.time()
@@ -248,6 +273,7 @@ class FlightController:
         # 下降中
         if self._bridge.is_landed():
             self._landing = False
+            self.reset_origin()
             # 着陆确认后用 force_disarm 避免被"非手动 disarm"拒绝
             self._bridge.force_disarm()
             return True
@@ -262,6 +288,7 @@ class FlightController:
 
     def force_disarm(self):
         """紧急上锁."""
+        self.reset_origin()
         self._bridge.force_disarm()
         self._landing = False
 

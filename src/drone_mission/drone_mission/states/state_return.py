@@ -35,22 +35,25 @@ class ReturnState:
         )
 
         # 设置返航航点
-        self._fsm.fc.goto_world(
-            home_x, home_y, self.HOME_Z,
-            speed=self._fsm.get_param("return_speed", 3.0),
-        )
+        from px4_control.telemetry import world_to_ned
+        tn, te, _ = world_to_ned(home_x, home_y, 0)
+        td = self._fsm.fc.altitude_to_ned(self.HOME_Z)
+        self._fsm.fc.goto_ned(tn, te, td, yaw=0.0,
+                              speed=self._fsm.get_param("return_speed", 3.0))
 
     def execute(self) -> Optional[str]:
         # 获取当前位置
         from px4_control.telemetry import ned_to_world
         pos = self._fsm.bridge.get_current_position()
-        drone_wx, drone_wy, drone_wz = ned_to_world(pos.north, pos.east, pos.down)
+        drone_wx, drone_wy, _ = ned_to_world(pos.north, pos.east, pos.down)
 
         import math
         home_x = self._fsm.get_param("home_x", 4.0)
         home_y = self._fsm.get_param("home_y", 10.0)
         dist_xy = math.hypot(drone_wx - home_x, drone_wy - home_y)
-        dist_z = abs(drone_wz - self.HOME_Z)
+        # 用相对高度比较, 不受 GPS/EKF 原点漂移影响
+        current_alt = self._fsm.fc.ned_to_altitude(pos.down)
+        dist_z = abs(current_alt - self.HOME_Z)
 
         tolerance = self._fsm.get_param("waypoint_tolerance", 0.5)
 

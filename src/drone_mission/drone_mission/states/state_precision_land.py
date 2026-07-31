@@ -134,7 +134,7 @@ class PrecisionLandState:
           > deadzone → P 控制: body_vel = kp_pixel * pixel_error
         """
         pos = self._fsm.bridge.get_current_position()
-        altitude = abs(pos.down)  # NED down 的绝对值 = 高度
+        altitude = abs(self._fsm.fc.ned_to_altitude(pos.down))  # NED down 的绝对值 = 高度
         blind_alt = float(self._fsm.get_param("landing_blind_altitude", 1.5))
 
         # 近地检测容易畸变。一旦视觉已连续证明对心，先在交接高度切换，
@@ -291,7 +291,7 @@ class PrecisionLandState:
 
         position = self._fsm.bridge.get_current_position()
         velocity = self._fsm.bridge.get_telemetry().velocity
-        altitude = abs(float(position.down))
+        altitude = abs(self._fsm.fc.ned_to_altitude(float(position.down)))
         horizontal_speed = math.hypot(float(velocity.vn), float(velocity.ve))
         vertical_speed = abs(float(velocity.vd))
 

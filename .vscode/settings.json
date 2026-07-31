@@ -1,5 +1,6 @@
 {
     "xml.downloadExternalResources.enabled": true,
+    "python.defaultInterpreterPath": "/usr/bin/python3",
     "ROS2.distro": "humble",
     "python.autoComplete.extraPaths": [
         "/opt/ros/humble/lib/python3.10/site-packages",

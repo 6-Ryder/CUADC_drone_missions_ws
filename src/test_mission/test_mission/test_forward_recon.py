@@ -318,7 +318,7 @@ class TestForwardRecon(Node):
             self._fc.takeoff(cruise_alt)
             pos = self._bridge.get_current_position()
 
-            if abs(pos.down - (-cruise_alt)) < self.get_param("takeoff_tolerance", 0.3):
+            if abs(pos.down - self._fc.altitude_to_ned(cruise_alt)) < self.get_param("takeoff_tolerance", 0.3):
                 self._stable_count += 1
             else:
                 self._stable_count = 0
@@ -347,14 +347,17 @@ class TestForwardRecon(Node):
                     f"World({hx:.1f}, {hy + fwd:.1f}, {cruise_alt:.1f})"
                     f" @ {speed:.1f}m/s"
                 )
-                self._fc.goto_world(hx, hy + fwd, cruise_alt, speed=speed)
+                tn, te, _ = world_to_ned(hx, hy + fwd, 0)
+                td = self._fc.altitude_to_ned(cruise_alt)
+                self._fc.goto_ned(tn, te, td, yaw=0.0, speed=speed)
                 self._command_sent = True
 
-            # 到达检测: World → NED 转换
+            # 到达检测: World → NED 转换 (XY 用 world_to_ned, Z 用相对高度)
             fwd = self.get_param("forward_distance", 20.0)
             hx = self.get_param("home_x", 0.0)
             hy = self.get_param("home_y", 0.0)
-            tn, te, td = world_to_ned(hx, hy + fwd, cruise_alt)
+            tn, te, _ = world_to_ned(hx, hy + fwd, 0)
+            td = self._fc.altitude_to_ned(cruise_alt)
 
             if self._fc.reached((tn, te, td), tol):
                 self._stable_count += 1
@@ -395,10 +398,12 @@ class TestForwardRecon(Node):
                     f"DESCEND: 降至侦察高度 {ralt}m → "
                     f"World({hx:.1f}, {hy + fwd:.1f}, {ralt:.1f})"
                 )
-                self._fc.goto_world(hx, hy + fwd, ralt, speed=1.0)
+                tn, te, _ = world_to_ned(hx, hy + fwd, 0)
+                td = self._fc.altitude_to_ned(ralt)
+                self._fc.goto_ned(tn, te, td, yaw=0.0, speed=1.0)
                 self._command_sent = True
 
-            target_down = -self.get_param("recon_altitude", 3.0)
+            target_down = self._fc.altitude_to_ned(self.get_param("recon_altitude", 3.0))
             pos = self._bridge.get_current_position()
 
             if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.5):
@@ -491,11 +496,13 @@ class TestForwardRecon(Node):
                 self.get_logger().info(
                     f"ASCEND: 回升至巡航高度 {cruise_alt}m"
                 )
-                self._fc.goto_world(hx, hy + fwd, cruise_alt, speed=1.0)
+                tn, te, _ = world_to_ned(hx, hy + fwd, 0)
+                td = self._fc.altitude_to_ned(cruise_alt)
+                self._fc.goto_ned(tn, te, td, yaw=0.0, speed=1.0)
                 self._command_sent = True
 
             pos = self._bridge.get_current_position()
-            if abs(pos.down - (-cruise_alt)) < self.get_param("takeoff_tolerance", 0.5):
+            if abs(pos.down - self._fc.altitude_to_ned(cruise_alt)) < self.get_param("takeoff_tolerance", 0.5):
                 self._stable_count += 1
             else:
                 self._stable_count = max(0, self._stable_count - 1)
@@ -520,12 +527,15 @@ class TestForwardRecon(Node):
                 self.get_logger().info(
                     f"RETURN: 返航至 Home World({hx:.1f}, {hy:.1f}, {cruise_alt:.1f})"
                 )
-                self._fc.goto_world(hx, hy, cruise_alt, speed=speed)
+                tn, te, _ = world_to_ned(hx, hy, 0)
+                td = self._fc.altitude_to_ned(cruise_alt)
+                self._fc.goto_ned(tn, te, td, yaw=0.0, speed=speed)
                 self._command_sent = True
 
             hx = self.get_param("home_x", 0.0)
             hy = self.get_param("home_y", 0.0)
-            tn, te, td = world_to_ned(hx, hy, cruise_alt)
+            tn, te, _ = world_to_ned(hx, hy, 0)
+            td = self._fc.altitude_to_ned(cruise_alt)
 
             if self._fc.reached((tn, te, td), tol):
                 self._stable_count += 1
@@ -566,7 +576,7 @@ class TestForwardRecon(Node):
             area_north_max=area_north_max,
             area_east_min=area_east_min,
             area_east_max=area_east_max,
-            altitude=-ralt,
+            altitude=self._fc.altitude_to_ned(ralt),
         )
 
         num_strips = len(self._recon_waypoints) // 2
@@ -725,7 +735,7 @@ class TestForwardRecon(Node):
     def _land_phase_servo(self, has_target: bool):
         """图像空间 P 控制器: 像素误差 → 机体速度, 对心下降."""
         pos = self._bridge.get_current_position()
-        altitude = abs(pos.down)
+        altitude = abs(self._fc.ned_to_altitude(pos.down))
 
         if not has_target or self._landing_target is None:
             # 目标丢失 → 悬停等待恢复

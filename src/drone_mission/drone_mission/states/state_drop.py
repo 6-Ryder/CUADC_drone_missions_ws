@@ -95,8 +95,8 @@ class DropState:
 
         # 保持水平位置, 降高
         pos = self._fsm.bridge.get_current_position()
-        self._descent_initial_error = abs(pos.down + drop_h)
-        self._fsm.fc.goto_ned(pos.north, pos.east, -drop_h, speed=0.5)
+        self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
+        self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_h), speed=0.5)
 
     def _enter_drop(self):
         self._fsm.get_logger().info("DROP: 执行投放")
@@ -118,7 +118,7 @@ class DropState:
         self._fsm.get_logger().info(f"ASCEND: 回升至巡航高度 {takeoff_h}m")
 
         pos = self._fsm.bridge.get_current_position()
-        self._fsm.fc.goto_ned(pos.north, pos.east, -takeoff_h, speed=1.0)
+        self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(takeoff_h), speed=1.0)
 
     def execute(self) -> Optional[str]:
         if self._sub_state == "DESCEND_TO_DROP":
@@ -140,7 +140,7 @@ class DropState:
         if status.pixel_error < self._descend_best_pixel_error:
             self._descend_best_pixel_error = status.pixel_error
 
-        height_error = abs(pos.down + drop_h)
+        height_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
         descent_ready = self._check_descent_ready(height_error)
         if self._precision_enabled() and not descent_ready:
             self._warn_descend_throttled(
@@ -384,9 +384,9 @@ class DropState:
         self._descend_stall_count = 0
 
         pos = self._fsm.bridge.get_current_position()
-        self._descent_initial_error = abs(pos.down + final_h)
+        self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(final_h))
         speed = float(self._fsm.get_param("precision_align_final_descent_speed", 0.25))
-        self._fsm.fc.goto_ned(pos.north, pos.east, -final_h, speed=speed)
+        self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(final_h), speed=speed)
         self._fsm.get_logger().info(
             "DESCEND: 初次精校完成, 定点直降至最终投放高度后复查 "
             f"{align_h:.2f}m → {final_h:.2f}m"
@@ -410,8 +410,8 @@ class DropState:
         self._descend_stall_count = 0
 
         pos = self._fsm.bridge.get_current_position()
-        self._descent_initial_error = abs(pos.down + drop_h)
-        self._fsm.fc.goto_ned(pos.north, pos.east, -drop_h, speed=0.0)
+        self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
+        self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_h), speed=0.0)
         self._fsm.get_logger().warn(
             f"DESCEND: {reason}, 低空原地重置精校 "
             f"(retry={self._descend_retry_count}/{max_retries})"
@@ -505,7 +505,7 @@ class DropState:
         takeoff_h = self._fsm.get_param("takeoff_height", 5.0)
         pos = self._fsm.bridge.get_current_position()
 
-        if abs(pos.down + takeoff_h) < 0.5:
+        if abs(self._fsm.fc.ned_to_altitude(pos.down) - takeoff_h) < 0.5:
             self._fsm.get_logger().info("ASCEND: 回到巡航高度")
             # 判断是否需要继续投放
             drops = self._fsm.drop_success_count
