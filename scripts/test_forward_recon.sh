@@ -152,6 +152,7 @@ echo ""
 
 ros2 launch test_mission test_forward_recon.launch.py \
     sim_mode:=false \
+    rc_require_arm_signal:=true \
     home_x:=0.0 \
     home_y:=0.0 \
     home_z:=0.0 \

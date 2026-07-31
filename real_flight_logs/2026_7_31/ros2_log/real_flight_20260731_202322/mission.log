@@ -1,0 +1,45 @@
+[INFO] [launch]: All log files can be found below /home/nvidia/.ros/log/2026-07-31-20-23-33-906470-nvidia-desktop-3010
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: === 分阶段真机测试: 前飞 20m + 侦察区 ===
+[INFO] [launch.user]:   安全: WAIT_ARMED → 遥控器 Arm Switch 解锁 → TAKEOFF
+[INFO] [launch.user]:   Phase 1: TAKEOFF → TRANSIT_FORWARD (向北 20m)
+[INFO] [launch.user]:   Phase 2: DESCEND → RECON_SWEEP → RETURN(不爬升) → LAND
+[INFO] [launch.user]:   LAND: H 标识视觉伺服精准降落
+[INFO] [px4_bridge-1]: process started with pid [3012]
+[INFO] [camera_node-2]: process started with pid [3014]
+[INFO] [vision_pipeline-3]: process started with pid [3016]
+[px4_bridge-1] [0m[INFO] [1785500615.024507040] [px4_bridge]: PX4 Bridge 已启动 (等待 DDS 连接...)[0m
+[camera_node-2] [0m[INFO] [1785500615.369102656] [camera_driver]: 实飞模式: 初始化 V4L2 相机...[0m
+[vision_pipeline-3] [0m[INFO] [1785500615.403011520] [vision_pipeline]: 统一视觉管线 v2 已创建 (姿态补偿 + 高度自适应)[0m
+[vision_pipeline-3] [0;93m2026-07-31 20:23:36.427468448 [W:onnxruntime:Default, device_discovery.cc:211 DiscoverDevicesForPlatform] GPU device discovery failed: device_discovery.cc:91 ReadFileContents Failed to open file: "/sys/class/drm/card1/device/vendor"[m
+[camera_node-2] [0m[INFO] [1785500616.837759840] [camera_driver]: V4L2 相机已打开: /dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0 (640x480 @ 30.0Hz)[0m
+[camera_node-2] [0m[INFO] [1785500616.840551584] [camera_driver]: 相机驱动已启动 (sim_mode=False)[0m
+[vision_pipeline-3] [0m[INFO] [1785500616.855704480] [vision_pipeline]: 圆筒 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/cylinder_yolo.onnx[0m
+[vision_pipeline-3] [0m[INFO] [1785500616.856441344] [vision_pipeline]: 蓝色标识 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/drop_marker_yolo.onnx[0m
+[vision_pipeline-3] [0m[INFO] [1785500616.857088832] [vision_pipeline]: 统一视觉管线 v2 初始化完成 (姿态补偿已启用)[0m
+[INFO] [test_forward_recon-4]: process started with pid [3089]
+[test_forward_recon-4] Traceback (most recent call last):
+[test_forward_recon-4]   File "/home/nvidia/CUADC_drone_missions_ws/install/test_mission/lib/test_mission/test_forward_recon", line 33, in <module>
+[test_forward_recon-4]     sys.exit(load_entry_point('test-mission', 'console_scripts', 'test_forward_recon')())
+[test_forward_recon-4]   File "/home/nvidia/CUADC_drone_missions_ws/build/test_mission/test_mission/test_forward_recon.py", line 826, in main
+[test_forward_recon-4]     node = TestForwardRecon()
+[test_forward_recon-4]   File "/home/nvidia/CUADC_drone_missions_ws/build/test_mission/test_mission/test_forward_recon.py", line 150, in __init__
+[test_forward_recon-4]     self._bridge = StandaloneBridge(self, sim_mode=sim_mode)
+[test_forward_recon-4]   File "/home/nvidia/CUADC_drone_missions_ws/build/px4_control/px4_control/standalone_bridge.py", line 137, in __init__
+[test_forward_recon-4]     status_topic = str(node.get_parameter("vehicle_status_topic").value)
+[test_forward_recon-4]   File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/node.py", line 601, in get_parameter
+[test_forward_recon-4]     raise ParameterNotDeclaredException(name)
+[test_forward_recon-4] rclpy.exceptions.ParameterNotDeclaredException: ('Invalid access to undeclared parameter(s)', 'vehicle_status_topic')
+[ERROR] [test_forward_recon-4]: process has died [pid 3089, exit code 1, cmd '/home/nvidia/CUADC_drone_missions_ws/install/test_mission/lib/test_mission/test_forward_recon --ros-args --log-level info --ros-args -r __node:=test_forward_recon --params-file /tmp/launch_params_n4cj_4c2'].
+[vision_pipeline-3] [0m[INFO] [1785500640.407464704] [vision_pipeline]: FPS: 9 | 耗时: 112ms | 高度: -0.0m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500655.856918912] [vision_pipeline]: FPS: 10 | 耗时: 105ms | 高度: 0.0m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500671.303576800] [vision_pipeline]: FPS: 11 | 耗时: 89ms | 高度: -0.2m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500686.929950240] [vision_pipeline]: FPS: 10 | 耗时: 100ms | 高度: -0.4m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500706.115514464] [vision_pipeline]: FPS: 9 | 耗时: 110ms | 高度: -0.3m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500931.544015069] [vision_pipeline]: FPS: 12 | 耗时: 83ms | 高度: -0.3m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500950.521681853] [vision_pipeline]: FPS: 7 | 耗时: 146ms | 高度: -0.3m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500972.260946990] [vision_pipeline]: FPS: 10 | 耗时: 96ms | 高度: -0.3m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785500989.691368408] [vision_pipeline]: FPS: 14 | 耗时: 74ms | 高度: -0.3m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785501005.387816399] [vision_pipeline]: FPS: 12 | 耗时: 85ms | 高度: -0.3m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785501021.157657425] [vision_pipeline]: FPS: 10 | 耗时: 96ms | 高度: -0.3m | 模式: none[0m
+[vision_pipeline-3] [0m[INFO] [1785501037.199185303] [vision_pipeline]: FPS: 10 | 耗时: 96ms | 高度: -0.3m | 模式: none[0m

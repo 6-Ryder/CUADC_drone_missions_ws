@@ -91,6 +91,7 @@ class TestForwardRecon(Node):
         # ---- 参数声明 ----
         # 通用
         self.declare_parameter("sim_mode", True)
+        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
         self.declare_parameter("cruise_altitude", 5.0)
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)

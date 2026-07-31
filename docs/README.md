@@ -20,6 +20,7 @@
 - [CODE_READING_GUIDE.md](CODE_READING_GUIDE.md)：逐文件导读、运行时调用链和代码学习路径。
 - [DEPLOYMENT.md](DEPLOYMENT.md)：构建、仿真、真机启动和日志操作。
 - [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)：真机现场检查清单。
+- [RISKS_AND_TODOS.md](RISKS_AND_TODOS.md)：风险清单和待办事项，真机飞行前的 blocking items。
 - [WORKLOG.md](WORKLOG.md)：问题、修改、验证和遗留风险的工作记录。
 - [field/README.md](../field/README.md)：Gazebo 场景和随机场地说明。
 - [飞控参数修改记录](../real_flight_logs/飞控参数修改记录.md)：实际飞行后的 PX4 参数记录。
