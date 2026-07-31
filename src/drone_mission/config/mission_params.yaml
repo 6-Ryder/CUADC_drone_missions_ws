@@ -53,7 +53,7 @@
     area2_altitude: 2.5           # 侦察区低空扫描高度 (m, NED z 负值)
 
     # --- 弓字形覆盖参数 ---
-    grid_spacing: 1.0             # 网格间距 (m)
+    grid_spacing: 1.67            # 网格间距 (m), 对齐 PathPlanner 默认值
     sweep_passes: 2               # 每区域折返次数
     sweep_margin_north: 1.0       # 长边界 (north) 内缩 (m)
     sweep_margin_east: 0.5        # 段边界 (east) 内缩 (m)
