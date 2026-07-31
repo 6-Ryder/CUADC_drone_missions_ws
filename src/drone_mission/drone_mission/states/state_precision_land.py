@@ -127,7 +127,7 @@ class PrecisionLandState:
 
         闭环在像素层:
           du = center_u - img_cx    (+u → 目标在画面右侧 → 机体右移)
-          dv = center_v - img_cy    (+v → 目标在画面下方 → 机体前飞)
+          dv = center_v - img_cy    (+v → 目标在画面下方 → 机体后飞)
           pixel_error = sqrt(du² + dv²)
 
           < deadzone → 已对心, 停止水平修正, 仅下降

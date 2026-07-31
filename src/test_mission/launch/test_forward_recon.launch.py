@@ -28,6 +28,7 @@ def generate_launch_description():
     pkg_vision = get_package_share_directory("drone_vision")
 
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
+    vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
 
     # ---- 启动参数 ----
     sim_mode_arg = DeclareLaunchArgument(
@@ -82,6 +83,15 @@ def generate_launch_description():
         "rc_require_arm_signal", default_value="true",
         description="true=等待人用遥控器Arm Switch解锁, false=代码arm直接起飞",
     )
+    vision_params_arg = DeclareLaunchArgument(
+        "vision_params", default_value=vision_param_file,
+        description="视觉管线参数文件路径",
+    )
+    camera_device_arg = DeclareLaunchArgument(
+        "camera_device",
+        default_value="/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0",
+        description="V4L2 相机设备路径 (仅 sim_mode:=false 时使用)",
+    )
 
     # ---- 节点 ----
 
@@ -100,7 +110,48 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-    # 2. 分阶段测试节点
+    # 2. 相机驱动 (V4L2 USB 相机 → /drone/camera/image_raw)
+    camera_node = Node(
+        package="drone_vision",
+        executable="camera_node",
+        name="camera_driver",
+        output="screen",
+        emulate_tty=True,
+        parameters=[{
+            "sim_mode": LaunchConfiguration("sim_mode"),
+            "camera_device": LaunchConfiguration("camera_device"),
+            "camera_width": 640,
+            "camera_height": 480,
+            "camera_fps": 30.0,
+            "fx": 400.0,
+            "fy": 400.0,
+            "cx": 320.0,
+            "cy": 240.0,
+        }],
+    )
+
+    # 3. 视觉管线 (H 标识精准降落, ONNX Runtime CUDA)
+    vision_pipeline_node = Node(
+        package="drone_vision",
+        executable="vision_pipeline",
+        name="vision_pipeline",
+        output="screen",
+        emulate_tty=True,
+        parameters=[
+            LaunchConfiguration("vision_params"),
+            {
+                "camera_width": 640,
+                "camera_height": 480,
+                "camera_fx": 400.0,
+                "camera_fy": 400.0,
+                "camera_cx": 320.0,
+                "camera_cy": 240.0,
+            },
+        ],
+        arguments=["--ros-args", "--log-level", "info"],
+    )
+
+    # 4. 分阶段测试节点
     test_node = Node(
         package="test_mission",
         executable="test_forward_recon",
@@ -122,6 +173,8 @@ def generate_launch_description():
             "sweep_speed": LaunchConfiguration("sweep_speed"),
             "grid_spacing": LaunchConfiguration("grid_spacing"),
             "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
+            "camera_cx": 320.0,
+            "camera_cy": 240.0,
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -136,7 +189,8 @@ def generate_launch_description():
         LogInfo(msg="=== 分阶段真机测试: 前飞 20m + 侦察区 ==="),
         LogInfo(msg="  安全: WAIT_ARMED → 遥控器 Arm Switch 解锁 → TAKEOFF"),
         LogInfo(msg="  Phase 1: TAKEOFF → TRANSIT_FORWARD (向北 20m)"),
-        LogInfo(msg="  Phase 2: DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND"),
+        LogInfo(msg="  Phase 2: DESCEND → RECON_SWEEP → ASCEND → RETURN"),
+        LogInfo(msg="  LAND: H 标识视觉伺服精准降落"),
         sim_mode_arg,
         cruise_altitude_arg,
         home_x_arg,
@@ -150,6 +204,10 @@ def generate_launch_description():
         sweep_speed_arg,
         grid_spacing_arg,
         rc_require_arg,
+        vision_params_arg,
+        camera_device_arg,
         px4_bridge_node,
+        camera_node,
+        vision_pipeline_node,
         test_delayed,
     ])
