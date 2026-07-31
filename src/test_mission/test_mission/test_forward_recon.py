@@ -2,11 +2,11 @@
 分阶段真机实飞测试 — 向前直飞 20m → 侦察区任务.
 
 Phase 1: 起飞 → 向北直飞 20m → 验证航点到达
-Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 回升 → 返航 → 降落
+Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 直接返航(不爬升) → 降落
 
 状态流:
   INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FORWARD → DESCEND_TO_RECON
-  → RECON_SWEEP → ASCEND_TO_CRUISE → RETURN → LAND → COMPLETE
+  → RECON_SWEEP → RETURN → LAND → COMPLETE
 
 安全 (RC 硬件解锁模式):
   - 遥控器 Arm Switch → SBus → PX4 自检 → PX4 解锁
@@ -52,8 +52,7 @@ class MissionState(Enum):
     TRANSIT_FORWARD = "TRANSIT_FORWARD"       # Phase 1: 向北直飞 20m
     DESCEND_TO_RECON = "DESCEND_TO_RECON"      # Phase 2: 降至侦察高度
     RECON_SWEEP = "RECON_SWEEP"                # Phase 2: 弓字形全覆盖
-    ASCEND_TO_CRUISE = "ASCEND_TO_CRUISE"      # Phase 2: 回升至巡航高度
-    RETURN = "RETURN"
+    RETURN = "RETURN"                          # 保持侦察高度直接返航, 不爬升
     LAND = "LAND"
     COMPLETE = "COMPLETE"
 
@@ -79,8 +78,8 @@ class TestForwardRecon(Node):
     Phase 2 — 侦察区任务:
       - 降至侦察扫描高度 (默认 3m)
       - 弓字形 (Boustrophedon) 全覆盖路径
-      - 回升至巡航高度
-      - 返航 + 降落
+      - 保持侦察高度直接返航 (不爬升, 省时)
+      - 精准降落
     """
 
     STABLE_TICKS = 40       # 高度/航点稳定确认帧数 (2s @ 20Hz)
@@ -179,6 +178,9 @@ class TestForwardRecon(Node):
         # ---- 进度日志 ----
         self._last_progress_log: float = 0.0
 
+        # ---- 返航高度 (RETURN 进入时捕获当前相对高度) ----
+        self._return_altitude: float = 0.0
+
         # ---- 精准降落状态 ----
         self._LAND_PHASE_SEARCH = 0
         self._LAND_PHASE_SERVO = 1
@@ -231,7 +233,7 @@ class TestForwardRecon(Node):
                                f" E[{-half_e}:{half_e}] @ {ralt}m")
         self.get_logger().info("  解锁: 遥控器 Arm Switch → PX4 → is_armed() → TAKEOFF")
         self.get_logger().info("  流程: INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FWD")
-        self.get_logger().info("         → DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND")
+        self.get_logger().info("         → DESCEND → RECON_SWEEP → RETURN → LAND")
         self.get_logger().info("=" * 60)
 
     # ================================================================
@@ -255,7 +257,6 @@ class TestForwardRecon(Node):
         MissionState.TRANSIT_FORWARD,
         MissionState.DESCEND_TO_RECON,
         MissionState.RECON_SWEEP,
-        MissionState.ASCEND_TO_CRUISE,
         MissionState.RETURN,
         MissionState.LAND,
     }
@@ -429,17 +430,19 @@ class TestForwardRecon(Node):
                 self._command_sent = True
 
             if not self._recon_waypoints:
-                self.get_logger().warn("RECON_SWEEP: 无航点, 跳过 → ASCEND")
-                self._transition(MissionState.ASCEND_TO_CRUISE)
+                self.get_logger().warn("RECON_SWEEP: 无航点, 跳过 → RETURN")
+                self._transition(MissionState.RETURN)
                 return
 
-            # 所有航点完成
+            # 所有航点完成 → 保持侦察高度直接返航
             if self._recon_wp_idx >= len(self._recon_waypoints):
+                ralt = self.get_param("recon_altitude", 3.0)
                 self.get_logger().info(
                     f"RECON_SWEEP: ✓ Phase 2 扫描完成"
-                    f" — {len(self._recon_waypoints)} 个航点全部到达 → ASCEND"
+                    f" — {len(self._recon_waypoints)} 个航点全部到达"
+                    f" → RETURN (保持 {ralt}m, 不爬升)"
                 )
-                self._transition(MissionState.ASCEND_TO_CRUISE)
+                self._transition(MissionState.RETURN)
                 return
 
             current_wp = self._recon_waypoints[self._recon_wp_idx]
@@ -485,57 +488,29 @@ class TestForwardRecon(Node):
                 )
 
         # ================================================================
-        # Phase 2: ASCEND_TO_CRUISE — 回升至巡航高度
-        # ================================================================
-        elif self._state == MissionState.ASCEND_TO_CRUISE:
-            if not self._command_sent:
-                fwd = self.get_param("forward_distance", 20.0)
-                hx = self.get_param("home_x", 0.0)
-                hy = self.get_param("home_y", 0.0)
-
-                self.get_logger().info(
-                    f"ASCEND: 回升至巡航高度 {cruise_alt}m"
-                )
-                tn, te, _ = world_to_ned(hx, hy + fwd, 0)
-                td = self._fc.altitude_to_ned(cruise_alt)
-                self._fc.goto_ned(tn, te, td, yaw=0.0, speed=1.0)
-                self._command_sent = True
-
-            pos = self._bridge.get_current_position()
-            if abs(pos.down - self._fc.altitude_to_ned(cruise_alt)) < self.get_param("takeoff_tolerance", 0.5):
-                self._stable_count += 1
-            else:
-                self._stable_count = max(0, self._stable_count - 1)
-
-            if self._stable_count >= self.STABLE_TICKS:
-                self.get_logger().info(
-                    f"ASCEND: 回到巡航高度 {cruise_alt}m → RETURN"
-                )
-                self._transition(MissionState.RETURN)
-            elif elapsed > 30.0:
-                self.get_logger().warn("ASCEND: 回升超时 (30s), 强制返航")
-                self._transition(MissionState.RETURN)
-
-        # ================================================================
-        # RETURN: 返航至 Home 点上方
+        # RETURN: 保持侦察高度直接返航至 Home 点上方 (不爬升)
         # ================================================================
         elif self._state == MissionState.RETURN:
             if not self._command_sent:
                 hx = self.get_param("home_x", 0.0)
                 hy = self.get_param("home_y", 0.0)
                 speed = self.get_param("return_speed", 3.0)
+                # 捕获当前实际相对高度, 真正不爬升
+                pos = self._bridge.get_current_position()
+                self._return_altitude = self._fc.ned_to_altitude(pos.down)
                 self.get_logger().info(
-                    f"RETURN: 返航至 Home World({hx:.1f}, {hy:.1f}, {cruise_alt:.1f})"
+                    f"RETURN: 保持当前高度 {self._return_altitude:.1f}m 返航至"
+                    f" Home World({hx:.1f}, {hy:.1f}, {self._return_altitude:.1f})"
                 )
                 tn, te, _ = world_to_ned(hx, hy, 0)
-                td = self._fc.altitude_to_ned(cruise_alt)
+                td = self._fc.altitude_to_ned(self._return_altitude)
                 self._fc.goto_ned(tn, te, td, yaw=0.0, speed=speed)
                 self._command_sent = True
 
             hx = self.get_param("home_x", 0.0)
             hy = self.get_param("home_y", 0.0)
             tn, te, _ = world_to_ned(hx, hy, 0)
-            td = self._fc.altitude_to_ned(cruise_alt)
+            td = self._fc.altitude_to_ned(self._return_altitude)
 
             if self._fc.reached((tn, te, td), tol):
                 self._stable_count += 1

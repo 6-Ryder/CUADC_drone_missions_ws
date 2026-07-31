@@ -3,7 +3,7 @@
 # test_forward_recon 真机启动 — 分阶段测试: 前飞 20m + 侦察区
 #
 # Phase 1: 起飞 → 向北直飞 20m → 验证航点到达
-# Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 回升 → 返航 → 降落
+# Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 直接返航(不爬升) → 降落
 #
 # 硬件连接:
 #   - CUAV 7 Nano 通过网线直连 Jetson Orin Nano (UDP 模式)
