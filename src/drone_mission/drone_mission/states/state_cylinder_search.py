@@ -48,7 +48,7 @@ class CylinderSearchState:
                    self._fsm.get_param("area1_north_max", 35.0)) / 2
 
         # NED 坐标
-        drop_alt = -self._fsm.get_param("area1_search_altitude", 5.0)
+        drop_alt = self._fsm.fc.altitude_to_ned(self._fsm.get_param("area1_search_altitude", 5.0))
         self._fsm.fc.goto_ned(area1_y, area1_x, drop_alt,
                               speed=self._fsm.get_param("sweep_speed", 0.8))
 
@@ -134,9 +134,9 @@ class CylinderSearchState:
 
         # 沿 east 方向慢速扫描
         self._scan_waypoints = [
-            {"north": (area1_n_min + area1_n_max) / 2, "east": area1_e_min, "down": -alt,
+            {"north": (area1_n_min + area1_n_max) / 2, "east": area1_e_min, "down": self._fsm.fc.altitude_to_ned(alt),
              "label": "scan_w"},
-            {"north": (area1_n_min + area1_n_max) / 2, "east": area1_e_max, "down": -alt,
+            {"north": (area1_n_min + area1_n_max) / 2, "east": area1_e_max, "down": self._fsm.fc.altitude_to_ned(alt),
              "label": "scan_e"},
         ]
         self._scan_wp_idx = 0

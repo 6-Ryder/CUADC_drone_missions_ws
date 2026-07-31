@@ -4,6 +4,9 @@
 # 飞行方向: 向北 (NED north 正方向)
 /mission_state_machine:
   ros__parameters:
+    # 真机当前 PX4 固件发布 v1；SITL launch 会覆盖为 v4。
+    vehicle_status_topic: "/fmu/out/vehicle_status_v1"
+
     # --- 坐标系原点 (北向场地: World X=East, Y=North) ---
     home_x: 4.0
     home_y: 10.0
@@ -50,7 +53,7 @@
     area2_altitude: 2.5           # 侦察区低空扫描高度 (m, NED z 负值)
 
     # --- 弓字形覆盖参数 ---
-    grid_spacing: 1.0             # 网格间距 (m)
+    grid_spacing: 1.67            # 网格间距 (m), 对齐 PathPlanner 默认值
     sweep_passes: 2               # 每区域折返次数
     sweep_margin_north: 1.0       # 长边界 (north) 内缩 (m)
     sweep_margin_east: 0.5        # 段边界 (east) 内缩 (m)
@@ -126,7 +129,10 @@
     # --- 精准降落参数 ---
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
-    landing_blind_altitude: 0.5   # 盲降切换高度 (m)
+    landing_blind_altitude: 1.5   # 稳定对心后切入盲降高度 (m)
+    landing_blind_align_tolerance_px: 30.0  # 切入盲降前最大像素误差
+    landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
+    landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
     landing_precision_target: 0.1 # 目标水平精度 (m)
     # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
     landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)
@@ -134,9 +140,19 @@
     landing_servo_deadzone_px: 12.0     # 像素死区 (px), 进入后停止水平修正
     landing_servo_x_to_right_sign: 1.0  # u轴→右移符号
     landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)
+    landing_target_min_confidence: 0.60  # 过滤近地低置信度 H 畸变
+    landing_target_max_jump_px: 80.0  # 连续帧 H 中心最大允许跳变，超过则悬停
     landing_descent_fast: 0.4           # >3m 下降速度 (m/s)
     landing_descent_medium: 0.25        # 1.5-3m 下降速度 (m/s)
     landing_descent_slow: 0.12          # <1.5m 下降速度 (m/s)
+    # PX4 接地检测要求下降意图 >= 1.1 * LNDMC_Z_VEL_MAX (当前为 0.275m/s)
+    landing_blind_descent_speed: 0.30   # 对心后近地纯垂直 Offboard 下降速度
+    landing_blind_timeout: 45.0         # 从进入盲降开始计时，超时则停止下降并报错
+    # 仅 SITL 使用本地高度/速度备用接地确认；真机只接受 PX4 land_detected
+    landing_touchdown_max_altitude: 0.10
+    landing_touchdown_max_horizontal_speed: 0.10
+    landing_touchdown_max_vertical_speed: 0.05
+    landing_touchdown_hold_time: 2.0
 
     # --- 异常处理参数 ---
     battery_warning: 0.25         # 低电量警告阈值 (比例)

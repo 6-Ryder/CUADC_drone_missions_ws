@@ -119,7 +119,7 @@ class TakeoffState:
                 # 发布起飞 setpoint
                 self._fsm.fc.takeoff(takeoff_h)
                 self._fsm.get_logger().info(
-                    f"[PX4] takeoff → NED(0.0, 0.0, {-takeoff_h})"
+                    f"[PX4] takeoff → NED(0.0, 0.0, {self._fsm.fc.altitude_to_ned(takeoff_h)})"
                 )
             elif sub_elapsed > 15.0:
                 self._fsm.get_logger().error("TAKEOFF: Offboard 切换超时")
@@ -129,7 +129,7 @@ class TakeoffState:
         # === SUB_CLIMB: 等待到达巡航高度 ===
         tolerance = self._fsm.get_param("takeoff_tolerance", 0.3)
         pos = self._fsm.bridge.get_current_position()
-        target_down = -takeoff_h
+        target_down = self._fsm.fc.altitude_to_ned(takeoff_h)
         altitude_error = abs(pos.down - target_down)
 
         if altitude_error < tolerance:

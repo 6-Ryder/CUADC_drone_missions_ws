@@ -61,6 +61,11 @@ def generate_launch_description():
         default_value="57.5",
         description="Home → 侦察区距离 (m)",
     )
+    vehicle_status_topic_arg = DeclareLaunchArgument(
+        "vehicle_status_topic",
+        default_value="/fmu/out/vehicle_status_v4",
+        description="SITL PX4 VehicleStatus DDS topic",
+    )
 
     # ---- 包路径 ----
     pkg_control = get_package_share_directory("px4_control")
@@ -89,6 +94,7 @@ def generate_launch_description():
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
             "home_z": LaunchConfiguration("home_z"),
+            "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -134,6 +140,8 @@ def generate_launch_description():
             "flight_axis": LaunchConfiguration("flight_axis"),
             "drop_distance": LaunchConfiguration("drop_distance"),
             "recon_distance": LaunchConfiguration("recon_distance"),
+            "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
+            "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -167,6 +175,7 @@ def generate_launch_description():
         flight_axis_arg,
         drop_distance_arg,
         recon_distance_arg,
+        vehicle_status_topic_arg,
         px4_bridge_node,
         vision_delayed,
         servo_delayed,

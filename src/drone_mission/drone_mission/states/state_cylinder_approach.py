@@ -83,7 +83,7 @@ class CylinderApproachState:
 
         tn, te, _ = world_to_ned(tx, ty, 0)
         alt = self._fsm.get_param("area1_search_altitude", 5.0)
-        self._fsm.fc.goto_ned(tn, te, -alt, speed=speed)
+        self._fsm.fc.goto_ned(tn, te, self._fsm.fc.altitude_to_ned(alt), speed=speed)
         return error
 
     @staticmethod
@@ -104,7 +104,7 @@ class CylinderApproachState:
         du, dv = self._pixel_error(cyl)
         pos = self._fsm.bridge.get_current_position()
         drone_wx, drone_wy, _ = ned_to_world(pos.north, pos.east, pos.down)
-        alt = max(abs(pos.down), 0.5)
+        alt = max(abs(self._fsm.fc.ned_to_altitude(pos.down)), 0.5)
         fx = float(self._fsm.get_param("camera_fx", 539.9))
         fy = float(self._fsm.get_param("camera_fy", 539.9))
         gain = float(self._fsm.get_param("cylinder_approach_pixel_gain", 0.65))
@@ -121,7 +121,7 @@ class CylinderApproachState:
 
         tn, te, _ = world_to_ned(target_wx, target_wy, 0.0)
         hold_alt = self._fsm.get_param("area1_search_altitude", 5.0)
-        self._fsm.fc.goto_ned(tn, te, -hold_alt, speed=speed)
+        self._fsm.fc.goto_ned(tn, te, self._fsm.fc.altitude_to_ned(hold_alt), speed=speed)
         return (du * du + dv * dv) ** 0.5
 
     def _find_nearest_cylinder(self, cylinders: list) -> Optional[object]:

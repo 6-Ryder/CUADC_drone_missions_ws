@@ -374,6 +374,8 @@ class VisionPipelineNode(Node):
         if not request.enable:
             self._detection_mode = "idle"
             self.set_servo_mode("none")
+            if self._coverage:
+                self._coverage.end_scan()
             self._release_detection_models()
         elif request.mode == 2:
             self._detection_mode = "landing"
@@ -387,6 +389,19 @@ class VisionPipelineNode(Node):
                 return response
             self._detection_mode = "all"
             self.set_servo_mode("none")
+            if self._coverage:
+                self._coverage.end_scan()
+        elif request.mode == 4:
+            self._detection_mode = "idle"
+            self.set_servo_mode("none")
+            self._release_detection_models()
+            if self._coverage:
+                self._coverage.reset()
+        elif request.mode == 5:
+            self._detection_mode = "idle"
+            self.set_servo_mode("none")
+            if self._coverage:
+                self._coverage.begin_scan()
         else:
             response.success = False
             response.message = f"不支持的视觉模式: {request.mode}"

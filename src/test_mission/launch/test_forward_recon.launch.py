@@ -3,7 +3,7 @@ test_forward_recon 启动 — px4_bridge + test_forward_recon.
 
 任务流程:
   Phase 1: TAKEOFF → TRANSIT_FORWARD (向北直飞 20m)
-  Phase 2: DESCEND → RECON_SWEEP → ASCEND → RETURN → LAND
+  Phase 2: DESCEND → RECON_SWEEP → RETURN(保持侦察高度,不爬升) → LAND
 
 使用方法:
   # 仿真 (SITL)
@@ -189,7 +189,7 @@ def generate_launch_description():
         LogInfo(msg="=== 分阶段真机测试: 前飞 20m + 侦察区 ==="),
         LogInfo(msg="  安全: WAIT_ARMED → 遥控器 Arm Switch 解锁 → TAKEOFF"),
         LogInfo(msg="  Phase 1: TAKEOFF → TRANSIT_FORWARD (向北 20m)"),
-        LogInfo(msg="  Phase 2: DESCEND → RECON_SWEEP → ASCEND → RETURN"),
+        LogInfo(msg="  Phase 2: DESCEND → RECON_SWEEP → RETURN(不爬升) → LAND"),
         LogInfo(msg="  LAND: H 标识视觉伺服精准降落"),
         sim_mode_arg,
         cruise_altitude_arg,

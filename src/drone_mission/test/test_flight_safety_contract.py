@@ -32,6 +32,7 @@ class _Bridge:
         self.offboard = False
         self.land_commands = 0
         self.force_disarms = 0
+        self.landed = False
 
     def is_offboard(self):
         return self.offboard
@@ -42,6 +43,16 @@ class _Bridge:
     def land_at_current(self):
         self.land_commands += 1
 
+    def is_landed(self):
+        return self.landed
+
+    def get_telemetry(self):
+        return type(
+            "Telemetry",
+            (),
+            {"velocity": Velocity(vn=0.0, ve=0.0, vd=0.3)},
+        )()
+
     def force_disarm(self):
         self.force_disarms += 1
 
@@ -49,9 +60,16 @@ class _Bridge:
 class _FlightController:
     def __init__(self):
         self.takeoff_calls = 0
+        self.velocity_commands = []
 
     def takeoff(self, _height):
         self.takeoff_calls += 1
+
+    def set_velocity_body(self, *command):
+        self.velocity_commands.append(command)
+
+    def stop_velocity(self):
+        self.velocity_commands.append((0.0, 0.0, 0.0))
 
 
 class _FSM:
@@ -68,6 +86,9 @@ class _FSM:
 
     def check_drop_service_result(self):
         return False
+
+    def set_vision_mode(self, _mode):
+        pass
 
 
 def test_takeoff_waits_for_confirmed_offboard(monkeypatch):
@@ -191,20 +212,195 @@ def test_flight_controller_takeoff_sets_same_target_for_altitude():
     assert bridge._target[2] == -5.0  # altitude=5 → NED down=-5
 
 
-def test_precision_land_timeout_uses_px4_land_not_force_disarm(monkeypatch):
+def test_precision_land_blind_descent_stays_offboard_and_can_trigger_land_detector(
+    monkeypatch,
+):
     fsm = _FSM()
     fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
-    fsm.fc.set_velocity_ned = lambda *_args: None
-    fsm.fc.set_velocity_body = lambda *_args: None
+    fsm.bridge.get_telemetry = lambda: type(
+        "Telemetry",
+        (),
+        {"velocity": Velocity(vn=0.0, ve=0.0, vd=0.3)},
+    )()
     state = PrecisionLandState(fsm)
-    state._start_time = 0.0
+    state._phase = state.PHASE_BLIND
+    state._blind_start_time = 1.0
     monkeypatch.setattr(
-        "drone_mission.states.state_precision_land.time.time", lambda: 61.0,
+        "drone_mission.states.state_precision_land.time.time", lambda: 2.0,
     )
 
-    assert state._execute_blind() is None
-    assert fsm.bridge.land_commands == 1
+    assert state.execute() is None
+    assert fsm.fc.velocity_commands[-1] == (0.0, 0.0, 0.3)
+    assert fsm.bridge.land_commands == 0
     assert fsm.bridge.force_disarms == 0
+
+
+def test_precision_land_never_hands_visual_loss_to_px4_land(monkeypatch):
+    fsm = _FSM()
+    fsm.get_landing_target = lambda: None
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
+    state = PrecisionLandState(fsm)
+    state._has_landing_target = True
+    state._vision_lost_start = 1.0
+    monkeypatch.setattr(
+        "drone_mission.states.state_precision_land.time.time", lambda: 5.0,
+    )
+
+    assert state.execute() == "ERROR"
+    assert fsm.fc.velocity_commands[-1] == (0.0, 0.0, 0.0)
+    assert fsm.bridge.land_commands == 0
+    assert fsm.bridge.force_disarms == 0
+
+
+def test_precision_land_sim_touchdown_requires_stable_window_then_disarms(
+    monkeypatch,
+):
+    fsm = _FSM()
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    fsm.bridge.get_telemetry = lambda: type(
+        "Telemetry",
+        (),
+        {"velocity": Velocity(vn=0.01, ve=-0.01, vd=0.0)},
+    )()
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_BLIND
+    state._blind_start_time = 1.0
+    now = [10.0]
+    monkeypatch.setattr(
+        "drone_mission.states.state_precision_land.time.time", lambda: now[0],
+    )
+
+    assert state.execute() is None
+    assert fsm.bridge.force_disarms == 0
+
+    now[0] = 12.1
+    assert state.execute() == "COMPLETE"
+    assert fsm.bridge.force_disarms == 1
+    assert fsm.bridge.land_commands == 0
+
+
+def test_precision_land_real_flight_does_not_use_local_altitude_fallback(
+    monkeypatch,
+):
+    fsm = _FSM()
+    fsm.get_param = lambda name, default: False if name == "sim_mode" else default
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    fsm.bridge.get_telemetry = lambda: type(
+        "Telemetry",
+        (),
+        {"velocity": Velocity(vn=0.0, ve=0.0, vd=0.0)},
+    )()
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_BLIND
+    state._blind_start_time = 1.0
+    now = [10.0]
+    monkeypatch.setattr(
+        "drone_mission.states.state_precision_land.time.time", lambda: now[0],
+    )
+
+    assert state.execute() is None
+    now[0] = 12.1
+    assert state.execute() is None
+    assert fsm.bridge.force_disarms == 0
+
+
+def test_precision_land_landed_telemetry_disarms_then_completes():
+    fsm = _FSM()
+    fsm.bridge.landed = True
+    state = PrecisionLandState(fsm)
+
+    assert state.execute() == "COMPLETE"
+    assert fsm.bridge.force_disarms == 1
+
+
+def test_precision_land_holds_position_on_a_single_large_target_jump():
+    """A one-frame H misdetection must not create a lateral descent command."""
+    fsm = _FSM()
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -3.0})()
+    commands = []
+    fsm.fc.set_velocity_body = lambda *command: commands.append(command)
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    target = {"center_u": 640.0, "center_v": 480.0, "confidence": 0.9}
+    fsm.get_landing_target = lambda: target
+    assert state.execute() is None
+
+    # Near-ground H detections jumped by about 100 px in the failed SITL run.
+    target = {"center_u": 740.0, "center_v": 480.0, "confidence": 0.9}
+    assert state.execute() is None
+    assert commands[-1] == (0.0, 0.0, 0.0)
+
+
+def test_precision_land_uses_latched_visual_alignment_before_bad_close_frame():
+    """Stable visual alignment must win over the detector's unreliable close range."""
+    fsm = _FSM()
+    # The successful visual window observed in SITL was 2.5m to 2.2m.
+    altitude = [-2.4]
+    target = [{
+        "center_u": 640.0,
+        "center_v": 480.0,
+        "confidence": 0.9,
+    }]
+    fsm.bridge.get_current_position = lambda: type(
+        "P", (), {"down": altitude[0]},
+    )()
+    fsm.get_landing_target = lambda: target[0]
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    for _ in range(10):
+        assert state.execute() is None
+
+    # At close range the detector degrades, but visual alignment was already
+    # proven for 10 frames and must be handed to vertical blind descent before
+    # this bad frame can command a lateral correction.
+    altitude[0] = -1.49
+    target[0] = {
+        "center_u": 640.0,
+        "center_v": 580.0,
+        "confidence": 0.54,
+    }
+    command_count = len(fsm.fc.velocity_commands)
+    assert state.execute() is None
+    assert state._phase == state.PHASE_BLIND
+    assert len(fsm.fc.velocity_commands) == command_count
+
+
+def test_precision_land_rejects_low_confidence_h_detection():
+    fsm = _FSM()
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -3.0})()
+    fsm.get_landing_target = lambda: {
+        "center_u": 700.0,
+        "center_v": 540.0,
+        "confidence": 0.54,
+    }
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    assert state.execute() is None
+    assert fsm.fc.velocity_commands[-1] == (0.0, 0.0, 0.0)
+
+
+def test_precision_land_blind_phase_does_not_retrigger_vision_loss_fallback(
+    monkeypatch,
+):
+    fsm = _FSM()
+    fsm.get_landing_target = lambda: None
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
+    commands = []
+    fsm.fc.set_velocity_body = lambda *command: commands.append(command)
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_BLIND
+    state._has_landing_target = True
+    state._vision_lost_start = 1.0
+    monkeypatch.setattr(
+        "drone_mission.states.state_precision_land.time.time", lambda: 5.0,
+    )
+
+    assert state.execute() is None
+    assert commands[-1] == (0.0, 0.0, 0.3)
+    assert fsm.bridge.land_commands == 0
 
 
 def test_px4_bridge_arm_does_not_use_force_magic():
@@ -219,7 +415,7 @@ def test_px4_bridge_arm_does_not_use_force_magic():
 
 
 def test_px4_telemetry_uses_versioned_status_topics():
-    """Verify the standalone bridge subscribes to versioned PX4 topics."""
+    """Verify the standalone bridge receives the deployment-selected status topic."""
     bridge_py = SOURCE_ROOT / "px4_control/px4_control/standalone_bridge.py"
     source = bridge_py.read_text(encoding="utf-8")
 

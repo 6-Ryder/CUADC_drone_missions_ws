@@ -254,7 +254,7 @@ class DropVisualAligner:
     def _probe_move(self, n: float, e: float, drop_h: float, label: str) -> None:
         """发送探测移动指令."""
         speed = float(self._fsm.get_param("drop_visual_align_probe_speed", 0.30))
-        self._fsm.fc.goto_ned(n, e, -drop_h, speed=speed)
+        self._fsm.fc.goto_ned(n, e, self._fsm.fc.altitude_to_ned(drop_h), speed=speed)
         self._probe_start_time = self._fsm.get_clock().now().nanoseconds / 1e9
         self._fsm.get_logger().info(
             f"DESCEND_PROBE: {label} → NED({n:.2f},{e:.2f}) "
@@ -297,7 +297,7 @@ class DropVisualAligner:
         if self._phase == ServoPhase.HOVER:
             # 悬停 2 秒让 is_centered 有机会累积稳定帧
             pos = self._fsm.bridge.get_current_position()
-            self._fsm.fc.goto_ned(pos.north, pos.east, -drop_height, speed=0.0)
+            self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_height), speed=0.0)
             hover_duration = float(
                 self._fsm.get_param("drop_visual_align_hover_time", 2.5)
             )
@@ -425,7 +425,7 @@ class DropVisualAligner:
 
     def _goto_ned(self, n: float, e: float, drop_h: float) -> None:
         speed = float(self._fsm.get_param("drop_visual_align_probe_speed", 0.30))
-        self._fsm.fc.goto_ned(n, e, -drop_h, speed=speed)
+        self._fsm.fc.goto_ned(n, e, self._fsm.fc.altitude_to_ned(drop_h), speed=speed)
 
     def _advance_phase(self, drop_h: float) -> None:
         """提交后推进到下一个探测轴或刹车."""

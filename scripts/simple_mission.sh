@@ -52,10 +52,8 @@ rm -f "$PX4_BLD/rootfs/0/parameters.bson" "$PX4_BLD/rootfs/0/parameters_backup.b
 rm -rf "$PX4_BLD/rootfs/0/dataman"
 rm -f "$PX4_BLD/rootfs/parameters.bson" "$PX4_BLD/rootfs/parameters_backup.bson"
 
-if [ -f /opt/ros/humble/setup.bash ]; then
-    source /opt/ros/humble/setup.bash
-else
-    error "ROS2 Humble 未找到"
+if ! source "$PROJ/scripts/sitl_env.sh"; then
+    error "SITL ROS2 环境初始化失败"
     exit 1
 fi
 

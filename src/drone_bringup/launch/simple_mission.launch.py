@@ -63,8 +63,12 @@ def generate_launch_description():
         description="true=SITL force arm(21196) / false=真机标准解锁(0)",
     )
     rc_require_arg = DeclareLaunchArgument(
-        "rc_require_arm_signal", default_value="true",
-        description="true=等待人用遥控器Arm Switch解锁, false=代码arm直接起飞",
+        "rc_require_arm_signal", default_value="false",
+        description="SITL 默认 false(代码强制解锁); 真机需显式传 true(遥控器解锁)",
+    )
+    vehicle_status_topic_arg = DeclareLaunchArgument(
+        "vehicle_status_topic", default_value="/fmu/out/vehicle_status_v4",
+        description="SITL VehicleStatus DDS topic; real flight must pass its verified version",
     )
 
     # ---- 节点 ----
@@ -80,6 +84,7 @@ def generate_launch_description():
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
             "home_z": 0.0,
+            "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -100,6 +105,7 @@ def generate_launch_description():
             "home_y": LaunchConfiguration("home_y"),
             "loiter_time": LaunchConfiguration("loiter_time"),
             "sim_mode": LaunchConfiguration("sim_mode"),
+            "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
@@ -127,6 +133,7 @@ def generate_launch_description():
         loiter_time_arg,
         sim_mode_arg,
         rc_require_arg,
+        vehicle_status_topic_arg,
         px4_bridge_node,
         mission_delayed,
     ])

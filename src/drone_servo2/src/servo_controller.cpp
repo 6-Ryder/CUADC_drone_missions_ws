@@ -270,45 +270,41 @@ DropManager::DropManager(
 
 bool DropManager::execute_drop(int cylinder_id)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (drop_count_ >= max_drops_) {
-    state_ = DropState::FAILED;
-    notify_done(false, cylinder_id);
-    return false;
-  }
-
-  if (!servo_->is_ready()) {
-    state_ = DropState::FAILED;
-    notify_done(false, cylinder_id);
-    return false;
-  }
-
-  state_ = DropState::MOVING;
-
-  // 移动到下一个位置: positions[drop_count + 1]
-  double target_pwm = positions_[drop_count_ + 1];
-
   bool success = false;
-  try {
-    success = servo_->set_pwm(target_pwm);
-    if (success) {
-      // 等待舵机动作完成
-      std::this_thread::sleep_for(
-        std::chrono::duration<double>(delay_ms_ / 1000.0));
+  {
+    // Serialize the whole move so a second request cannot select the same
+    // position.  Do not call user callbacks while this mutex is held.
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (drop_count_ >= max_drops_ || !servo_->is_ready()) {
+      state_ = DropState::FAILED;
+      last_result_ = false;
+    } else {
+      state_ = DropState::MOVING;
+
+      // 移动到下一个位置: positions[drop_count + 1]
+      const double target_pwm = positions_[drop_count_ + 1];
+      try {
+        success = servo_->set_pwm(target_pwm);
+        if (success) {
+          // 等待舵机动作完成
+          std::this_thread::sleep_for(
+            std::chrono::duration<double>(delay_ms_ / 1000.0));
+        }
+      } catch (...) {
+        success = false;
+      }
+
+      if (success) {
+        drop_count_++;
+        state_ = DropState::DONE;
+      } else {
+        state_ = DropState::FAILED;
+      }
+      last_result_ = success;
     }
-  } catch (...) {
-    success = false;
   }
 
-  if (success) {
-    drop_count_++;
-    state_ = DropState::DONE;
-  } else {
-    state_ = DropState::FAILED;
-  }
-
-  last_result_ = success;
   notify_done(success, cylinder_id);
   return success;
 }

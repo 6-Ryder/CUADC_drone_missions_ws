@@ -1,112 +1,68 @@
-# 真机舵机调试指南
+# 真机现场调试指南
 
-带此清单去现场, 按顺序做. 每一步失败即停, 排查后再继续.
+这是现场操作清单，不替代操作者的遥控器和硬件急停。每一步失败都应停在地面排查。
 
----
+## 1. 上电与安全
 
-## 第一步: 通电检查
+- 螺旋桨、舵机和载荷安装状态已确认，测试区域无人员和障碍物。
+- 遥控器已连接，Arm Switch 处于禁止解锁位置，手动接管可用。
+- QGroundControl 能连接 CUAV 7-Nano，电池和传感器状态正常。
+- 确认 PX4 v1.17 参数记录与当前飞控一致，尤其是 RC、接地检测和速度限制。
 
-Jetson 上电 → 飞控上电 → QGC 连接飞控 → 确认 MAIN5 配置:
+参数参考：[飞控参数修改记录](../real_flight_logs/飞控参数修改记录.md)。
 
-- 执行器页面 → MAIN5 = "Peripheral via Actuator Set 1"
-- MAIN5 的 PWM Min = 1150, PWM Max = 2150
-- 确认 Disarmed 状态下 MAIN5 输出状态
+## 2. PX4 DDS 与桥接
 
----
-
-## 第二步: 验证 px4_bridge 通信
-
-```bash
-ssh jetson
-cd ~/CUADC_drone_missions_ws
-source install/setup.bash
-ros2 run px4_control px4_bridge
-```
-
-等待 "注册完成" 日志.
-
-另开终端验证:
-```bash
-source install/setup.bash
-ros2 topic echo /drone/pose --once    # 应看到位姿数据
-```
-
-不通 → 检查飞控与 Jetson 串口连接.
-
----
-
-## 第三步: 启动舵机节点
+先在地面启动环境：
 
 ```bash
-# 保持 px4_bridge 运行
-# 新终端:
-source install/setup.bash
-ros2 run drone_servo2 servo_controller --ros-args -p platform:=jetson
+source /opt/ros/humble/setup.bash
+source /home/ryder/drone_tasks_ws/install/setup.bash
+ros2 launch drone_bringup real_flight.launch.py
 ```
 
-预期输出:
-```
-舵机: PX4 VehicleCommand 模式 (set=1 idx=0 pwm=[1150..2150] init=1150μs)
-投放序列 (2 次):
-  [0] 1150 μs ← 初始/闭合
-  [1] 1700 μs
-  [2] 2150 μs
-舵机投放服务已就绪
-```
-
-舵机应保持 1150μs (闭合), 不动作.
-
----
-
-## 第四步: 触发投放
+确认真机使用 v1 话题：
 
 ```bash
-# 新终端:
-source install/setup.bash
-ros2 service call /drone/servo/trigger_drop drone_interfaces/srv/TriggerDrop "cylinder_id: 1"
+ros2 topic list | rg '/fmu/out/vehicle_status_v1|/fmu/out/vehicle_land_detected'
+ros2 topic echo /drone/pose --once
 ```
 
-观察舵机是否从 1150 → 1700μs.
+如果没有状态或位姿，停止任务，检查 MicroXRCEAgent 的串口/UDP 传输、PX4 `UXRCE_DDS_CFG`、串口权限和网络连接。
 
-**不动时检查 QGC 输出映射:**
+## 3. 相机与视觉
 
-MAIN5 必须配置为 `Peripheral via Actuator Set 1`。控制器固定发送
-`DO_SET_ACTUATOR.param1`，并将 `param7` 设为 0；不要通过尝试其他索引绕过映射错误。
-
----
-
-## 第五步: 抓取 VehicleCommand 确认链路
+确认设备路径和图像流：
 
 ```bash
-ros2 topic echo /drone/cmd/vehicle_command_relay
+ls -l /dev/v4l/by-id/
+ros2 topic list | rg 'image|vision/status'
+ros2 topic echo /drone/vision/status --once
 ```
 
-触发投放后应看到 `command: 187`. 有 → 软件通; 无 → servo_controller 问题.
+必须看到视觉 `ready=1`，并使用真机标定的 `fx/fy/cx/cy`。若模型加载失败、provider 不可用、相机无帧或 ready 未置位，不得解锁。
 
----
+## 4. 舵机与 MAIN5
 
-## 第六步: 解锁后测试
-
-部分 PX4 配置锁外围执行器, 需解锁后才输出 PWM:
+地面无载荷测试投放服务：
 
 ```bash
-# QGC 里手动解锁 (遥控器或按钮)
-# 或:
-ros2 service call /mavros/cmd/arming mavros_msgs/srv/CommandBool "value: true"
+ros2 service list | rg '/drone/servo/trigger_drop'
+ros2 topic echo /drone/servo/status --once
 ```
 
-**注意: 解锁后电机也转, 确保不装桨!**
+确认 MAIN5 配置为 Peripheral via Actuator Set 1，PWM 范围为 1150–2150 μs。舵机序列只能前进：1150（闭合）→ 1700（第一次释放）→ 2150（第二次释放）。
 
-解锁后重试投放.
+## 5. 起飞前任务检查
 
----
+- `vehicle_status_v1`、`/drone/pose`、视觉和舵机均 ready；
+- 遥控器允许解锁但仍保留手动接管；
+- 任务区域坐标、相机朝向和目标载荷与配置一致；
+- 操作者知道如何切换手动/安全模式；
+- 记录本次日志目录和飞控参数版本。
 
-## 快速排查表
+## 6. 降落与异常
 
-| 现象 | 原因 | 动作 |
-|---|---|---|
-| 舵机不动, VehicleCommand 有输出 | MAIN5 功能或 PWM 范围错误 | QGC 设置 MAIN5 为 Peripheral via Actuator Set 1, 范围 1150-2150μs |
-| 舵机不动, VehicleCommand 无输出 | servo_controller 没发布 | 检查节点日志 |
-| 舵机动了但角度不对 | PWM 范围不匹配 | QGC 调 PWM Min/Max |
-| 飞控不响应 VehicleCommand | 未解锁或 PX4 配置锁 | 解锁后重试 |
-| px4_bridge 没输出 | DDS 连接问题 | 检查串口/USB |
+精准降落必须先由 H 视觉完成对心锁存，再进入 1.5 m 盲降。视觉丢失、盲降超时或水平误差未稳定时，系统应停止运动并进入错误处理；不要以 PX4 LAND 代替视觉流程。
+
+接地后确认 `/fmu/out/vehicle_land_detected`，再检查电机停转、舵机状态和任务摘要。任何异常先由遥控器接管，再停止 ROS 2 节点。

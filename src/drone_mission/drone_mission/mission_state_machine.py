@@ -203,6 +203,7 @@ class MissionFSM(Node):
         """声明所有 YAML 参数."""
         # 全局
         self.declare_parameter("sim_mode", True)
+        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
         self.declare_parameter("home_x", 4.0)
         self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)
@@ -312,7 +313,10 @@ class MissionFSM(Node):
         # 降落
         self.declare_parameter("landing_search_altitude", 5.0)
         self.declare_parameter("landing_approach_speed", 0.5)
-        self.declare_parameter("landing_blind_altitude", 0.5)
+        self.declare_parameter("landing_blind_altitude", 1.5)
+        self.declare_parameter("landing_blind_align_tolerance_px", 30.0)
+        self.declare_parameter("landing_blind_stable_frames", 10)
+        self.declare_parameter("landing_alignment_latch_max_altitude", 2.5)
         self.declare_parameter("landing_precision_target", 0.1)
         # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
         self.declare_parameter("landing_servo_kp_pixel", 0.004)
@@ -320,9 +324,17 @@ class MissionFSM(Node):
         self.declare_parameter("landing_servo_deadzone_px", 12.0)
         self.declare_parameter("landing_servo_x_to_right_sign", 1.0)
         self.declare_parameter("landing_servo_y_to_forward_sign", -1.0)
+        self.declare_parameter("landing_target_min_confidence", 0.60)
+        self.declare_parameter("landing_target_max_jump_px", 80.0)
         self.declare_parameter("landing_descent_fast", 0.4)
         self.declare_parameter("landing_descent_medium", 0.25)
         self.declare_parameter("landing_descent_slow", 0.12)
+        self.declare_parameter("landing_blind_descent_speed", 0.30)
+        self.declare_parameter("landing_blind_timeout", 45.0)
+        self.declare_parameter("landing_touchdown_max_altitude", 0.10)
+        self.declare_parameter("landing_touchdown_max_horizontal_speed", 0.10)
+        self.declare_parameter("landing_touchdown_max_vertical_speed", 0.05)
+        self.declare_parameter("landing_touchdown_hold_time", 2.0)
         # 异常
         self.declare_parameter("battery_warning", 0.25)
         self.declare_parameter("battery_critical", 0.15)
@@ -939,6 +951,8 @@ class MissionFSM(Node):
     _VISION_MODE_NONE = 0
     _VISION_MODE_LANDING = 2
     _VISION_MODE_ALL = 3
+    _VISION_MODE_COVERAGE_RESET = 4
+    _VISION_MODE_COVERAGE = 5
 
     def set_vision_mode(self, mode: str) -> None:
         """Switch the separately running vision pipeline through its ROS service."""
@@ -954,6 +968,12 @@ class MissionFSM(Node):
 
         if mode == "landing":
             request.mode = self._VISION_MODE_LANDING
+            request.enable = True
+        elif mode == "coverage_reset":
+            request.mode = self._VISION_MODE_COVERAGE_RESET
+            request.enable = True
+        elif mode == "coverage":
+            request.mode = self._VISION_MODE_COVERAGE
             request.enable = True
         elif mode == "none":
             request.mode = self._VISION_MODE_NONE

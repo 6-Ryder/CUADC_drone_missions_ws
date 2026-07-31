@@ -73,6 +73,7 @@ class SimpleMission(Node):
         self.declare_parameter("loiter_time", 5.0)
         self.declare_parameter("state_timeout", 180.0)
         self.declare_parameter("sim_mode", True)
+        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
 
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
         self.declare_parameter("rc_require_arm_signal", True)
@@ -203,7 +204,7 @@ class SimpleMission(Node):
         # ---- TAKEOFF: 起飞至巡航高度 ----
         elif self._state == MissionState.TAKEOFF:
             self._fc.takeoff(cruise_alt)
-            target_down = -cruise_alt
+            target_down = self._fc.altitude_to_ned(cruise_alt)
             pos = self._bridge.get_current_position()
 
             if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.3):
@@ -224,14 +225,17 @@ class SimpleMission(Node):
                 dx = self.get_param("drop_x", 4.0)
                 dy = self.get_param("drop_y", 42.5)
                 self.get_logger().info(f"TRANSIT: 飞往投放区 World({dx}, {dy}, {cruise_alt})")
-                self._fc.goto_world(dx, dy, cruise_alt, speed=2.0)
+                tn, te, _ = world_to_ned(dx, dy, 0)
+                td = self._fc.altitude_to_ned(cruise_alt)
+                self._fc.goto_ned(tn, te, td, yaw=0.0, speed=2.0)
                 self._command_sent = True
 
-            n, e, d = world_to_ned(
+            n, e, _ = world_to_ned(
                 self.get_param("drop_x", 4.0),
                 self.get_param("drop_y", 42.5),
-                cruise_alt,
+                0,
             )
+            d = self._fc.altitude_to_ned(cruise_alt)
             if self._fc.reached((n, e, d), tol):
                 loiter_t = self.get_param("loiter_time", 5.0)
                 self.get_logger().info(f"TRANSIT: 到达投放区 → LOITER ({loiter_t}s)")
@@ -253,14 +257,17 @@ class SimpleMission(Node):
                 hx = self.get_param("home_x", 4.0)
                 hy = self.get_param("home_y", 10.0)
                 self.get_logger().info(f"RETURN: 返航至 World({hx}, {hy}, {cruise_alt})")
-                self._fc.goto_world(hx, hy, cruise_alt, speed=3.0)
+                tn, te, _ = world_to_ned(hx, hy, 0)
+                td = self._fc.altitude_to_ned(cruise_alt)
+                self._fc.goto_ned(tn, te, td, yaw=0.0, speed=3.0)
                 self._command_sent = True
 
-            n, e, d = world_to_ned(
+            n, e, _ = world_to_ned(
                 self.get_param("home_x", 4.0),
                 self.get_param("home_y", 10.0),
-                cruise_alt,
+                0,
             )
+            d = self._fc.altitude_to_ned(cruise_alt)
             if self._fc.reached((n, e, d), tol):
                 self.get_logger().info("RETURN: 到达起降点上方 → LAND")
                 self._transition(MissionState.LAND)
