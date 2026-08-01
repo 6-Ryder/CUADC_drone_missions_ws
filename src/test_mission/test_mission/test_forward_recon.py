@@ -408,7 +408,7 @@ class TestForwardRecon(Node):
             target_down = self._fc.altitude_to_ned(self.get_param("recon_altitude", 3.0))
             pos = self._bridge.get_current_position()
 
-            if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.5):
+            if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.3):
                 self._stable_count += 1
             else:
                 self._stable_count = max(0, self._stable_count - 1)
