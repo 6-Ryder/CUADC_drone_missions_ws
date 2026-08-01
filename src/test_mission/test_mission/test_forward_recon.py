@@ -91,6 +91,7 @@ class TestForwardRecon(Node):
         # ---- 参数声明 ----
         # 通用
         self.declare_parameter("sim_mode", True)
+        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
         self.declare_parameter("cruise_altitude", 5.0)
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
@@ -155,7 +156,7 @@ class TestForwardRecon(Node):
             sweep_speed=self.get_param("sweep_speed", 0.8),
             transit_speed=self.get_param("transit_speed", 2.0),
             return_speed=self.get_param("return_speed", 3.0),
-            grid_spacing=self.get_param("grid_spacing", 1.0),
+            grid_spacing=self.get_param("grid_spacing", 1.67),
             margin_north=self.get_param("sweep_margin_north", 0.5),
             margin_east=self.get_param("sweep_margin_east", 0.5),
         )
@@ -218,8 +219,8 @@ class TestForwardRecon(Node):
         # ---- 启动日志 ----
         fwd = self.get_param("forward_distance", 20.0)
         ralt = self.get_param("recon_altitude", 3.0)
-        half_n = self.get_param("recon_area_half_north", 4.0)
-        half_e = self.get_param("recon_area_half_east", 3.0)
+        half_n = self.get_param("recon_area_half_north", 2.5)
+        half_e = self.get_param("recon_area_half_east", 4.0)
 
         self.get_logger().info("=" * 60)
         self.get_logger().info("  TestForwardRecon — 分阶段真机测试")
@@ -407,7 +408,7 @@ class TestForwardRecon(Node):
             target_down = self._fc.altitude_to_ned(self.get_param("recon_altitude", 3.0))
             pos = self._bridge.get_current_position()
 
-            if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.5):
+            if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.3):
                 self._stable_count += 1
             else:
                 self._stable_count = max(0, self._stable_count - 1)
@@ -537,8 +538,8 @@ class TestForwardRecon(Node):
     def _generate_recon_waypoints(self):
         """生成侦察区弓字形全覆盖航点 (NED 坐标系)."""
         fwd = self.get_param("forward_distance", 20.0)
-        half_n = self.get_param("recon_area_half_north", 4.0)
-        half_e = self.get_param("recon_area_half_east", 3.0)
+        half_n = self.get_param("recon_area_half_north", 2.5)
+        half_e = self.get_param("recon_area_half_east", 4.0)
         ralt = self.get_param("recon_altitude", 3.0)
 
         area_north_min = fwd - half_n
@@ -561,7 +562,7 @@ class TestForwardRecon(Node):
             f" 区域 NED N[{area_north_min:.1f}:{area_north_max:.1f}]"
             f" E[{area_east_min:.1f}:{area_east_max:.1f}],"
             f" 高度 {ralt:.1f}m,"
-            f" 间距 {self.get_param('grid_spacing', 1.0)}m"
+            f" 间距 {self.get_param('grid_spacing', 1.67)}m"
         )
 
         if self._recon_waypoints:

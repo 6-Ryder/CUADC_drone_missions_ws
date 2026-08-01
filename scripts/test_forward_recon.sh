@@ -152,6 +152,7 @@ echo ""
 
 ros2 launch test_mission test_forward_recon.launch.py \
     sim_mode:=false \
+    rc_require_arm_signal:=true \
     home_x:=0.0 \
     home_y:=0.0 \
     home_z:=0.0 \
@@ -159,10 +160,10 @@ ros2 launch test_mission test_forward_recon.launch.py \
     cruise_altitude:=5.0 \
     transit_speed:=2.0 \
     recon_altitude:=3.0 \
-    recon_area_half_north:=4.0 \
-    recon_area_half_east:=3.0 \
+    recon_area_half_north:=2.5 \
+    recon_area_half_east:=4.0 \
     sweep_speed:=0.8 \
-    grid_spacing:=1.0 \
+    grid_spacing:=1.67 \
     "$@" 2>&1 | tee "$LOG_DIR/mission.log"
 
 # ---- 清理 ----
