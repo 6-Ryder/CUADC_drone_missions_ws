@@ -65,11 +65,11 @@ def generate_launch_description():
     )
     recon_half_north_arg = DeclareLaunchArgument(
         "recon_area_half_north", default_value="2.5",
-        description="侦察区 north 半宽 (m)",
+        description="侦察区 north 半宽 (m), 对齐主任务 Area2 5m",
     )
     recon_half_east_arg = DeclareLaunchArgument(
         "recon_area_half_east", default_value="4.0",
-        description="侦察区 east 半宽 (m)",
+        description="侦察区 east 半宽 (m), 对齐主任务 Area2 8m",
     )
     sweep_speed_arg = DeclareLaunchArgument(
         "sweep_speed", default_value="0.8",
@@ -77,7 +77,7 @@ def generate_launch_description():
     )
     grid_spacing_arg = DeclareLaunchArgument(
         "grid_spacing", default_value="1.67",
-        description="弓字形条带间距 (m)",
+        description="弓字形条带间距 (m), 对齐 PathPlanner 默认",
     )
     rc_require_arg = DeclareLaunchArgument(
         "rc_require_arm_signal", default_value="true",
