@@ -58,7 +58,7 @@ class ReconPatrolState:
         north_range = area2_n_max - area2_n_min
         east_range = area2_e_max - area2_e_min
         total_area = north_range * east_range
-        grid_spacing = self._fsm.get_param("grid_spacing", 1.0)
+        grid_spacing = self._fsm.get_param("grid_spacing", 1.67)
         num_strips = len(self._waypoints) // 2  # 每 strip 2 个航点
 
         self._fsm.get_logger().info(

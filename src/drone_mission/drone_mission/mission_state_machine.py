@@ -224,7 +224,6 @@ class MissionFSM(Node):
         self.declare_parameter("sweep_speed", 0.8)
         self.declare_parameter("transit_speed", 2.0)
         self.declare_parameter("return_speed", 3.0)
-        self.declare_parameter("max_acceleration", 0.2)
         # Area 1
         self.declare_parameter("area1_north_min", 30.0)
         self.declare_parameter("area1_north_max", 35.0)
@@ -239,8 +238,7 @@ class MissionFSM(Node):
         self.declare_parameter("area2_east_max", 4.0)
         self.declare_parameter("area2_altitude", 2.5)   # 侦察区低空扫描高度, 与 YAML 一致
         # 覆盖
-        self.declare_parameter("grid_spacing", 1.0)
-        self.declare_parameter("sweep_passes", 2)
+        self.declare_parameter("grid_spacing", 1.67)
         self.declare_parameter("sweep_margin_north", 1.0)
         self.declare_parameter("sweep_margin_east", 0.5)
         self.declare_parameter("recon_require_full_path", True)
@@ -386,7 +384,7 @@ class MissionFSM(Node):
             sweep_speed=self.get_param("sweep_speed", 0.8),
             transit_speed=self.get_param("transit_speed", 2.0),
             return_speed=self.get_param("return_speed", 3.0),
-            grid_spacing=self.get_param("grid_spacing", 1.0),
+            grid_spacing=self.get_param("grid_spacing", 1.67),
             margin_north=self.get_param("sweep_margin_north", 1.0),
             margin_east=self.get_param("sweep_margin_east", 0.5),
         )
@@ -1077,6 +1075,7 @@ class MissionFSM(Node):
             ("precision_align_final_drop_height", 0.2, 8.0),
             ("grid_spacing", 0.2, 10.0),
             ("waypoint_tolerance", 0.05, 5.0),
+            ("sweep_speed", 0.1, 15.0),
             ("transit_speed", 0.1, 15.0),
             ("return_speed", 0.1, 15.0),
         ]

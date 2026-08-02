@@ -44,12 +44,13 @@ PX4 飞控                    drone_servo2 舵机投放
 
 阅读顺序：
 
-1. `msg/CylinderDetection.msg`、`CylinderArray.msg`：投放目标怎样表达。
-2. `msg/LandingTarget.msg`：H 目标中心、世界坐标和置信度怎样表达。
-3. `msg/CoverageStatus.msg`：覆盖率怎样从视觉传给任务。
-4. `srv/SetVisionMode.srv`：FSM 如何切换视觉模式。
-5. `srv/TriggerDrop.srv`：FSM 如何请求一次投放。
-6. `action/PrecisionLand.action`：历史/独立精准降落接口；当前完整 FSM 主要通过话题和状态类完成降落。
+1. `msg/NedPositionSetpoint.msg`：任务位置航段如何原子传递 NED 目标、yaw 和可选速度给 `px4_bridge`。
+2. `msg/CylinderDetection.msg`、`CylinderArray.msg`：投放目标怎样表达。
+3. `msg/LandingTarget.msg`：H 目标中心、世界坐标和置信度怎样表达。
+4. `msg/CoverageStatus.msg`：覆盖率怎样从视觉传给任务。
+5. `srv/SetVisionMode.srv`：FSM 如何切换视觉模式。
+6. `srv/TriggerDrop.srv`：FSM 如何请求一次投放。
+7. `action/PrecisionLand.action`：历史/独立精准降落接口；当前完整 FSM 主要通过话题和状态类完成降落。
 
 阅读目标不是记住消息字段，而是掌握生产者、消费者、时间新鲜度和失败含义。比如 `LandingTarget.confidence` 只是视觉输出，是否允许盲降由 `state_precision_land.py` 决定。
 
@@ -59,7 +60,7 @@ PX4 飞控                    drone_servo2 舵机投放
 
 1. `telemetry.py`：先理解 NED、World、Home 和位置/速度数据结构。
 2. `flight_controller.py`：看任务状态使用的高层动作，例如 arm、takeoff、goto、set velocity、force disarm。
-3. `standalone_bridge.py`：看任务 FSM 如何通过 `/drone/cmd_*` relay 话题发送指令，并接收 PX4 遥测。
+3. `standalone_bridge.py`：看任务 FSM 如何通过 `/drone/cmd_*` relay 话题发送指令，并接收 PX4 遥测；位置航段使用 `NedPositionSetpoint`，视觉精校/降落仍使用独立速度话题。
 4. `px4_bridge.py`：看 relay 话题如何转换成 `/fmu/in/*`，以及 PX4 输出如何变成 `/drone/pose`、状态和接地信号。
 
 这里最容易误解的是：任务 FSM 和 `px4_bridge` 是不同 ROS 2 进程。FSM 通常使用 `StandaloneBridge`，`px4_bridge` 再把 ROS 命令转发给 PX4；不要把两者当作一个类调用链。

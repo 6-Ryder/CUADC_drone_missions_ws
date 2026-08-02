@@ -20,7 +20,8 @@ from typing import Optional
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
-from geometry_msgs.msg import Point, PoseStamped, TwistStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
+from drone_interfaces.msg import NedPositionSetpoint
 
 from px4_msgs.msg import (
     OffboardControlMode,
@@ -160,6 +161,7 @@ class PX4Bridge(Node):
         self._target_setpoint = Position(0.0, 0.0, -5.0)  # NED
         self._current_setpoint = Position(0.0, 0.0, -5.0)
         self._target_yaw: float = 0.0
+        self._target_speed: Optional[float] = None
         self._current_yaw: float = 0.0
         self._smoothed_yaw: float = 0.0  # 平滑后的 yaw setpoint, 避免与物理 yaw 冲突
         self._setpoint_lock = threading.Lock()
@@ -172,10 +174,10 @@ class PX4Bridge(Node):
         self._offboard_active: bool = False
         self._velocity_mode: bool = False  # True=速度控制, False=位置控制
         self._last_velocity_cmd = (0.0, 0.0, 0.0)  # 缓存速度指令, 避免心跳覆写
-        
+
         # ---- 订阅 Mission FSM 的 setpoint 指令 (NED) ----
         self._cmd_sp_sub = self.create_subscription(
-            Point, "/drone/cmd_setpoint_ned", self._cmd_setpoint_cb, 10,
+            NedPositionSetpoint, "/drone/cmd_setpoint_ned", self._cmd_setpoint_cb, 10,
         )
         # 订阅 Mission FSM 的速度指令 (NED velocity)
         from geometry_msgs.msg import Twist
@@ -214,10 +216,7 @@ class PX4Bridge(Node):
         self.declare_parameter("max_error_count", 5)
         self.declare_parameter("waypoint_timeout", 120.0)
         self.declare_parameter("land_altitude", 0.15)
-        self.declare_parameter("sweep_speed", 0.8)
-        self.declare_parameter("transit_speed", 2.0)
-        self.declare_parameter("return_speed", 3.0)
-        self.declare_parameter("max_acceleration", 2.0)
+        self.declare_parameter("max_setpoint_speed_limit", 3.0)
         self.declare_parameter("home_x", 4.0)
         self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)
@@ -289,16 +288,20 @@ class PX4Bridge(Node):
             f"p1={msg.param1} p2={msg.param2}"
         )
 
-    def _cmd_setpoint_cb(self, msg: Point):
+    def _cmd_setpoint_cb(self, msg: NedPositionSetpoint):
         """接收 Mission FSM 的 setpoint 指令并更新目标."""
         with self._setpoint_lock:
             self._velocity_mode = False
             self._target_setpoint = Position(
-                north=float(msg.x),
-                east=float(msg.y),
-                down=float(msg.z),
+                north=float(msg.north),
+                east=float(msg.east),
+                down=float(msg.down),
             )
-        self._target_yaw = 0.0
+            self._target_yaw = float(msg.yaw)
+            speed = float(msg.speed)
+            self._target_speed = (
+                speed if msg.use_speed and math.isfinite(speed) and speed > 0.0 else None
+            )
 
     def _cmd_velocity_cb(self, msg):
         """接收 Mission FSM 的速度指令 (NED velocity)."""
@@ -441,8 +444,12 @@ class PX4Bridge(Node):
             target = self._target_setpoint
             current = self._current_setpoint
             target_yaw = self._target_yaw
+            target_speed = self._target_speed
 
-        max_step = self.get_parameter("max_acceleration").value * 0.05  # per 20Hz tick
+        safety_limit = float(self.get_parameter("max_setpoint_speed_limit").value)
+        safety_limit = max(0.0, safety_limit)
+        requested_speed = target_speed if target_speed is not None else safety_limit
+        max_step = min(float(requested_speed), safety_limit) * 0.05  # per 20Hz tick
 
         # 平滑位置
         dx = target.north - current.north
@@ -474,7 +481,9 @@ class PX4Bridge(Node):
     # 公开接口 (供 FlightController 和 Mission 层调用)
     # ================================================================
 
-    def set_position_target(self, north: float, east: float, down: float, yaw: float = 0.0):
+    def set_position_target(self, north: float, east: float, down: float,
+                            yaw: float = 0.0,
+                            speed: Optional[float] = None):
         """
         设置位置控制目标 (NED 坐标系).
 
@@ -490,6 +499,11 @@ class PX4Bridge(Node):
             self._velocity_mode = False
             self._target_setpoint = Position(north, east, down)
             self._target_yaw = yaw
+            self._target_speed = (
+                float(speed)
+                if speed is not None and math.isfinite(speed) and speed > 0.0
+                else None
+            )
 
     def set_velocity_target(self, vn: float, ve: float, vd: float, yaw_rate: float = 0.0):
         """

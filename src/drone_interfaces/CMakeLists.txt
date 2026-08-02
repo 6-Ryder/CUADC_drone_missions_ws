@@ -17,6 +17,7 @@ set(msg_files
   msg/HazardArray.msg
   msg/LandingTarget.msg
   msg/CoverageStatus.msg
+  msg/NedPositionSetpoint.msg
 )
 
 # 服务定义
