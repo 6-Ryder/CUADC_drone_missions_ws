@@ -4,7 +4,7 @@
 set -eo pipefail
 
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
-PX4_DIR="${1:-/home/ryder/PX4-Autopilot}"
+PX4_DIR="${1:-/home/nvidia/PX4-Autopilot}"
 TEMPLATE="$PROJ/src/px4_msgs"
 BUILD_BASE="$PROJ/build/sitl_px4_msgs"
 INSTALL_BASE="$PROJ/install/sitl_px4_msgs"

@@ -5,7 +5,7 @@
 ## 1. 构建
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
@@ -31,7 +31,7 @@ pytest -q src/drone_mission/test src/drone_vision/test src/px4_control/test
 执行：
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 ./scripts/start_full_simulation.sh
 ```
 
@@ -53,7 +53,7 @@ SITL 脚本内部执行 `source scripts/sitl_env.sh`。该脚本先加载工作�
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/ryder/drone_tasks_ws/scripts/sitl_env.sh
+source /home/nvidia/CUADC_drone_missions_ws/scripts/sitl_env.sh
 ros2 launch drone_bringup sitl.launch.py
 ```
 
@@ -73,7 +73,7 @@ SITL launch 默认 Home 为 World `(4,10,0)`、飞行轴为 north、投放距离
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/ryder/drone_tasks_ws/install/setup.bash
+source /home/nvidia/CUADC_drone_missions_ws/install/setup.bash
 ros2 launch drone_bringup real_flight.launch.py
 ```
 

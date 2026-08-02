@@ -77,12 +77,12 @@ else
 fi
 
 # 2. Workspace
-if [ -f ~/drone_tasks_ws/install/setup.bash ]; then
+if [ -f ~/CUADC_drone_missions_ws/install/setup.bash ]; then
     source /opt/ros/humble/setup.bash 2>/dev/null || true
-    source ~/drone_tasks_ws/install/setup.bash 2>/dev/null || true
+    source ~/CUADC_drone_missions_ws/install/setup.bash 2>/dev/null || true
     ok "workspace sourced"
 else
-    err "~/drone_tasks_ws/install/setup.bash 不存在"
+    err "~/CUADC_drone_missions_ws/install/setup.bash 不存在"
     exit 1
 fi
 

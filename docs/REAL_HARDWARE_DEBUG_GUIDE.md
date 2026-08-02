@@ -17,7 +17,7 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/ryder/drone_tasks_ws/install/setup.bash
+source /home/nvidia/CUADC_drone_missions_ws/install/setup.bash
 ros2 launch drone_bringup real_flight.launch.py
 ```
 
