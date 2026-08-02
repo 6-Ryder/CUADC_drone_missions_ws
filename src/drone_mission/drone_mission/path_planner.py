@@ -244,14 +244,15 @@ class PathPlanner:
                 # 条带沿 north, 沿 east 飞行
                 waypoints.append({
                     "north": strip_pos, "east": start_flight, "down": altitude,
-                    "yaw": math.pi / 2 if i % 2 == 0 else -math.pi / 2,
+                    # 侦察阶段不需要机头随扫描方向旋转，固定朝 NED North。
+                    "yaw": 0.0,
                     "speed": self.sweep_speed,
                     "hover_s": 0.0,
                     "label": f"strip_{i}_enter",
                 })
                 waypoints.append({
                     "north": strip_pos, "east": end_flight, "down": altitude,
-                    "yaw": math.pi / 2 if i % 2 == 0 else -math.pi / 2,
+                    "yaw": 0.0,
                     "speed": self.sweep_speed,
                     "hover_s": 0.0,
                     "label": f"strip_{i}_exit",

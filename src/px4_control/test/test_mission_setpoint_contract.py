@@ -201,6 +201,23 @@ class MissionSetpointContractTest(unittest.TestCase):
 
         self.assertIn("NedPositionSetpoint, \"/drone/cmd_setpoint_ned\"", source)
 
+    def test_recon_coverage_waypoints_keep_a_fixed_heading(self):
+        from drone_mission.path_planner import PathPlanner
+
+        waypoints = PathPlanner(
+            sweep_speed=0.8,
+            grid_spacing=1.67,
+        ).plan_coverage_ned(
+            area_north_min=55.0,
+            area_north_max=60.0,
+            area_east_min=-4.0,
+            area_east_max=4.0,
+            altitude=-2.5,
+        )
+
+        self.assertTrue(waypoints)
+        self.assertTrue(all(waypoint["yaw"] == 0.0 for waypoint in waypoints))
+
 
 if __name__ == "__main__":
     unittest.main()

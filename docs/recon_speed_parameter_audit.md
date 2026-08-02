@@ -20,8 +20,9 @@ mission_params.yaml:sweep_speed (0.8 m/s)
 ```
 
 `NedPositionSetpoint` 原子携带 NED 的 `north/east/down`、`yaw`、`speed`
-和 `use_speed`。这同时修复了旧 `geometry_msgs/Point` 中继丢失规划 yaw
-的问题。
+和 `use_speed`。侦察覆盖规划现在将所有扫描航点的 `yaw` 固定为 `0.0`
+（机头朝 NED North），因此不会在条带切换时随飞行方向旋转；其他任务阶段
+仍可通过各自航点传递 yaw。
 
 ## 速度规则与参数归属
 
@@ -69,6 +70,13 @@ return_speed: 3.0
 重新构建工作区并重启完整任务。若要调整全局位置模式上限，编辑
 `src/px4_control/config/px4_params.yaml` 的
 `max_setpoint_speed_limit`；不要用它替代三种任务阶段速度。
+
+## 修改侦察航向
+
+当前侦察区不需要机头随扫描方向旋转，`PathPlanner.plan_coverage_ned()`
+将侦察航点 yaw 固定为 `0.0`。该行为不是速度参数，修改
+`sweep_speed`、`transit_speed` 或 `max_setpoint_speed_limit` 不会改变它。
+如需改变侦察机头方向，应修改路径规划器中的固定 yaw，并同步进行受控验证。
 
 ## 验证要求
 
