@@ -19,6 +19,11 @@ class _FC:
     def is_waypoint_timed_out(self):
         return False
 
+    origin_down = 0.0
+
+    def altitude_to_ned(self, altitude_m):
+        return self.origin_down - altitude_m
+
 
 class _Logger:
     def info(self, _message):

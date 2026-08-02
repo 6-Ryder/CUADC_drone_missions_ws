@@ -2,6 +2,15 @@
 
 本文档记录已经影响当前实现的关键问题、修改和验证。历史方案只保留结论，不再作为运行手册。
 
+## 2026-08-02 — 版本回退后构建产物残留导致启动崩溃
+
+- 现象：07:20 实飞成功（`real_flight_20260802_072045`）；git pull 新版本（Full `62a5cdf`，新增 `NedPositionSetpoint.msg` 并重构速度控制）亦成功；回退到初版本（jetson 分支，无该消息）后，09:15 / 09:25 两次任务**启动瞬间全部失败**。
+- 证据：两次 `mission.log` 逐字一致 —— `vision_pipeline` 与 `test_forward_recon` 均在 `__init__` 创建话题/服务时崩溃（exit code 1）：
+  `ImportError: .../drone_interfaces_s__rosidl_typesupport_c.cpython-310-aarch64-linux-gnu.so: undefined symbol: drone_interfaces__msg__ned_position_setpoint__convert_to_py` → `UnsupportedTypeSupport`。任务从未进入 FSM。
+- 根因：回退后增量 `colcon build` **只重建不回收** —— C typesupport 库已按回退后的源码重新生成（该符号被移除），Python 静态 typesupport 扩展仍是新版本构建的残留（引用已删除的符号），运行时 dlopen 符号解析失败。编译期不报错，运行期每次启动必现。
+- 教训：修改消息接口或切换 / 回退版本后**必须全量清理重建**（`rm -rf build install log && colcon build --symlink-install`），不要在增量构建上赌依赖判断。规范见 [DEPLOYMENT.md §2 构建产物清理](DEPLOYMENT.md)。
+- 修复验证：待真机全量重建后复飞确认。
+
 ## 2026-08-02 — 真机通信链路纠正
 
 - 发现：完整真机 launch、舵机硬件测试和部分文档仍把 PX4↔Jetson 通信写成 Jetson UART 串口。

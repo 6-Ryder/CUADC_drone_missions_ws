@@ -19,7 +19,46 @@ pytest -q src/drone_mission/test src/drone_vision/test src/px4_control/test
 
 视觉配置引用的模型位于 `src/drone_vision/drone_vision/models/`，当前运行模型为 ONNX。模型、ROS 2 Humble、PX4 消息和 Python 依赖缺失时不要开始飞行。
 
-## 2. 完整 SITL
+> ⚠️ 版本切换或消息接口变更后**必须全量清理重建**，增量构建会残留旧版本产物导致启动即崩溃，见 [§2 构建产物清理](#2-构建产物清理)。
+
+## 2. 构建产物清理
+
+构建系统（colcon + rosidl）的增量构建原则是**只增不删**：源码有变化就重新生成产物，但不会删除"上次生成、这次源码中已不存在"的旧产物。消息接口（`.msg`/`.srv`）变更尤其危险：
+
+- 生成代码是消息定义的"快照"；C typesupport 库与 Python 静态 typesupport 扩展（`*_s__rosidl_typesupport_c*.so`）各自独立判断是否重跑，极易出现**新库 + 旧扩展**的混搭；
+- 编译期不报错（编译只针对本次生成的代码），运行时 import 才炸：`undefined symbol: ..._convert_to_py` / `UnsupportedTypeSupport`，且**每次启动必现**，不是偶发。
+
+### 什么时候必须清理后重建
+
+| 场景 | 说明 |
+|---|---|
+| 消息接口变更 | 新增/删除 `.msg`/`.srv`、修改字段、改 CMakeLists 消息列表 |
+| 版本切换 | git pull / checkout / 回退 / 分支切换，尤其涉及接口与依赖时 |
+| 环境变化 | 换机器或架构（x86_64 ↔ aarch64 的 `install/` 不可互拷）、升级 Python / ROS / 系统库 |
+| 诡异症状 | `undefined symbol`、`UnsupportedTypeSupport`、改了代码行为不变、报错引用已删除文件 |
+
+### 什么时候不需要清理
+
+- 只改 `.py` 源码：`--symlink-install` 构建下直接生效，无需编译；
+- 只改 yaml 配置；
+- 同一版本内、消息接口未变的 C++ 改动：`colcon build --packages-select <pkg>` 即可。
+
+### 操作方法
+
+```bash
+# 全量清理（版本切换后默认走这个，最保险）
+rm -rf build install log
+colcon build --symlink-install
+
+# 局部清理（只动接口时）
+rm -rf build/drone_interfaces install/drone_interfaces
+colcon build --packages-up-to drone_vision test_mission px4_control
+# --packages-up-to = 该包 + 它依赖的所有包
+```
+
+实飞事故实例（版本回退后两次任务启动即崩溃）见 [WORKLOG.md](WORKLOG.md) 2026-08-02 复盘。
+
+## 3. 完整 SITL
 
 前置条件：
 
@@ -47,7 +86,7 @@ cd /home/ryder/drone_tasks_ws
 
 SITL 脚本内部执行 `source scripts/sitl_env.sh`。该脚本先加载工作区，再将隔离构建的 v4 `px4_msgs` overlay 提升到环境前端，使 `vehicle_status_v4` 与 PX4 SITL 匹配。
 
-## 3. SITL 环境切换
+## 4. SITL 环境切换
 
 不要在已经加载真机 v1 消息的终端中直接运行 SITL 节点。需要手动启动节点时：
 
@@ -59,7 +98,7 @@ ros2 launch drone_bringup sitl.launch.py
 
 SITL launch 默认 Home 为 World `(4,10,0)`、飞行轴为 north、投放距离 32.5 m、侦察距离 57.5 m。
 
-## 4. 真机全系统
+## 5. 真机全系统
 
 真机使用 `real_flight.launch.py`。物理连接和默认参数为：
 
@@ -88,15 +127,16 @@ ros2 launch drone_bringup real_flight.launch.py \
 
 同一 UDP 端口只能运行一个 Agent；若 Agent 因端口占用或其他原因退出，完整真机 launch 会自动停止，不能忽略该报错继续飞行。启动后先观察 `/fmu/out/vehicle_status_v1`、`/drone/pose`、`/drone/vision/status` 和 `/drone/servo/status`，确认就绪再允许任务进入 ARM。现场检查顺序见 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)。
 
-## 5. 分阶段 smoke test
+## 6. 分阶段 smoke test
 
 `scripts/simple_mission_real.sh` 是旧的简化航点/投放测试入口，不等价于完整 FSM。它适合验证通信、起飞、简单航点和返航链路；完整任务必须使用 `real_flight.launch.py`。
 
-## 6. 停止与故障定位
+## 7. 停止与故障定位
 
 - SITL 正常结束后，脚本会结束 ROS 2 launch；若异常退出，先读取当前日志目录中的 PID 文件，再只停止该次运行创建的进程。
 - 真机异常时优先由操作者切换遥控器安全模式/手动模式，再停止上位机节点；不要在飞行中依赖终端清理命令代替接管。
 - 视觉未就绪：检查模型路径、ONNX Runtime provider、相机话题和 `/drone/vision/status`。
+- 启动即崩溃 `undefined symbol` / `UnsupportedTypeSupport`：版本切换或接口变更后增量构建产物残留，执行全量清理重建（见 [§2 构建产物清理](#2-构建产物清理)）。
 - PX4 无状态：检查网线、Jetson IP、UDP `8888` 监听、PX4 Ethernet uXRCE 参数和 v1 消息环境。
 - 舵机无动作：检查 `/drone/servo/trigger_drop`、MAIN5 配置和 [飞控参数修改记录](../real_flight_logs/飞控参数修改记录.md)。
 - 降落失败：检查 H 检测置信度、视觉对心日志、盲降计时和 `vehicle_land_detected`；不得把问题掩盖为 PX4 LAND。
