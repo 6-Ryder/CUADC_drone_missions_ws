@@ -53,6 +53,27 @@ ros2 topic echo /drone/servo/status --once
 
 确认 MAIN5 配置为 Peripheral via Actuator Set 1，PWM 范围为 1150–2150 μs。舵机序列只能前进：1150（闭合）→ 1700（第一次释放）→ 2150（第二次释放）。
 
+### ACK 话题名版本差异（易踩坑）
+
+`VehicleCommandAck` 的 DDS 话题名随消息版本不同，**真机与 SITL 不一致**：
+
+| 环境 | MESSAGE_VERSION | ACK 话题名 | servo 订阅 |
+|---|---|---|---|
+| 真机 (v1) | 0 | `/fmu/out/vehicle_command_ack`（无后缀） | ✅ 无后缀 |
+| SITL (v4 overlay) | 1 | `/fmu/out/vehicle_command_ack_v1` | SITL 用 ServoMock，不订阅 |
+
+`servo_controller.cpp` 订阅的是**无后缀**话题，仅真机正确。若 PX4 固件升级改变 `VehicleCommandAck.MESSAGE_VERSION`，话题名会变，servo 会持续报 `PX4 舵机命令 ACK 超时` 而命令实际已被 PX4 接收（`/fmu/in/vehicle_command` 有数据但 ACK 无回）。
+
+排查时三层差分：
+
+```bash
+ros2 topic echo /drone/cmd/vehicle_command_relay --field param1   # servo 命令发出 (-1.0)
+ros2 topic echo /fmu/in/vehicle_command --field param1            # px4_bridge 中继
+ros2 topic echo /fmu/out/vehicle_command_ack --once               # PX4 ACK (result=0)
+```
+
+如果前两层有数据、第三层为空，优先怀疑话题名版本不匹配（用 `ros2 topic list | grep ack` 核对真实话题名）。
+
 ## 5. 起飞前任务检查
 
 - `vehicle_status_v1`、`/drone/pose`、视觉和舵机均 ready；

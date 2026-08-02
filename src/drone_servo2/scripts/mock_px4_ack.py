@@ -4,7 +4,7 @@ Mock PX4 ACK — 无需飞控, 欺骗 servo_controller 完成完整状态机流�
 
 原理:
   servo_controller(jetson) 发 VehicleCommand 到 /drone/cmd/vehicle_command_relay
-  → 本脚本监听 → 伪造 VehicleCommandAck 回 /fmu/out/vehicle_command_ack_v1
+  → 本脚本监听 → 伪造 VehicleCommandAck 回 /fmu/out/vehicle_command_ack
   → servo_controller 收到 ACK → ready=true → 允许投放
 
 这样在没有 PX4 / SITL 的情况下, 也能端到端测试投放序列:
@@ -38,7 +38,7 @@ class MockPX4Ack(Node):
         )
         self._ack_pub = self.create_publisher(
             VehicleCommandAck,
-            "/fmu/out/vehicle_command_ack_v1",
+            "/fmu/out/vehicle_command_ack",
             sensor_qos,
         )
 

@@ -8,7 +8,7 @@ SOURCE = (
 
 def test_hardware_servo_waits_for_px4_command_ack():
     assert "VehicleCommandAck" in SOURCE
-    assert '"/fmu/out/vehicle_command_ack_v1"' in SOURCE
+    assert '"/fmu/out/vehicle_command_ack"' in SOURCE
     assert "VEHICLE_CMD_RESULT_ACCEPTED" in SOURCE
 
 

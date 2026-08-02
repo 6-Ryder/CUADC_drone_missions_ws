@@ -116,7 +116,7 @@ public:
     rclcpp::SubscriptionOptions options;
     options.callback_group = ack_group_;
     ack_sub_ = node_->create_subscription<VehicleCommandAck>(
-      "/fmu/out/vehicle_command_ack_v1", rclcpp::SensorDataQoS(),
+      "/fmu/out/vehicle_command_ack", rclcpp::SensorDataQoS(),
       [this](const VehicleCommandAck::SharedPtr msg) {handle_ack(*msg);},
       options);
   }
