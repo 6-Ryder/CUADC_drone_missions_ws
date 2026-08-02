@@ -3,7 +3,7 @@ test_forward_recon 启动 — px4_bridge + test_forward_recon.
 
 任务流程:
   Phase 1: TAKEOFF → TRANSIT_FORWARD (向北直飞 20m)
-  Phase 2: DESCEND → RECON_SWEEP → RETURN(保持侦察高度,不爬升) → LAND
+  Phase 2: DESCEND → RECON_SWEEP → RETURN(爬升至4m返航) → LAND
 
 使用方法:
   # 仿真 (SITL)
@@ -82,6 +82,10 @@ def generate_launch_description():
     rc_require_arg = DeclareLaunchArgument(
         "rc_require_arm_signal", default_value="true",
         description="true=等待人用遥控器Arm Switch解锁, false=代码arm直接起飞",
+    )
+    return_altitude_arg = DeclareLaunchArgument(
+        "return_altitude", default_value="4.0",
+        description="RETURN: 返航目标高度 (m, 相对起飞点)",
     )
     vision_params_arg = DeclareLaunchArgument(
         "vision_params", default_value=vision_param_file,
@@ -173,6 +177,7 @@ def generate_launch_description():
             "sweep_speed": LaunchConfiguration("sweep_speed"),
             "grid_spacing": LaunchConfiguration("grid_spacing"),
             "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
+            "return_altitude": LaunchConfiguration("return_altitude"),
             "camera_cx": 320.0,
             "camera_cy": 240.0,
         }],
@@ -189,7 +194,7 @@ def generate_launch_description():
         LogInfo(msg="=== 分阶段真机测试: 前飞 20m + 侦察区 ==="),
         LogInfo(msg="  安全: WAIT_ARMED → 遥控器 Arm Switch 解锁 → TAKEOFF"),
         LogInfo(msg="  Phase 1: TAKEOFF → TRANSIT_FORWARD (向北 20m)"),
-        LogInfo(msg="  Phase 2: DESCEND → RECON_SWEEP → RETURN(不爬升) → LAND"),
+        LogInfo(msg="  Phase 2: DESCEND → RECON_SWEEP → RETURN(爬升4m) → LAND"),
         LogInfo(msg="  LAND: H 标识视觉伺服精准降落"),
         sim_mode_arg,
         cruise_altitude_arg,
@@ -204,6 +209,7 @@ def generate_launch_description():
         sweep_speed_arg,
         grid_spacing_arg,
         rc_require_arg,
+        return_altitude_arg,
         vision_params_arg,
         camera_device_arg,
         px4_bridge_node,

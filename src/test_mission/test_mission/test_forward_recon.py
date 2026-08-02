@@ -2,7 +2,7 @@
 分阶段真机实飞测试 — 向前直飞 20m → 侦察区任务.
 
 Phase 1: 起飞 → 向北直飞 20m → 验证航点到达
-Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 直接返航(不爬升) → 降落
+Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 爬升返航(至 4m) → 降落
 
 状态流:
   INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FORWARD → DESCEND_TO_RECON
@@ -52,7 +52,7 @@ class MissionState(Enum):
     TRANSIT_FORWARD = "TRANSIT_FORWARD"       # Phase 1: 向北直飞 20m
     DESCEND_TO_RECON = "DESCEND_TO_RECON"      # Phase 2: 降至侦察高度
     RECON_SWEEP = "RECON_SWEEP"                # Phase 2: 弓字形全覆盖
-    RETURN = "RETURN"                          # 保持侦察高度直接返航, 不爬升
+    RETURN = "RETURN"                          # 返航并爬升至 return_altitude (默认 4m)
     LAND = "LAND"
     COMPLETE = "COMPLETE"
 
@@ -78,7 +78,7 @@ class TestForwardRecon(Node):
     Phase 2 — 侦察区任务:
       - 降至侦察扫描高度 (默认 3m)
       - 弓字形 (Boustrophedon) 全覆盖路径
-      - 保持侦察高度直接返航 (不爬升, 省时)
+      - 返航同时爬升至 return_altitude (默认 4m), 回到初始点上方
       - 精准降落
     """
 
@@ -120,6 +120,7 @@ class TestForwardRecon(Node):
 
         # 返航
         self.declare_parameter("return_speed", 3.0)
+        self.declare_parameter("return_altitude", 4.0)  # 返航目标高度 (m)
 
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
         self.declare_parameter("rc_require_arm_signal", True)
@@ -178,9 +179,6 @@ class TestForwardRecon(Node):
 
         # ---- 进度日志 ----
         self._last_progress_log: float = 0.0
-
-        # ---- 返航高度 (RETURN 进入时捕获当前相对高度) ----
-        self._return_altitude: float = 0.0
 
         # ---- 精准降落状态 ----
         self._LAND_PHASE_SEARCH = 0
@@ -435,13 +433,13 @@ class TestForwardRecon(Node):
                 self._transition(MissionState.RETURN)
                 return
 
-            # 所有航点完成 → 保持侦察高度直接返航
+            # 所有航点完成 → 爬升返航至 Home 上方
             if self._recon_wp_idx >= len(self._recon_waypoints):
-                ralt = self.get_param("recon_altitude", 3.0)
+                ret_alt = self.get_param("return_altitude", 4.0)
                 self.get_logger().info(
                     f"RECON_SWEEP: ✓ Phase 2 扫描完成"
                     f" — {len(self._recon_waypoints)} 个航点全部到达"
-                    f" → RETURN (保持 {ralt}m, 不爬升)"
+                    f" → RETURN (爬升至 {ret_alt}m 返航)"
                 )
                 self._transition(MissionState.RETURN)
                 return
@@ -489,29 +487,28 @@ class TestForwardRecon(Node):
                 )
 
         # ================================================================
-        # RETURN: 保持侦察高度直接返航至 Home 点上方 (不爬升)
+        # RETURN: 返航至 Home 点上方, 同时爬升至 return_altitude (默认 4m)
         # ================================================================
         elif self._state == MissionState.RETURN:
             if not self._command_sent:
                 hx = self.get_param("home_x", 0.0)
                 hy = self.get_param("home_y", 0.0)
                 speed = self.get_param("return_speed", 3.0)
-                # 捕获当前实际相对高度, 真正不爬升
-                pos = self._bridge.get_current_position()
-                self._return_altitude = self._fc.ned_to_altitude(pos.down)
+                ret_alt = self.get_param("return_altitude", 4.0)
                 self.get_logger().info(
-                    f"RETURN: 保持当前高度 {self._return_altitude:.1f}m 返航至"
-                    f" Home World({hx:.1f}, {hy:.1f}, {self._return_altitude:.1f})"
+                    f"RETURN: 返航至 Home 并爬升至 {ret_alt:.1f}m → "
+                    f"World({hx:.1f}, {hy:.1f}, {ret_alt:.1f}) @ {speed:.1f}m/s"
                 )
                 tn, te, _ = world_to_ned(hx, hy, 0)
-                td = self._fc.altitude_to_ned(self._return_altitude)
+                td = self._fc.altitude_to_ned(ret_alt)
                 self._fc.goto_ned(tn, te, td, yaw=0.0, speed=speed)
                 self._command_sent = True
 
             hx = self.get_param("home_x", 0.0)
             hy = self.get_param("home_y", 0.0)
+            ret_alt = self.get_param("return_altitude", 4.0)
             tn, te, _ = world_to_ned(hx, hy, 0)
-            td = self._fc.altitude_to_ned(self._return_altitude)
+            td = self._fc.altitude_to_ned(ret_alt)
 
             if self._fc.reached((tn, te, td), tol):
                 self._stable_count += 1
