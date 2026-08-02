@@ -27,7 +27,8 @@ from rclpy.qos import (
     QoSProfile,
     QoSReliabilityPolicy,
 )
-from geometry_msgs.msg import Point, Twist
+from geometry_msgs.msg import Twist
+from drone_interfaces.msg import NedPositionSetpoint
 from px4_msgs.msg import (
     BatteryStatus,
     VehicleAttitude,
@@ -73,7 +74,7 @@ class StandaloneBridge:
     work transparently in both standalone and direct-DDS modes.
     ...
     Publishers:
-      /drone/cmd_setpoint_ned           (Point)   — position setpoints
+      /drone/cmd_setpoint_ned           (NedPositionSetpoint) — position setpoints
       /drone/cmd_velocity_ned           (Twist)   — velocity setpoints
       /drone/cmd/vehicle_command_relay  (VehicleCommand) — mode/arm/land
 
@@ -115,6 +116,8 @@ class StandaloneBridge:
 
         # ---- Setpoint state ----
         self._target_ned: Optional[Tuple[float, float, float]] = None
+        self._target_yaw: float = 0.0
+        self._target_speed: Optional[float] = None
         self._velocity_mode: bool = False
         self._vel_target: Tuple[float, float, float] = (0.0, 0.0, 0.0)
 
@@ -124,7 +127,9 @@ class StandaloneBridge:
         self._telemetry_ready: bool = False  # 收到第一条 VehicleStatus 后才允许发指令
 
         # ---- Publishers (relay topics → px4_bridge) ----
-        self._sp_pub = node.create_publisher(Point, "/drone/cmd_setpoint_ned", 10)
+        self._sp_pub = node.create_publisher(
+            NedPositionSetpoint, "/drone/cmd_setpoint_ned", 10,
+        )
         self._vel_pub = node.create_publisher(Twist, "/drone/cmd_velocity_ned", 10)
         self._cmd_pub = node.create_publisher(
             VehicleCommand, "/drone/cmd/vehicle_command_relay", 10,
@@ -169,10 +174,13 @@ class StandaloneBridge:
             msg.linear.z = float(self._vel_target[2])
             self._vel_pub.publish(msg)
         elif self._target_ned is not None:
-            msg = Point()
-            msg.x = float(self._target_ned[0])
-            msg.y = float(self._target_ned[1])
-            msg.z = float(self._target_ned[2])
+            msg = NedPositionSetpoint()
+            msg.north = float(self._target_ned[0])
+            msg.east = float(self._target_ned[1])
+            msg.down = float(self._target_ned[2])
+            msg.yaw = float(self._target_yaw)
+            msg.use_speed = self._target_speed is not None
+            msg.speed = float(self._target_speed) if msg.use_speed else 0.0
             self._sp_pub.publish(msg)
 
     # ----------------------------------------------------------------
@@ -303,10 +311,17 @@ class StandaloneBridge:
     # -- Setpoints --
 
     def set_position_target(self, north: float, east: float, down: float,
-                            yaw: float = 0.0) -> None:
+                            yaw: float = 0.0,
+                            speed: Optional[float] = None) -> None:
         """Set position control target (NED)."""
         self._velocity_mode = False
         self._target_ned = (float(north), float(east), float(down))
+        self._target_yaw = float(yaw)
+        self._target_speed = (
+            float(speed)
+            if speed is not None and math.isfinite(speed) and speed > 0.0
+            else None
+        )
 
     def set_velocity_target(self, vn: float, ve: float, vd: float,
                             yaw_rate: float = 0.0) -> None:

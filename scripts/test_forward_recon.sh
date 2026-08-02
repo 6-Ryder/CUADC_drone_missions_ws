@@ -6,15 +6,12 @@
 # Phase 2: 降至侦察高度 → 弓字形全覆盖扫描 → 直接返航(不爬升) → 降落
 #
 # 硬件连接:
-#   - CUAV 7 Nano 通过网线直连 Jetson Orin Nano (UDP 模式)
-#   - 或通过串口 TELEM2 -> Jetson UART (Serial 模式)
+#   - PX4 通过网线以太网 UDP 连接 Jetson Orin Nano
+#   - 任务相机通过 USB 连接 Jetson
 #
 # 用法:
 #   # 以太网连接 (默认)
 #   ./scripts/test_forward_recon.sh
-#
-#   # 串口连接
-#   DDS_TRANSPORT=serial SERIAL_DEV=/dev/ttyTHS0 ./scripts/test_forward_recon.sh
 #
 #   # 自定义参数
 #   ./scripts/test_forward_recon.sh \
@@ -55,10 +52,8 @@ source "$PROJ/install/setup.bash"
 export ROS_DOMAIN_ID=0
 
 # ---- DDS 通信方式 ----
-DDS_TRANSPORT="${DDS_TRANSPORT:-udp}"
+# PX4 参数 UXRCE_DDS_CFG=1000 (Ethernet), UXRCE_DDS_AG_IP=<Jetson IP>.
 DDS_PORT="${DDS_PORT:-8888}"
-SERIAL_DEV="${SERIAL_DEV:-/dev/ttyTHS0}"
-SERIAL_BAUD="${SERIAL_BAUD:-921600}"
 
 # ---- Step 0: 清理旧进程 ----
 step "Step 0/3 — 清理旧进程"
@@ -71,27 +66,15 @@ sleep 1
 info "旧进程已清理"
 
 # ---- Step 1: MicroXRCEAgent ----
-if [ "$DDS_TRANSPORT" = "udp" ]; then
-    step "Step 1/3 — 启动 MicroXRCEAgent (UDP :$DDS_PORT)"
-    MicroXRCEAgent udp4 -p "$DDS_PORT" > "$LOG_DIR/agent.log" 2>&1 &
-    AGENT_PID=$!
-else
-    step "Step 1/3 — 启动 MicroXRCEAgent (Serial: $SERIAL_DEV @ $SERIAL_BAUD)"
-    if [ ! -e "$SERIAL_DEV" ]; then
-        error "串口设备不存在: $SERIAL_DEV"
-        ls -la /dev/tty* 2>/dev/null | head -10 || true
-        exit 1
-    fi
-    MicroXRCEAgent serial --dev "$SERIAL_DEV" --baudrate "$SERIAL_BAUD" \
-        > "$LOG_DIR/agent.log" 2>&1 &
-    AGENT_PID=$!
-fi
+step "Step 1/3 — 启动 MicroXRCEAgent (Ethernet UDP :$DDS_PORT)"
+MicroXRCEAgent udp4 -p "$DDS_PORT" > "$LOG_DIR/agent.log" 2>&1 &
+AGENT_PID=$!
 
 echo "$AGENT_PID" > "$LOG_DIR/agent.pid"
 sleep 3
 
 if kill -0 "$AGENT_PID" 2>/dev/null; then
-    info "MicroXRCEAgent 已启动 (PID: $AGENT_PID, transport: $DDS_TRANSPORT)"
+    info "MicroXRCEAgent 已启动 (PID: $AGENT_PID, Ethernet UDP:$DDS_PORT)"
 else
     error "MicroXRCEAgent 启动失败! 检查: $LOG_DIR/agent.log"
     exit 1
@@ -101,7 +84,7 @@ fi
 step "Step 2/3 — 等待 PX4 DDS 通信就绪"
 DDS_READY=false
 for i in $(seq 1 60); do
-    if ros2 topic list 2>/dev/null | grep -q "/fmu/out/vehicle_status"; then
+    if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
         info "PX4 DDS 通信就绪 (耗时 ${i}s)"
         DDS_READY=true
         break
@@ -117,14 +100,9 @@ if [ "$DDS_READY" = false ]; then
     error ""
     error "硬件检查:"
     error "  1. 飞控是否上电?"
-    if [ "$DDS_TRANSPORT" = "udp" ]; then
-        error "  2. 网线: Jetson <-> CUAV 7 Nano?"
-        error "  3. ping 飞控 IP?"
-        error "  4. PX4 参数: UXRCE_DDS_CFG=2, UXRCE_DDS_AG_IP=<Jetson IP>"
-    else
-        error "  2. 串口线: $SERIAL_DEV?"
-        error "  3. PX4 参数: UXRCE_DDS_CFG=1, SER_TEL2_BAUD=$SERIAL_BAUD"
-    fi
+    error "  2. 网线: Jetson <-> CUAV 7 Nano?"
+    error "  3. PX4 Ethernet IP 是否可达?"
+    error "  4. PX4 参数: UXRCE_DDS_CFG=1000, UXRCE_DDS_AG_IP=<Jetson IP>, UXRCE_DDS_PRT=$DDS_PORT"
     kill $AGENT_PID 2>/dev/null
     exit 1
 fi
@@ -137,7 +115,7 @@ echo "┌───────────────────────�
 echo "│        test_forward_recon 分阶段真机测试                   │"
 echo "├──────────────────────────────────────────────────────────┤"
 echo "│  安全:     遥控器 Arm Switch 解锁 → is_armed() → 起飞       │"
-echo "│  通信:     MicroXRCEAgent $DDS_TRANSPORT                  │"
+echo "│  通信:     PX4 Ethernet → Agent UDP:$DDS_PORT              │"
 echo "│  解锁:     标准 ARM (非 SITL force)                      │"
 echo "│  Home:     解锁点 (0, 0)                                 │"
 echo "├──────────────────────────────────────────────────────────┤"

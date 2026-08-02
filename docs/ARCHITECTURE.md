@@ -14,7 +14,7 @@
 
 | 包 | 职责 | 主要实现 |
 |---|---|---|
-| `drone_interfaces` | ROS 2 自定义接口 | `CylinderArray`、`LandingTarget`、`CoverageStatus`、`SetVisionMode`、`TriggerDrop` |
+| `drone_interfaces` | ROS 2 自定义接口 | `NedPositionSetpoint`、`CylinderArray`、`LandingTarget`、`CoverageStatus`、`SetVisionMode`、`TriggerDrop` |
 | `px4_control` | PX4 DDS 适配和指令输出 | `px4_bridge.py`、`standalone_bridge.py`、`flight_controller.py` |
 | `drone_vision` | 相机、ONNX 推理、目标精修、覆盖监控、视觉伺服 | `vision_pipeline.py` 及检测器/控制器 |
 | `drone_servo2` | 多位置投放控制 | C++ `servo_controller.cpp`，SITL Mock 或 Jetson PX4 执行器 |
@@ -45,7 +45,7 @@ Gazebo 相机 / V4L2 相机
              MAIN5/PWM                         PX4
 ```
 
-运行时由 launch 启动四类节点：PX4 bridge、视觉管线、舵机控制器、任务 FSM。真机额外启动 V4L2 相机和 MicroXRCEAgent；SITL 额外启动 Gazebo 图像桥。
+运行时由 launch 启动四类节点：PX4 bridge、视觉管线、舵机控制器、任务 FSM。真机额外启动 USB V4L2 相机和 Ethernet/UDP MicroXRCEAgent；SITL 额外启动 Gazebo 图像桥。
 
 ## 4. 坐标与场地
 
@@ -135,7 +135,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 
 ## 10. PX4 与舵机控制
 
-`px4_control` 接收 `/drone/cmd_setpoint_ned`、`/drone/cmd_velocity_ned` 和 `/drone/vision/servo_cmd`，向 PX4 发布 OffboardControlMode、TrajectorySetpoint 和 VehicleCommand；同时输出 `/drone/pose`、速度和状态供任务与视觉使用。
+`px4_control` 接收 `/drone/cmd_setpoint_ned`（`NedPositionSetpoint`：NED 位置、yaw 和可选航段速度）、`/drone/cmd_velocity_ned` 和 `/drone/vision/servo_cmd`，向 PX4 发布 OffboardControlMode、TrajectorySetpoint 和 VehicleCommand；同时输出 `/drone/pose`、速度和状态供任务与视觉使用。位置航段速度由任务 YAML 配置，并受 `max_setpoint_speed_limit` 和 PX4 自身速度上限约束；视觉精校/降落的速度模式保持独立。
 
 `drone_servo2` 通过 `/drone/servo/trigger_drop` 接收投放请求。SITL 使用 Mock，仅记录和模拟位置；Jetson 使用 `VehicleCommand` 的 `DO_SET_ACTUATOR` 经 PX4 MAIN5 输出 PWM。
 
@@ -144,7 +144,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 源码默认参数面向真机：`/fmu/out/vehicle_status_v1`。`sitl.launch.py` 显式覆盖为 v4；`scripts/sitl_env.sh` 将隔离构建的 v4 `px4_msgs` overlay 提升到环境前端。两端保持同一任务接口，差异集中在消息类型和启动传输层。
 
 ```text
-真机：ROS Humble + workspace(v1) → MicroXRCEAgent → PX4 v1
+真机：USB 相机 → Jetson；ROS Humble + workspace(v1) → UDP Agent:8888 ← PX4 Ethernet
 SITL：ROS Humble + workspace(v1) + isolated overlay(v4) → UDP Agent → PX4 SITL v4
 ```
 

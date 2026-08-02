@@ -54,8 +54,6 @@ class FlightController:
         self._waypoint_start_time: float = 0.0
         self._default_waypoint_timeout: float = bridge.get_parameter("waypoint_timeout").value
         self._waypoint_timeout: float = self._default_waypoint_timeout
-        self._target_speed: float = 1.0
-
         self._landing = False
         self._land_start_time: float = 0.0
         self._land_mode_requested = False
@@ -150,8 +148,7 @@ class FlightController:
             飞行速度 (m/s)
 
         """
-        self._target_speed = speed
-        self._bridge.set_position_target(north, east, down, yaw)
+        self._bridge.set_position_target(north, east, down, yaw, speed=speed)
         self._current_waypoint = Position(north, east, down)
         self._waypoint_start_time = time.time()
         self._waypoint_timeout = self._default_waypoint_timeout

@@ -71,6 +71,14 @@ class _FlightController:
     def stop_velocity(self):
         self.velocity_commands.append((0.0, 0.0, 0.0))
 
+    origin_down = 0.0
+
+    def altitude_to_ned(self, altitude_m):
+        return self.origin_down - altitude_m
+
+    def ned_to_altitude(self, ned_down):
+        return self.origin_down - ned_down
+
 
 class _FSM:
     def __init__(self):

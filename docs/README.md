@@ -19,6 +19,7 @@
 - [ARCHITECTURE.md](ARCHITECTURE.md)：当前代码结构、数据流、FSM 和控制算法。
 - [CODE_READING_GUIDE.md](CODE_READING_GUIDE.md)：逐文件导读、运行时调用链和代码学习路径。
 - [DEPLOYMENT.md](DEPLOYMENT.md)：构建、仿真、真机启动和日志操作。
+- [PARAMETER_USAGE_GUIDE.md](PARAMETER_USAGE_GUIDE.md)：任务速度、航向和常用参数修改指南。
 - [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)：真机现场检查清单。
 - [RISKS_AND_TODOS.md](RISKS_AND_TODOS.md)：风险清单和待办事项，真机飞行前的 blocking items。
 - [WORKLOG.md](WORKLOG.md)：问题、修改、验证和遗留风险的工作记录。
@@ -89,4 +90,5 @@ docs/                 # 当前说明、部署手册和工作记录
 
 ## 文档维护规则
 
-运行规范只写入 `README.md`、`ARCHITECTURE.md` 和 `DEPLOYMENT.md`。问题复盘写入 `WORKLOG.md`，并标注“已验证”“仅 SITL 验证”或“待真机验证”。旧方案不再作为运行说明保留。
+运行规范写入 `README.md`、`ARCHITECTURE.md`、`DEPLOYMENT.md` 和参数使用指南。
+问题复盘写入 `WORKLOG.md`，并标注“已验证”“仅 SITL 验证”或“待真机验证”。旧方案不再作为运行说明保留。

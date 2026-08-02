@@ -7,12 +7,12 @@
 #   ./test_servo_hardware.sh
 #
 # 可选参数:
-#   ./test_servo_hardware.sh --serial /dev/ttyTHS1 --baud 921600
+#   ./test_servo_hardware.sh --udp-port 8888
 #   ./test_servo_hardware.sh --init-only     # 仅初始闭合, 不执行投放
 #   ./test_servo_hardware.sh --dry-run       # 仅检查环境, 不启动任何节点
 #
 # 链路:
-#   MicroXRCEAgent (serial→DDS) → px4_bridge (DDS↔ROS2)
+#   PX4 Ethernet → MicroXRCEAgent (UDP→DDS) → px4_bridge (DDS↔ROS2)
 #     → servo_controller (jetson) → /drone/cmd/vehicle_command_relay
 #       → px4_bridge relay → /fmu/in/vehicle_command
 #         → PX4 → MAIN5 PWM 50Hz → 舵机
@@ -24,8 +24,7 @@
 set -e
 
 # ---- 默认参数 ----
-SERIAL_DEV=/dev/ttyTHS1
-SERIAL_BAUD=921600
+DDS_PORT=8888
 DRY_RUN=false
 INIT_ONLY=false
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -33,15 +32,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # ---- 解析参数 ----
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --serial) SERIAL_DEV="$2"; shift 2 ;;
-        --baud)   SERIAL_BAUD="$2"; shift 2 ;;
+        --udp-port) DDS_PORT="$2"; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
         --init-only) INIT_ONLY=true; shift ;;
         -h|--help)
-            echo "用法: $0 [--serial DEV] [--baud RATE] [--dry-run] [--init-only]"
+            echo "用法: $0 [--udp-port PORT] [--dry-run] [--init-only]"
             echo ""
-            echo "  --serial DEV    串口设备 (默认 /dev/ttyTHS1)"
-            echo "  --baud RATE     波特率 (默认 921600)"
+            echo "  --udp-port PORT Agent UDP 监听端口 (默认 8888)"
             echo "  --dry-run       仅检查环境, 不启动节点"
             echo "  --init-only     仅初始闭合舵机, 不执行投放"
             echo "  -h, --help      显示帮助"
@@ -101,15 +98,7 @@ else
     exit 1
 fi
 
-# 4. 串口设备
-if [ -e "$SERIAL_DEV" ]; then
-    ok "串口设备: $SERIAL_DEV"
-else
-    warn "串口设备 $SERIAL_DEV 不存在"
-    warn "如果 CUAV 7-Nano 已连接但路径不同, 用 --serial 指定"
-fi
-
-# 5. MicroXRCEAgent
+# 4. MicroXRCEAgent
 if command -v MicroXRCEAgent &>/dev/null; then
     ok "MicroXRCEAgent: $(which MicroXRCEAgent)"
 else
@@ -148,16 +137,16 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# 1. MicroXRCEAgent — 串口 ↔ DDS
-info "启动 MicroXRCEAgent ($SERIAL_DEV @ $SERIAL_BAUD)..."
-MicroXRCEAgent serial --dev "$SERIAL_DEV" --baudrate "$SERIAL_BAUD" &
+# 1. MicroXRCEAgent — Ethernet UDP ↔ DDS
+info "启动 MicroXRCEAgent (Ethernet UDP :$DDS_PORT)..."
+MicroXRCEAgent udp4 -p "$DDS_PORT" &
 XRCE_PID=$!
 sleep 2
 
 # 检查 Agent 是否存活
 if ! kill -0 $XRCE_PID 2>/dev/null; then
     err "MicroXRCEAgent 启动失败"
-    err "检查: 1) 串口是否正确 2) CUAV 7-Nano 是否上电 3) 是否有其他进程占用串口"
+    err "检查: 1) UDP 端口是否已被占用 2) CUAV 7-Nano 是否上电 3) 网线和 PX4 Ethernet 参数"
     exit 1
 fi
 ok "MicroXRCEAgent 已启动 (PID=$XRCE_PID)"
@@ -177,13 +166,13 @@ ok "px4_bridge 已启动 (PID=$BRIDGE_PID)"
 # 等待 DDS 建连 + PX4 心跳
 info "等待 PX4 连接 (最多 15s)..."
 for i in $(seq 1 15); do
-    if ros2 topic list 2>/dev/null | grep -q "/fmu/out/vehicle_status"; then
+    if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
         ok "PX4 已连接 (${i}s)"
         break
     fi
     sleep 1
     if [ $i -eq 15 ]; then
-        err "PX4 连接超时 — 检查: 1) CUAV 7-Nano 是否已上电 2) 串口连接"
+        err "PX4 连接超时 — 检查: 1) CUAV 7-Nano 是否已上电 2) 网线 3) UXRCE_DDS_CFG=1000 4) Jetson IP/UDP:$DDS_PORT"
         exit 1
     fi
 done

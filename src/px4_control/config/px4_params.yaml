@@ -16,8 +16,6 @@
     waypoint_timeout: 120.0       # 单航点超时 (s)
     land_altitude: 0.15           # 着陆确认高度 (m, NED z > -0.15 认为已着陆)
 
-    # --- 速度与加速度参数 ---
-    sweep_speed: 0.8              # 区域内部遍历速度 (m/s)
-    transit_speed: 3.0            # 区域之间中转速度 (m/s)
-    return_speed: 4.0             # 返航速度 (m/s)
-    max_acceleration: 2.0         # setpoint 斜坡速率 (m/s), 需 >= transit_speed
+    # --- Bridge 位置设定点安全上限 ---
+    # 任务阶段速度由 mission_params.yaml 统一配置；此值只限制其最大值。
+    max_setpoint_speed_limit: 3.0 # setpoint 推进速度上限 (m/s)

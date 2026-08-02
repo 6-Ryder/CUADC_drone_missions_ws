@@ -4,7 +4,7 @@
 侦察区弓字形 (Boustrophedon) 全覆盖:
   - 自动选择最优条带方向: 沿区域长边飞行, 条带沿短边分布
     这样转弯次数最少, 飞行效率最高
-  - 条间距: grid_spacing (默认 1.0m), 配合相机 FOV 确保全覆盖
+  - 条间距: grid_spacing (默认 1.67m), 配合相机 FOV 确保全覆盖
   - 飞行速度: sweep_speed (0.5-1.0 m/s)
 
 过渡路径:
@@ -244,14 +244,15 @@ class PathPlanner:
                 # 条带沿 north, 沿 east 飞行
                 waypoints.append({
                     "north": strip_pos, "east": start_flight, "down": altitude,
-                    "yaw": math.pi / 2 if i % 2 == 0 else -math.pi / 2,
+                    # 侦察阶段不需要机头随扫描方向旋转，固定朝 NED North。
+                    "yaw": 0.0,
                     "speed": self.sweep_speed,
                     "hover_s": 0.0,
                     "label": f"strip_{i}_enter",
                 })
                 waypoints.append({
                     "north": strip_pos, "east": end_flight, "down": altitude,
-                    "yaw": math.pi / 2 if i % 2 == 0 else -math.pi / 2,
+                    "yaw": 0.0,
                     "speed": self.sweep_speed,
                     "hover_s": 0.0,
                     "label": f"strip_{i}_exit",

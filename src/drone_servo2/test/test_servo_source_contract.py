@@ -45,3 +45,14 @@ def test_drop_completion_callback_runs_after_drop_manager_lock_is_released():
     notify_pos = execute_drop.index("notify_done(success, cylinder_id);")
     assert "  }\n\n  notify_done(success, cylinder_id);" in execute_drop[lock_pos:]
     assert lock_pos < notify_pos
+
+
+def test_hardware_servo_test_uses_the_ethernet_udp_agent():
+    """The deployed flight controller reaches Jetson over Ethernet, not UART."""
+    script = (
+        Path(__file__).resolve().parents[1] / "scripts/test_servo_hardware.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "MicroXRCEAgent udp4 -p \"$DDS_PORT\"" in script
+    assert "MicroXRCEAgent serial" not in script
+    assert "SERIAL_DEV=" not in script
