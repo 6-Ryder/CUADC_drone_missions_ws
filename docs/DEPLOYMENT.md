@@ -61,10 +61,11 @@ SITL launch 默认 Home 为 World `(4,10,0)`、飞行轴为 north、投放距离
 
 ## 4. 真机全系统
 
-真机使用 `real_flight.launch.py`，默认设备参数为：
+真机使用 `real_flight.launch.py`。物理连接和默认参数为：
 
-- V4L2 相机：`/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0`；
-- 串口 MicroXRCEAgent：`/dev/ttyTHS1`、921600 baud；
+- 相机：USB → Jetson V4L2，`/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0`；
+- PX4：以太网 UDP → Jetson MicroXRCEAgent，监听端口 `8888`；
+- PX4 当前参数：`UXRCE_DDS_CFG=1000`、`UXRCE_DDS_AG_IP=192.168.1.11`、`UXRCE_DDS_PRT=8888`；
 - PX4 状态话题：`/fmu/out/vehicle_status_v1`；
 - 相机分辨率：640×480，内参必须替换为实测标定值；
 - `rc_require_arm_signal=true`，必须由遥控器 Arm Switch 允许解锁。
@@ -82,11 +83,10 @@ ros2 launch drone_bringup real_flight.launch.py
 ```bash
 ros2 launch drone_bringup real_flight.launch.py \
   camera_device:=/dev/video0 \
-  serial_device:=/dev/ttyTHS1 \
-  serial_baud:=921600
+  dds_port:=8888
 ```
 
-启动后先观察 `/drone/pose`、`/drone/vision/status` 和 `/drone/servo/status`，确认就绪再允许任务进入 ARM。现场检查顺序见 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)。
+同一 UDP 端口只能运行一个 Agent；若 Agent 因端口占用或其他原因退出，完整真机 launch 会自动停止，不能忽略该报错继续飞行。启动后先观察 `/fmu/out/vehicle_status_v1`、`/drone/pose`、`/drone/vision/status` 和 `/drone/servo/status`，确认就绪再允许任务进入 ARM。现场检查顺序见 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)。
 
 ## 5. 分阶段 smoke test
 
@@ -97,6 +97,6 @@ ros2 launch drone_bringup real_flight.launch.py \
 - SITL 正常结束后，脚本会结束 ROS 2 launch；若异常退出，先读取当前日志目录中的 PID 文件，再只停止该次运行创建的进程。
 - 真机异常时优先由操作者切换遥控器安全模式/手动模式，再停止上位机节点；不要在飞行中依赖终端清理命令代替接管。
 - 视觉未就绪：检查模型路径、ONNX Runtime provider、相机话题和 `/drone/vision/status`。
-- PX4 无状态：检查 Agent 传输方式、串口/UDP 参数和 v1 消息环境。
+- PX4 无状态：检查网线、Jetson IP、UDP `8888` 监听、PX4 Ethernet uXRCE 参数和 v1 消息环境。
 - 舵机无动作：检查 `/drone/servo/trigger_drop`、MAIN5 配置和 [飞控参数修改记录](../real_flight_logs/飞控参数修改记录.md)。
 - 降落失败：检查 H 检测置信度、视觉对心日志、盲降计时和 `vehicle_land_detected`；不得把问题掩盖为 PX4 LAND。

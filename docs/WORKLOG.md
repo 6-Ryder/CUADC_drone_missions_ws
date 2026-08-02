@@ -2,6 +2,14 @@
 
 本文档记录已经影响当前实现的关键问题、修改和验证。历史方案只保留结论，不再作为运行手册。
 
+## 2026-08-02 — 真机通信链路纠正
+
+- 发现：完整真机 launch、舵机硬件测试和部分文档仍把 PX4↔Jetson 通信写成 Jetson UART 串口。
+- 证据：PX4 参数为 `UXRCE_DDS_CFG=1000`、Agent IP `192.168.1.11`、端口 `8888`；实飞 Agent 日志显示 UDP 会话来自 PX4 `192.168.1.10`。
+- 修改：真机完整 launch、简化真机脚本、前飞侦察脚本和舵机测试统一为 `MicroXRCEAgent udp4 -p 8888`，并把 DDS 就绪检查收紧为 `vehicle_status_v1`。
+- 物理拓扑：相机使用 USB 接入 Jetson；PX4 使用以太网 UDP 接入 Jetson；舵机由 PX4 MAIN5 驱动。
+- 待现场确认：Jetson UDP 端口唯一占用、PX4 Ethernet 参数、DDS v1 话题与真实图像/舵机状态。
+
 ## 2026-07-31 — 风险与待办审计
 
 - 审计：对全仓代码、git 历史、WORKLOG 和 SITL 验证结果做系统风险排查。

@@ -45,7 +45,7 @@ Gazebo 相机 / V4L2 相机
              MAIN5/PWM                         PX4
 ```
 
-运行时由 launch 启动四类节点：PX4 bridge、视觉管线、舵机控制器、任务 FSM。真机额外启动 V4L2 相机和 MicroXRCEAgent；SITL 额外启动 Gazebo 图像桥。
+运行时由 launch 启动四类节点：PX4 bridge、视觉管线、舵机控制器、任务 FSM。真机额外启动 USB V4L2 相机和 Ethernet/UDP MicroXRCEAgent；SITL 额外启动 Gazebo 图像桥。
 
 ## 4. 坐标与场地
 
@@ -144,7 +144,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 源码默认参数面向真机：`/fmu/out/vehicle_status_v1`。`sitl.launch.py` 显式覆盖为 v4；`scripts/sitl_env.sh` 将隔离构建的 v4 `px4_msgs` overlay 提升到环境前端。两端保持同一任务接口，差异集中在消息类型和启动传输层。
 
 ```text
-真机：ROS Humble + workspace(v1) → MicroXRCEAgent → PX4 v1
+真机：USB 相机 → Jetson；ROS Humble + workspace(v1) → UDP Agent:8888 ← PX4 Ethernet
 SITL：ROS Humble + workspace(v1) + isolated overlay(v4) → UDP Agent → PX4 SITL v4
 ```
 

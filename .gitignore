@@ -5,6 +5,7 @@ install/
 # Logs
 log/
 logs/
+real_flight_logs/
 
 # VS Code IntelliSense database
 .vscode/browse.vc.db

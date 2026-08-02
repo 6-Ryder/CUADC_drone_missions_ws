@@ -28,7 +28,7 @@ ros2 topic list | rg '/fmu/out/vehicle_status_v1|/fmu/out/vehicle_land_detected'
 ros2 topic echo /drone/pose --once
 ```
 
-如果没有状态或位姿，停止任务，检查 MicroXRCEAgent 的串口/UDP 传输、PX4 `UXRCE_DDS_CFG`、串口权限和网络连接。
+PX4 与 Jetson 使用以太网 UDP，不使用 Jetson UART。若没有状态或位姿，停止任务，按以下顺序检查：Jetson 网卡 IP、UDP `8888` 监听、PX4 `UXRCE_DDS_CFG=1000`、`UXRCE_DDS_AG_IP=192.168.1.11`、`UXRCE_DDS_PRT=8888` 和网线连接。
 
 ## 3. 相机与视觉
 

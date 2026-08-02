@@ -35,7 +35,8 @@ PX4 飞控                    drone_servo2 舵机投放
 
 1. `src/drone_bringup/launch/real_flight.launch.py`：启动 MicroXRCEAgent、V4L2 相机、PX4 bridge、视觉、舵机和完整任务 FSM。
 2. `src/drone_vision/drone_vision/camera.py`：读取 V4L2 设备并发布标准 ROS 图像话题。
-3. 真机使用工作区默认 v1 `px4_msgs` 和 `/fmu/out/vehicle_status_v1`；任务逻辑仍与 SITL 共用。
+3. PX4 通过以太网 UDP 向 Jetson 的 `MicroXRCEAgent udp4 -p 8888` 建立 DDS；相机则独立通过 USB 接入 Jetson。
+4. 真机使用工作区默认 v1 `px4_msgs` 和 `/fmu/out/vehicle_status_v1`；任务逻辑仍与 SITL 共用。
 
 ## 3. 按模块阅读文件
 
@@ -172,7 +173,7 @@ PX4 飞控                    drone_servo2 舵机投放
 
 ### 第六阶段：再看真机差异
 
-最后阅读 `real_flight.launch.py`、`scripts/sitl_env.sh`、`standalone_bridge.py` 和 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)，专门比较相机、DDS v1/v4、串口/UDP、MAIN5 和接地确认，不要把 SITL Adapter 的行为误认为真机实现。
+最后阅读 `real_flight.launch.py`、`scripts/sitl_env.sh`、`standalone_bridge.py` 和 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)，专门比较 USB 相机、PX4 Ethernet/UDP DDS、v1/v4 消息、MAIN5 和接地确认，不要把 SITL Adapter 的行为误认为真机实现。
 
 ## 7. 阅读时容易混淆的文件
 
