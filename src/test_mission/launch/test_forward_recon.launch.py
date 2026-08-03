@@ -56,7 +56,7 @@ def generate_launch_description():
         description="Phase 1: 向北直飞距离 (m)",
     )
     transit_speed_arg = DeclareLaunchArgument(
-        "transit_speed", default_value="2.0",
+        "transit_speed", default_value="2.5",
         description="过渡飞行速度 (m/s)",
     )
     recon_altitude_arg = DeclareLaunchArgument(
@@ -72,7 +72,7 @@ def generate_launch_description():
         description="侦察区 east 半宽 (m), 对齐主任务 Area2 8m",
     )
     sweep_speed_arg = DeclareLaunchArgument(
-        "sweep_speed", default_value="0.8",
+        "sweep_speed", default_value="1.2",
         description="扫描飞行速度 (m/s)",
     )
     grid_spacing_arg = DeclareLaunchArgument(

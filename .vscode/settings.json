@@ -16,5 +16,6 @@
         "/home/ryder/drone_tasks_ws/src/drone_servo",
         "/home/ryder/drone_tasks_ws/src/drone_bringup"
     ],
-    "github.copilot.chat.codeGeneration.useInstructionFiles": true
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    "git.detectSubmodules": false
 }

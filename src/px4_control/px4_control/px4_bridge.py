@@ -216,7 +216,7 @@ class PX4Bridge(Node):
         self.declare_parameter("max_error_count", 5)
         self.declare_parameter("waypoint_timeout", 120.0)
         self.declare_parameter("land_altitude", 0.15)
-        self.declare_parameter("max_setpoint_speed_limit", 3.0)
+        self.declare_parameter("max_setpoint_speed_limit", 5.0)
         self.declare_parameter("home_x", 4.0)
         self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)

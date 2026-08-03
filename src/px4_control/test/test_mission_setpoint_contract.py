@@ -161,7 +161,7 @@ class MissionSetpointContractTest(unittest.TestCase):
             ROOT / "px4_control/px4_control/px4_bridge.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("sweep_speed: 0.8", mission_yaml)
+        self.assertIn("sweep_speed: 1.2", mission_yaml)
         self.assertNotIn("max_acceleration", mission_yaml)
         self.assertNotIn("sweep_passes", mission_yaml)
         self.assertIn('(\"sweep_speed\", 0.1, 15.0)', mission_source)
@@ -171,7 +171,7 @@ class MissionSetpointContractTest(unittest.TestCase):
         self.assertNotIn("sweep_speed:", bridge_yaml)
         self.assertNotIn("transit_speed:", bridge_yaml)
         self.assertNotIn("return_speed:", bridge_yaml)
-        self.assertIn("max_setpoint_speed_limit: 3.0", bridge_yaml)
+        self.assertIn("max_setpoint_speed_limit: 5.0", bridge_yaml)
         self.assertNotIn('declare_parameter("sweep_speed"', bridge_source)
         self.assertNotIn('declare_parameter("transit_speed"', bridge_source)
         self.assertNotIn('declare_parameter("return_speed"', bridge_source)
@@ -190,7 +190,7 @@ class MissionSetpointContractTest(unittest.TestCase):
 
         self.assertNotIn("sweep_speed` 改多少都不会影响", audit)
         self.assertIn("max_setpoint_speed_limit", audit)
-        self.assertIn("sweep_speed: 0.8", audit)
+        self.assertIn("sweep_speed: 1.2", audit)
         self.assertIn("NedPositionSetpoint", architecture)
         self.assertIn("NedPositionSetpoint", reading_guide)
 

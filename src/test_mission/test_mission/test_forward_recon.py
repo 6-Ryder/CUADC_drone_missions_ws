@@ -107,19 +107,19 @@ class TestForwardRecon(Node):
 
         # Phase 1: 前飞参数
         self.declare_parameter("forward_distance", 20.0)   # 向北飞行距离 (m)
-        self.declare_parameter("transit_speed", 2.0)       # 过渡飞行速度 (m/s)
+        self.declare_parameter("transit_speed", 2.5)       # 过渡飞行速度 (m/s)
 
         # Phase 2: 侦察区参数
         self.declare_parameter("recon_altitude", 3.0)          # 侦察扫描高度 (m)
         self.declare_parameter("recon_area_half_north", 2.5)   # 侦察区 north 半宽 (m), 对齐主任务 Area2 5m
         self.declare_parameter("recon_area_half_east", 4.0)    # 侦察区 east 半宽 (m), 对齐主任务 Area2 8m
-        self.declare_parameter("sweep_speed", 0.8)             # 扫描飞行速度 (m/s)
+        self.declare_parameter("sweep_speed", 1.2)             # 扫描飞行速度 (m/s)
         self.declare_parameter("grid_spacing", 1.67)           # 条带间距 (m), 对齐 PathPlanner 默认
         self.declare_parameter("sweep_margin_north", 0.5)      # north 方向边距 (m)
         self.declare_parameter("sweep_margin_east", 0.5)       # east 方向边距 (m)
 
         # 返航
-        self.declare_parameter("return_speed", 3.0)
+        self.declare_parameter("return_speed", 3.8)
         self.declare_parameter("return_altitude", 4.0)  # 返航目标高度 (m)
 
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
