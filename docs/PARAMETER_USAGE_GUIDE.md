@@ -452,7 +452,7 @@ ros2 launch drone_bringup simple_mission.launch.py \
 | `cruise_altitude` | `5.0` m | 巡航高度。 |
 | `forward_distance` | `20.0` m | Phase 1 向北直飞距离。 |
 | `transit_speed` | `2.5` m/s | 前飞转场速度。 |
-| `recon_altitude` | `3.0` m | 测试侦察高度。 |
+| `recon_altitude` | `2.5` m | 测试侦察高度。 |
 | `recon_area_half_north` | `2.5` m | 侦察区 North 半宽。 |
 | `recon_area_half_east` | `4.0` m | 侦察区 East 半宽。 |
 | `sweep_speed` | `1.2` m/s | 测试扫描速度。 |
@@ -465,7 +465,7 @@ ros2 launch drone_bringup simple_mission.launch.py \
 
 ```bash
 ros2 launch test_mission test_forward_recon.launch.py \
-  sim_mode:=false sweep_speed:=1.2 recon_altitude:=3.0 \
+  sim_mode:=false sweep_speed:=1.2 recon_altitude:=2.5 \
   rc_require_arm_signal:=true
 ```
 

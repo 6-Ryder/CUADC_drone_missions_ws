@@ -60,7 +60,7 @@ def generate_launch_description():
         description="过渡飞行速度 (m/s)",
     )
     recon_altitude_arg = DeclareLaunchArgument(
-        "recon_altitude", default_value="3.0",
+        "recon_altitude", default_value="2.5",
         description="Phase 2: 侦察扫描高度 (m)",
     )
     recon_half_north_arg = DeclareLaunchArgument(
