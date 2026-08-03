@@ -116,9 +116,9 @@ src/drone_mission/config/mission_params.yaml
 
 | 参数 | 当前值 | 影响范围 |
 |---|---:|---|
-| `sweep_speed` | `0.8` m/s | 投放区/侦察区内部扫描航点 |
-| `transit_speed` | `2.0` m/s | 投放区与侦察区之间的转场 |
-| `return_speed` | `3.0` m/s | 返航航段 |
+| `sweep_speed` | `1.2` m/s | 投放区/侦察区内部扫描航点 |
+| `transit_speed` | `2.5` m/s | 投放区与侦察区之间的转场 |
+| `return_speed` | `3.8` m/s | 返航航段 |
 
 位置模式的设定点推进速度为：
 
@@ -289,7 +289,7 @@ src/px4_control/config/px4_params.yaml
 | `max_error_count` | `5` | Bridge 中仅声明；当前错误处理不直接读取。 |
 | `waypoint_timeout` | `120.0` s | 航点超时。 |
 | `land_altitude` | `0.15` m | Bridge 中仅声明；当前接地判定不直接读取。 |
-| `max_setpoint_speed_limit` | `3.0` m/s | 所有位置模式设定点的 bridge 安全上限。 |
+| `max_setpoint_speed_limit` | `5.0` m/s | 所有位置模式设定点的 bridge 安全上限。 |
 | `home_x/y/z` | `4/10/0` | Bridge 的 World Home 原点，真机由 launch 覆盖为 0/0/0。 |
 
 `max_setpoint_speed_limit` 影响起飞、转场、侦察、返航和位置悬停修正。
@@ -451,11 +451,11 @@ ros2 launch drone_bringup simple_mission.launch.py \
 | `sim_mode` | `true` | SITL/真机。 |
 | `cruise_altitude` | `5.0` m | 巡航高度。 |
 | `forward_distance` | `20.0` m | Phase 1 向北直飞距离。 |
-| `transit_speed` | `2.0` m/s | 前飞转场速度。 |
-| `recon_altitude` | `3.0` m | 测试侦察高度。 |
+| `transit_speed` | `2.5` m/s | 前飞转场速度。 |
+| `recon_altitude` | `2.5` m | 测试侦察高度。 |
 | `recon_area_half_north` | `2.5` m | 侦察区 North 半宽。 |
 | `recon_area_half_east` | `4.0` m | 侦察区 East 半宽。 |
-| `sweep_speed` | `0.8` m/s | 测试扫描速度。 |
+| `sweep_speed` | `1.2` m/s | 测试扫描速度。 |
 | `grid_spacing` | `1.67` m | 条带间距。 |
 | `rc_require_arm_signal` | `true` | 真机人工解锁。 |
 | `camera_device` | USB 稳定路径 | 真机 V4L2 设备。 |
@@ -465,7 +465,7 @@ ros2 launch drone_bringup simple_mission.launch.py \
 
 ```bash
 ros2 launch test_mission test_forward_recon.launch.py \
-  sim_mode:=false sweep_speed:=0.8 recon_altitude:=3.0 \
+  sim_mode:=false sweep_speed:=1.2 recon_altitude:=2.5 \
   rc_require_arm_signal:=true
 ```
 
@@ -490,10 +490,10 @@ ros2 launch test_mission test_forward_recon.launch.py \
 
 ```yaml
 # mission_params.yaml
-sweep_speed: 0.8
+sweep_speed: 1.2
 ```
 
-不要修改 `max_setpoint_speed_limit`，除非要改变所有位置模式的安全上限。
+不要修改 `max_setpoint_speed_limit`（当前 5.0 m/s），除非要改变所有位置模式的安全上限。
 
 ### 10.2 同时改变扫描区域
 

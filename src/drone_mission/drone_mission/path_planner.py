@@ -5,7 +5,7 @@
   - 自动选择最优条带方向: 沿区域长边飞行, 条带沿短边分布
     这样转弯次数最少, 飞行效率最高
   - 条间距: grid_spacing (默认 1.67m), 配合相机 FOV 确保全覆盖
-  - 飞行速度: sweep_speed (0.5-1.0 m/s)
+  - 飞行速度: sweep_speed (0.5-1.5 m/s)
 
 过渡路径:
   - 投放区 → 侦察区 → 返航点
@@ -28,7 +28,7 @@ class PathPlanner:
     路径规划器.
 
     使用方式:
-      planner = PathPlanner(sweep_speed=0.8, transit_speed=2.0)
+      planner = PathPlanner(sweep_speed=1.2, transit_speed=2.5)
       waypoints = planner.plan_coverage(zone_bounds, altitude=5.0)
       waypoints = planner.plan_transit(from_xyz, to_xyz)
     """

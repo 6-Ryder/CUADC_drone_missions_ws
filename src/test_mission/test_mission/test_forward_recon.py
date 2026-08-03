@@ -76,7 +76,7 @@ class TestForwardRecon(Node):
       - 到达确认 (位置 + 连续稳定帧数)
 
     Phase 2 — 侦察区任务:
-      - 降至侦察扫描高度 (默认 3m)
+      - 降至侦察扫描高度 (默认 2.5m)
       - 弓字形 (Boustrophedon) 全覆盖路径
       - 返航同时爬升至 return_altitude (默认 4m), 回到初始点上方
       - 精准降落
@@ -107,19 +107,19 @@ class TestForwardRecon(Node):
 
         # Phase 1: 前飞参数
         self.declare_parameter("forward_distance", 20.0)   # 向北飞行距离 (m)
-        self.declare_parameter("transit_speed", 2.0)       # 过渡飞行速度 (m/s)
+        self.declare_parameter("transit_speed", 2.5)       # 过渡飞行速度 (m/s)
 
         # Phase 2: 侦察区参数
-        self.declare_parameter("recon_altitude", 3.0)          # 侦察扫描高度 (m)
+        self.declare_parameter("recon_altitude", 2.5)          # 侦察扫描高度 (m)
         self.declare_parameter("recon_area_half_north", 2.5)   # 侦察区 north 半宽 (m), 对齐主任务 Area2 5m
         self.declare_parameter("recon_area_half_east", 4.0)    # 侦察区 east 半宽 (m), 对齐主任务 Area2 8m
-        self.declare_parameter("sweep_speed", 0.8)             # 扫描飞行速度 (m/s)
+        self.declare_parameter("sweep_speed", 1.2)             # 扫描飞行速度 (m/s)
         self.declare_parameter("grid_spacing", 1.67)           # 条带间距 (m), 对齐 PathPlanner 默认
         self.declare_parameter("sweep_margin_north", 0.5)      # north 方向边距 (m)
         self.declare_parameter("sweep_margin_east", 0.5)       # east 方向边距 (m)
 
         # 返航
-        self.declare_parameter("return_speed", 3.0)
+        self.declare_parameter("return_speed", 3.8)
         self.declare_parameter("return_altitude", 4.0)  # 返航目标高度 (m)
 
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
@@ -216,7 +216,7 @@ class TestForwardRecon(Node):
 
         # ---- 启动日志 ----
         fwd = self.get_param("forward_distance", 20.0)
-        ralt = self.get_param("recon_altitude", 3.0)
+        ralt = self.get_param("recon_altitude", 2.5)
         half_n = self.get_param("recon_area_half_north", 2.5)
         half_e = self.get_param("recon_area_half_east", 4.0)
 
@@ -392,7 +392,7 @@ class TestForwardRecon(Node):
                 fwd = self.get_param("forward_distance", 20.0)
                 hx = self.get_param("home_x", 0.0)
                 hy = self.get_param("home_y", 0.0)
-                ralt = self.get_param("recon_altitude", 3.0)
+                ralt = self.get_param("recon_altitude", 2.5)
 
                 self.get_logger().info(
                     f"DESCEND: 降至侦察高度 {ralt}m → "
@@ -403,7 +403,7 @@ class TestForwardRecon(Node):
                 self._fc.goto_ned(tn, te, td, yaw=0.0, speed=1.0)
                 self._command_sent = True
 
-            target_down = self._fc.altitude_to_ned(self.get_param("recon_altitude", 3.0))
+            target_down = self._fc.altitude_to_ned(self.get_param("recon_altitude", 2.5))
             pos = self._bridge.get_current_position()
 
             if abs(pos.down - target_down) < self.get_param("takeoff_tolerance", 0.3):
@@ -537,7 +537,7 @@ class TestForwardRecon(Node):
         fwd = self.get_param("forward_distance", 20.0)
         half_n = self.get_param("recon_area_half_north", 2.5)
         half_e = self.get_param("recon_area_half_east", 4.0)
-        ralt = self.get_param("recon_altitude", 3.0)
+        ralt = self.get_param("recon_altitude", 2.5)
 
         area_north_min = fwd - half_n
         area_north_max = fwd + half_n

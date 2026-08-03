@@ -21,6 +21,7 @@
 - [DEPLOYMENT.md](DEPLOYMENT.md)：构建、仿真、真机启动和日志操作。
 - [PARAMETER_USAGE_GUIDE.md](PARAMETER_USAGE_GUIDE.md)：任务速度、航向和常用参数修改指南。
 - [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)：真机现场检查清单。
+- [RTK_DEPLOYMENT_GUIDE.md](RTK_DEPLOYMENT_GUIDE.md)：C-RTK 基站/Rover 部署、PX4 参数、QGC 验证、日志与可选 RTK 质量门设计。
 - [RISKS_AND_TODOS.md](RISKS_AND_TODOS.md)：风险清单和待办事项，真机飞行前的 blocking items。
 - [WORKLOG.md](WORKLOG.md)：问题、修改、验证和遗留风险的工作记录。
 - [field/README.md](../field/README.md)：Gazebo 场景和随机场地说明。

@@ -137,6 +137,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# 0. 清理残留 Agent（避免端口占用导致新 Agent 起不来）
+info "清理残留 MicroXRCEAgent 进程..."
+pkill -9 -f MicroXRCEAgent 2>/dev/null || true
+sleep 0.5
+
 # 1. MicroXRCEAgent — Ethernet UDP ↔ DDS
 info "启动 MicroXRCEAgent (Ethernet UDP :$DDS_PORT)..."
 MicroXRCEAgent udp4 -p "$DDS_PORT" &
@@ -163,19 +168,32 @@ if ! kill -0 $BRIDGE_PID 2>/dev/null; then
 fi
 ok "px4_bridge 已启动 (PID=$BRIDGE_PID)"
 
-# 等待 DDS 建连 + PX4 心跳
-info "等待 PX4 连接 (最多 15s)..."
-for i in $(seq 1 15); do
+# 等待 DDS 建连 + PX4 心跳 (冷启动最多 45s)
+info "等待 PX4 DDS 连接 (冷启动可能需要 45s)..."
+PX4_CONNECTED=false
+for i in $(seq 1 45); do
     if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
-        ok "PX4 已连接 (${i}s)"
-        break
+        # 二次确认: 有发布者才通过 (话题可能由 Agent 空注册)
+        if ros2 topic info /fmu/out/vehicle_status_v1 2>/dev/null | grep -q "Publisher count: [1-9]"; then
+            ok "PX4 DDS 已连接且有数据 (${i}s)"
+            PX4_CONNECTED=true
+            break
+        fi
     fi
     sleep 1
-    if [ $i -eq 15 ]; then
-        err "PX4 连接超时 — 检查: 1) CUAV 7-Nano 是否已上电 2) 网线 3) UXRCE_DDS_CFG=1000 4) Jetson IP/UDP:$DDS_PORT"
-        exit 1
+    # 每 10s 提示一次
+    if [ $((i % 10)) -eq 0 ]; then
+        info "  已等待 ${i}s... (可尝试: 1) 断电重启飞控 2) 检查网线 3) QGC 确认 PX4 心跳)"
     fi
 done
+
+if ! $PX4_CONNECTED; then
+    err "PX4 DDS 连接超时 (45s)"
+    err "设备: 1) 飞控断电重启 → 2) 等指示灯稳定 → 3) 再运行本脚本"
+    err "参数: UXRCE_DDS_CFG=1000, UXRCE_DDS_AG_IP=<Jetson IP>, UXRCE_DDS_PRT=$DDS_PORT"
+    err "网络: 检查网线, ping <PX4 IP>, ss -uln | grep $DDS_PORT"
+    exit 1
+fi
 
 # 3. servo_controller — jetson 模式
 info "启动 servo_controller (jetson 模式)..."

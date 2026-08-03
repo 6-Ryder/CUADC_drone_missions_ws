@@ -18,4 +18,4 @@
 
     # --- Bridge 位置设定点安全上限 ---
     # 任务阶段速度由 mission_params.yaml 统一配置；此值只限制其最大值。
-    max_setpoint_speed_limit: 3.0 # setpoint 推进速度上限 (m/s)
+    max_setpoint_speed_limit: 5.0 # setpoint 推进速度上限 (m/s)
