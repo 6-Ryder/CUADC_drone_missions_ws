@@ -1,5 +1,126 @@
 # 当前系统架构
 
+## 工作空间总览：`drone_tasks_ws`
+
+这是一个**基于 ROS 2 Humble + PX4 Offboard + Gazebo SITL 的无人机自主任务系统**，部署在 Jetson Orin Nano 真机上，SITL 仿真在 x86 开发机上。
+
+### 核心任务
+
+无人机自主执行**全流程任务**：
+1. **起飞** → 飞行至投放区 → 搜索圆筒目标 → **两次精准投放**（舵机 PWM 序列 `1150→1700→2150 μs`）
+2. 飞至侦察区 → **弓字形全覆盖扫描**（相机 FOV 覆盖网格）
+3. 返航 → **H 标识视觉伺服** → 对心后近地盲降 → 接地并强制解锁
+
+### 已跑通状态（2026-07-30 SITL 全流程）
+
+| 指标 | 结果 |
+|---|---|
+| 两次投放 | ✅ 成功 |
+| 侦察覆盖率 | ✅ 100% |
+| H 标识对心盲降 | ✅ 1.5m 切入，接地确认 |
+| 任务完成 | ✅ `mission_end.success=True, ~200s` |
+
+### 源码包（10 个包，`src/`）
+
+```
+drone_interfaces  ← ROS 2 自定义 msg/srv/action (接口协议)
+    ├── msg: NedPositionSetpoint, CylinderArray, LandingTarget, CoverageStatus...
+    └── srv: SetVisionMode, TriggerDrop
+
+px4_control       ← PX4 DDS 适配层
+    ├── px4_bridge.py        — PX4 ↔ ROS2 DDS 桥 (发布 /fmu/in/*, 中转 /drone/cmd/*)
+    ├── standalone_bridge.py — FSM 不直连 DDS 时的轻量转发器 (同一接口)
+    ├── flight_controller.py — 高层飞控动作 (arm/takeoff/goto/velocity/disarm)
+    └── telemetry.py         — NED/World 坐标、位置/速度/姿态模型
+
+drone_vision      ← 统一视觉管线 v2
+    ├── vision_pipeline.py   — 主节点: 订阅 /drone/camera/image_raw, 运行 YOLO/ONNX
+    ├── models/yolo_engine.py — ONNX Runtime 推理, provider 选择, 模型生命周期
+    ├── cylinder_detector.py  — 圆筒 YOLO + OpenCV 精修 (边缘、白色、半径)
+    ├── landing_detector.py   — H 标识检测 + OpenCV 精修
+    ├── marker_detector.py    — 蓝色投放标识精修 (蓝色占比、圆度、直径过滤)
+    ├── coordinate_transforms.py — pixel_to_world (6-DoF 姿态补偿 + simple fallback)
+    ├── visual_servoing.py    — 像素误差 → NED 速度 (PI-D 控制器)
+    ├── coverage_monitor.py   — 相机 FOV 网格覆盖 → /drone/vision/coverage
+    └── camera.py             — V4L2 相机驱动 (真机)
+
+drone_servo2      ← C++ 多位置舵机投放（当前主用）
+    ├── servo_controller.cpp  — 订阅 TriggerDrop, 步进 PWM 位置序列
+    └── SITL Mock / Jetson PX4 DO_SET_ACTUATOR → MAIN5
+
+drone_servo       ← Python 旧舵机实现 (参考/独立, 不在主链路)
+
+drone_mission     ← 核心任务调度
+    ├── mission_state_machine.py — 20Hz FSM 主循环, 参数声明, 服务/话题桥接
+    ├── states/
+    │   ├── state_init.py, state_takeoff.py   — 初始化, 起飞
+    │   ├── state_transit.py                  — 区域中转 (NED 航点 + 速度)
+    │   ├── state_cylinder_search.py          — 投放区搜索 (目标记忆/去重)
+    │   ├── state_drop.py                     — DESCEND→EXECUTE→ASCEND 三阶段
+    │   ├── state_recon_patrol.py             — 弓字形全覆盖扫描
+    │   ├── state_return.py                   — 返航
+    │   ├── state_precision_land.py           — H 搜索→视觉伺服→盲降→接地
+    │   └── state_hold_for_takeover.py        — 异常接管悬停
+    ├── path_planner.py           — 弓字形航点生成
+    ├── cylinder_selector.py      — 已投排除 + min_radius_first 策略
+    ├── precision_align_controller.py — CUADC 风格像素闭环精校 (替代旧梯度探测)
+    └── simple_mission.py         — Smoke test (非完整 FSM)
+
+drone_bringup     ← Launch 文件
+    ├── sitl.launch.py       — SITL: px4_bridge + vision + servo + mission
+    └── real_flight.launch.py — 真机: +MicroXRCEAgent + V4L2 camera + Jetson 参数
+
+test_mission      ← 分阶段真机测试 (test_forward_recon: 直飞20m+侦察扫描)
+drone_utils       ← 共享工具 (TaskLogger, Watchdog, EmergencyHandler, ProgressMonitor)
+px4_msgs          ← PX4 DDS 消息定义 (v1/v4 隔离)
+```
+
+### 架构数据流
+
+```
+相机 (Gazebo/V4L2) ──Image──► drone_vision ──检测结果──► drone_mission (FSM)
+                                  │                          │
+                          视觉伺服速度               NED 航点/速度/投放
+                                  │                          │
+                          px4_control ◄──────────────────────┘
+                                  │
+                          /fmu/in/* (PX4 DDS)
+                                  │
+                               PX4 飞控
+                                  │
+                          drone_servo2 ←── TriggerDrop 服务
+```
+
+### 坐标系统
+
+| 坐标系 | 方向 | 用途 |
+|---|---|---|
+| **NED** | x=North, y=East, z=Down | PX4 飞控指令与遥测 |
+| **World (ENU)** | x=East, y=North, z=Up | Gazebo/任务逻辑内部 |
+| 转换 | `World x = home_x + NED east`, `World y = home_y + NED north` | `telemetry.py` |
+
+### 关键设计决策
+
+1. **精准降落只走视觉 H 对心**，视觉丢失不 fallback 到 PX4 LAND
+2. **FSM 与 PX4 在不同进程**：FSM → StandaloneBridge → ROS relay 话题 → px4_bridge → PX4 DDS
+3. **v1/v4 消息隔离**：真机 v1，SITL v4；`sitl_env.sh` 控制 overlay 环境
+4. **视觉模型按需加载**：投放模型在进入侦察时释放，降落模型按需创建
+5. **舵机步进投放**：每次只前进一步 PWM 位置，不跳位
+6. **遥控器安全**：真机 `rc_require_arm_signal=true`，必须人工 Arm Switch 解锁
+
+### 辅助资源
+
+| 目录 | 内容 |
+|---|---|
+| `docs/` | ARCHITECTURE, CODE_READING_GUIDE, DEPLOYMENT, RTK 指南, WORKLOG |
+| `scripts/` | start_full_simulation.sh, start_full_real_mission.sh, sitl_env.sh, debug_vision.sh |
+| `field/` | Gazebo 场景 (drone_field.sdf, 70m×8m 北向) |
+| `real_flight_logs/` | 真机飞行日志 (按日期) + 飞控参数修改记录 |
+| `log/` | SITL 仿真日志 (209 个子目录) |
+| `controller_params_v3.params` | 37KB PX4 控制器参数文件 |
+
+---
+
 本文档描述仓库当前实现，不描述已经废弃的方案。代码事实优先级高于本文档；参数以各包 `config/*.yaml` 为准。
 
 ## 1. 设计不变量
