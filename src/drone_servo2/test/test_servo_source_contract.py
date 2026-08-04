@@ -4,6 +4,9 @@ from pathlib import Path
 SOURCE = (
     Path(__file__).resolve().parents[1] / "src/servo_controller.cpp"
 ).read_text(encoding="utf-8")
+CONFIG = (
+    Path(__file__).resolve().parents[1] / "config/servo_params.yaml"
+).read_text(encoding="utf-8")
 
 
 def test_hardware_servo_waits_for_px4_command_ack():
@@ -56,3 +59,30 @@ def test_hardware_servo_test_uses_the_ethernet_udp_agent():
     assert "MicroXRCEAgent udp4 -p \"$DDS_PORT\"" in script
     assert "MicroXRCEAgent serial" not in script
     assert "SERIAL_DEV=" not in script
+
+
+def test_ack_timeout_retries_the_same_absolute_pwm_exactly_once():
+    command_method = SOURCE[
+        SOURCE.index("bool send_pwm_command(double pwm_us)"):SOURCE.index(
+            "void handle_ack", SOURCE.index("bool send_pwm_command(double pwm_us)")
+        )
+    ]
+
+    assert "command_retries: 1" in CONFIG
+    assert "command_retries_" in command_method
+    assert "attempt <= command_retries_" in command_method
+    assert "send_actuator_cmd(pwm_to_normalized(pwm_us));" in command_method
+    assert "attempt < command_retries_" in command_method
+
+
+def test_rejected_ack_never_retries_and_current_pwm_changes_only_on_acceptance():
+    command_method = SOURCE[
+        SOURCE.index("bool send_pwm_command(double pwm_us)"):SOURCE.index(
+            "void handle_ack", SOURCE.index("bool send_pwm_command(double pwm_us)")
+        )
+    ]
+
+    reject = command_method.index("if (!ack_accepted_)")
+    accepted_store = command_method.index("current_pwm_.store(pwm_us);")
+    assert "return false;" in command_method[reject:accepted_store]
+    assert reject < accepted_store

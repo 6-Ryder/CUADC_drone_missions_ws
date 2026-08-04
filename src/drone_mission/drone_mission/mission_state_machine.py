@@ -37,6 +37,7 @@ from drone_mission.states.state_drop import DropState
 from drone_mission.states.state_recon_patrol import ReconPatrolState
 from drone_mission.states.state_return import ReturnState
 from drone_mission.states.state_precision_land import PrecisionLandState
+from drone_mission.states.state_hold_for_takeover import HoldForTakeoverState
 
 # 依赖层
 from px4_control.px4_bridge import PX4Bridge
@@ -85,6 +86,7 @@ class MissionState(Enum):
     RECON_PATROL = "RECON_PATROL"
     RETURN_TO_HOME = "RETURN_TO_HOME"
     PRECISION_LAND = "PRECISION_LAND"
+    HOLD_FOR_TAKEOVER = "HOLD_FOR_TAKEOVER"
     COMPLETE = "COMPLETE"
     ERROR = "ERROR"
 
@@ -174,6 +176,12 @@ class MissionFSM(Node):
         self._servo_ready: bool = False
         self._vision_ready: bool = False
         self._mission_failed: bool = False
+        self._takeover_reason: Optional[str] = None
+        self._takeover_requested: bool = False
+        self._recon_path_completed: bool = False
+        # Set only after TAKEOFF has received an actual PX4 Offboard confirmation.
+        # Before that point, TAKEOFF itself is responsible for requesting Offboard.
+        self._offboard_confirmed: bool = False
 
         # ---- 视觉数据缓存 ----
         self._cylinders: List[Any] = []
@@ -224,6 +232,11 @@ class MissionFSM(Node):
         self.declare_parameter("sweep_speed", 0.8)
         self.declare_parameter("transit_speed", 2.0)
         self.declare_parameter("return_speed", 3.0)
+        self.declare_parameter("return_altitude", 5.0)
+        self.declare_parameter("navigation_progress_window", 30.0)
+        self.declare_parameter("navigation_progress_min_improvement", 0.25)
+        self.declare_parameter("search_progress_window", 30.0)
+        self.declare_parameter("visual_progress_min_improvement", 2.0)
         # Area 1
         self.declare_parameter("area1_north_min", 30.0)
         self.declare_parameter("area1_north_max", 35.0)
@@ -278,7 +291,7 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_fine_step_s", 0.12)
         self.declare_parameter("precision_align_hover_s", 0.04)
         self.declare_parameter("precision_align_timeout", 25.0)
-        self.declare_parameter("precision_align_max_retries", 2)
+        self.declare_parameter("precision_align_max_retries", 1)
         self.declare_parameter("precision_align_image_x_to_right_sign", 1.0)
         self.declare_parameter("precision_align_image_y_to_forward_sign", -1.0)
         self.declare_parameter("precision_align_threshold_norm_x", 0.008)
@@ -329,6 +342,7 @@ class MissionFSM(Node):
         self.declare_parameter("landing_descent_slow", 0.12)
         self.declare_parameter("landing_blind_descent_speed", 0.30)
         self.declare_parameter("landing_blind_timeout", 45.0)
+        self.declare_parameter("landing_search_progress_window", 15.0)
         self.declare_parameter("landing_touchdown_max_altitude", 0.10)
         self.declare_parameter("landing_touchdown_max_horizontal_speed", 0.10)
         self.declare_parameter("landing_touchdown_max_vertical_speed", 0.05)
@@ -404,6 +418,7 @@ class MissionFSM(Node):
             MissionState.RECON_PATROL: ReconPatrolState(self),
             MissionState.RETURN_TO_HOME: ReturnState(self),
             MissionState.PRECISION_LAND: PrecisionLandState(self),
+            MissionState.HOLD_FOR_TAKEOVER: HoldForTakeoverState(self),
         }
 
         # 配置 TransitState 的目标
@@ -742,24 +757,50 @@ class MissionFSM(Node):
         # 紧急检查
         emergency_level = self._emergency.check()
         if emergency_level == EmergencyLevel.RTL:
-            self.get_logger().warn("紧急: 触发 RTL 返航!")
-            self._transition_to(MissionState.RETURN_TO_HOME)
+            self.request_takeover("emergency battery/vision warning")
+            return
+        elif emergency_level == EmergencyLevel.LAND:
+            self.request_takeover("emergency land")
             return
         elif emergency_level == EmergencyLevel.ABORT:
-            self.get_logger().error("紧急: 任务中止!")
-            self._transition_to(MissionState.ERROR)
+            self.request_takeover("emergency abort")
+            return
+
+        # TAKEOFF owns the initial transition into Offboard.  Once PX4 has
+        # explicitly confirmed that transition, any later mode loss invalidates
+        # the active task trajectory and must stop autonomous output at once.
+        if (
+            self._offboard_confirmed
+            and self._current_state not in (
+                MissionState.COMPLETE,
+                MissionState.ERROR,
+                MissionState.HOLD_FOR_TAKEOVER,
+            )
+            and not self.bridge.is_offboard()
+        ):
+            self.request_takeover("PX4 left Offboard")
             return
 
         # 飞行中遥控器上锁 → 立刻中止 (仅 RC 模式)
         if self.get_param("rc_require_arm_signal", True):
             if self._current_state not in (
                 MissionState.INIT, MissionState.COMPLETE, MissionState.ERROR,
+                MissionState.HOLD_FOR_TAKEOVER,
             ) and not self.bridge.is_armed():
-                self.get_logger().error(
-                    f"遥控器上锁 (disarm) — 飞行中检测到, 中止任务"
+                handler = self._state_handlers.get(self._current_state)
+                final_ground_disarm = (
+                    self._current_state == MissionState.PRECISION_LAND
+                    and bool(getattr(handler, "final_disarm_pending", False))
                 )
-                self._transition_to(MissionState.ERROR)
-                return
+                if not final_ground_disarm:
+                    self.get_logger().error(
+                        "遥控器上锁 (disarm) — 飞行中检测到，停止自主输出"
+                    )
+                    self.request_takeover("vehicle disarmed")
+                    return
+                # PrecisionLandState issued force_disarm only after PX4
+                # touchdown (or the strict touchdown fallback).  Let it
+                # observe the expected disarm and complete the mission.
 
         # 执行当前状态
         if self._current_state == MissionState.COMPLETE:
@@ -767,14 +808,14 @@ class MissionFSM(Node):
 
         handler = self._state_handlers.get(self._current_state)
         if handler is None:
-            self.get_logger().warn(f"无处理器: {self._current_state.value}")
+            self.request_takeover(f"no handler for {self._current_state.value}")
             return
 
         try:
             next_state_name = handler.execute()
         except Exception as e:
             self.get_logger().error(f"状态执行异常 {self._current_state.value}: {e}")
-            self._transition_to(MissionState.ERROR)
+            self.request_takeover(f"state execute exception: {e}")
             return
 
         if next_state_name:
@@ -793,12 +834,19 @@ class MissionFSM(Node):
         """从字符串状态名转换为枚举并跳转."""
         try:
             state = MissionState(state_name)
+            if state == MissionState.ERROR:
+                self.request_takeover("legacy ERROR transition")
+                return
             self._transition_to(state)
         except ValueError:
             self.get_logger().error(f"未知状态: {state_name}")
+            self.request_takeover(f"unknown state: {state_name}")
 
     def _transition_to(self, state: MissionState):
         """执行状态转换."""
+        if state == MissionState.ERROR:
+            self.request_takeover("legacy ERROR transition")
+            return
         old_state = self._current_state
         self._prev_state = old_state
         self._current_state = state
@@ -829,7 +877,7 @@ class MissionFSM(Node):
                 handler.enter()
             except Exception as e:
                 self.get_logger().error(f"状态进入异常 {state.value}: {e}")
-                self._transition_to(MissionState.ERROR)
+                self.request_takeover(f"state enter exception: {e}")
                 return
             self._emergency.set_state(state.value)
         else:
@@ -871,7 +919,12 @@ class MissionFSM(Node):
 
     def _handle_complete(self):
         """任务完成处理."""
-        success = not self._mission_failed
+        max_drops = int(self.get_param("max_drops", 2))
+        success = (
+            not self._mission_failed
+            and self._drop_success_count >= max_drops
+            and bool(getattr(self, "_recon_path_completed", False))
+        )
         self.get_logger().info("=" * 60)
         self.get_logger().info("  任务完成" if success else "  任务失败")
         self.get_logger().info(f"  投放: {self._drop_success_count}/{self._drop_count}")
@@ -884,18 +937,51 @@ class MissionFSM(Node):
             "drops_completed": self._drop_success_count,
             "drops_total": self._drop_count,
             "coverage_ratio": coverage.get("coverage_ratio", 0) if coverage else 0,
-            "final_state": "COMPLETE" if success else "ERROR",
+            "final_state": "COMPLETE" if success else "HOLD_FOR_TAKEOVER",
         })
+        # The standalone bridge owns its own heartbeat timer.  Stopping only
+        # this FSM timer would leave a live lease and the last Offboard target
+        # on the real PX4 DDS path after a completed mission.
+        bridge = getattr(self, "bridge", None)
+        if bridge is not None:
+            bridge.stop_autonomous_output()
         # 停止控制循环
         if hasattr(self, '_ctrl_timer'):
             self._ctrl_timer.cancel()
 
     def _handle_error(self):
         """错误处理."""
+        self.request_takeover("legacy ERROR handler")
+
+    def request_takeover(self, reason: str) -> None:
+        """Stop task progress and retain a zero-velocity hold for RC takeover."""
+        if (
+            getattr(self, "_takeover_requested", False)
+            or getattr(self, "_current_state", None) == MissionState.HOLD_FOR_TAKEOVER
+        ):
+            return
+        self._takeover_requested = True
         self._mission_failed = True
-        self.get_logger().error("任务进入 ERROR 状态")
-        self._task_logger.log_error("mission_error", "FSM entered ERROR state")
-        self._transition_to(MissionState.COMPLETE)
+        if self._takeover_reason is None:
+            self._takeover_reason = str(reason)
+            self.get_logger().error(
+                f"任务等待人工接管: {self._takeover_reason}"
+            )
+
+        bridge = self.bridge
+        if bridge.is_armed() and bridge.is_offboard():
+            bridge.hold_for_takeover()
+        else:
+            bridge.stop_autonomous_output()
+        self._transition_to(MissionState.HOLD_FOR_TAKEOVER)
+
+    def mark_offboard_confirmed(self) -> None:
+        """Record the one successful PX4 Offboard confirmation for this mission."""
+        self._offboard_confirmed = True
+
+    def mark_recon_path_completed(self) -> None:
+        """Record completion of every planned reconnaissance waypoint."""
+        self._recon_path_completed = True
 
     # ================================================================
     # 面向状态处理器的接口 (Context)
@@ -1005,6 +1091,14 @@ class MissionFSM(Node):
         return self.bridge.battery_ready
 
     @property
+    def land_ready(self) -> bool:
+        return bool(getattr(self.bridge, "land_ready", False))
+
+    @property
+    def vision_ready(self) -> bool:
+        return self._vision_ready
+
+    @property
     def rc_ready(self) -> bool:
         """遥控器已解锁 → 才允许进入自动任务.
 
@@ -1065,7 +1159,7 @@ class MissionFSM(Node):
             ("battery_warning", 0.05, 1.0),
             ("battery_critical", 0.01, 0.9),
             ("vision_loss_timeout", 0.5, 60.0),
-            ("state_max_duration", 10.0, 600.0),
+            ("state_max_duration", 0.0, 600.0),
             ("drop_descend_height", 0.3, 10.0),
             ("precision_align_alpha", 0.01, 1.0),
             ("precision_align_gain", 0.1, 10.0),

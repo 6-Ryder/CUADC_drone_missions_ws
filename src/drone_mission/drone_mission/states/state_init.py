@@ -44,12 +44,31 @@ class InitState:
             self._odom_ready_count = 0
 
         # 视觉/舵机节点检查
+        telemetry_ready = self._fsm.bridge.telemetry_fresh(time.monotonic())
         vision_alive = self._fsm.watchdog.is_alive("vision")
         servo_alive = self._fsm.watchdog.is_alive("servo")
+        vision_ready = self._fsm.vision_ready
         battery_ready = self._fsm.battery_ready
+        land_ready = self._fsm.land_ready
         rc_ready = self._fsm.rc_ready
 
         elapsed = time.time() - self._start_time
+
+        missing = []
+        if not telemetry_ready:
+            missing.append("telemetry")
+        if self._odom_ready_count < self._odom_stable_threshold:
+            missing.append("odom")
+        if not battery_ready:
+            missing.append("battery")
+        if not land_ready:
+            missing.append("land_status")
+        if not vision_alive or not vision_ready:
+            missing.append("vision")
+        if not servo_alive or not self._fsm.servo_ready:
+            missing.append("servo")
+        if not rc_ready:
+            missing.append("rc")
 
         # 诊断日志 — RC 模式时显示 armed/preflight 明细
         if elapsed - getattr(self, '_last_diag_log', 0) > 5.0:
@@ -62,10 +81,14 @@ class InitState:
             else:
                 rc_detail = "skip"
             self._fsm.get_logger().info(
-                f"INIT: odom={self._odom_ready_count}, "
+                f"INIT: waiting={','.join(missing) or 'none'}, "
+                f"odom={self._odom_ready_count}, "
+                f"telemetry={'OK' if telemetry_ready else 'WAIT'}, "
                 f"vision={'OK' if vision_alive else 'WAIT'}, "
+                f"vision_ready={'OK' if vision_ready else 'WAIT'}, "
                 f"servo={'OK' if servo_alive else 'WAIT'}, "
                 f"battery={'OK' if battery_ready else 'WAIT'}, "
+                f"land={'OK' if land_ready else 'WAIT'}, "
                 f"rc=[{rc_detail}], "
                 f"elapsed={elapsed:.0f}s"
             )
@@ -73,34 +96,17 @@ class InitState:
         # 就绪条件
         if (
             self._odom_ready_count >= self._odom_stable_threshold
+            and telemetry_ready
             and vision_alive
+            and vision_ready
             and servo_alive
             and self._fsm.servo_ready
             and battery_ready
+            and land_ready
             and rc_ready
         ):
             self._fsm.get_logger().info("INIT: 系统就绪 (含遥控器确认), 进入 ARM")
             return "ARM"
-
-        # 关键节点未就绪时禁止解锁飞行.
-        if elapsed > 30.0:
-            missing = []
-            if self._odom_ready_count < self._odom_stable_threshold:
-                missing.append("odom")
-            if not vision_alive:
-                missing.append("vision")
-            if not servo_alive:
-                missing.append("servo_heartbeat")
-            if not self._fsm.servo_ready:
-                missing.append("servo_hw")
-            if not battery_ready:
-                missing.append("battery")
-            if not rc_ready:
-                missing.append("rc(armed+preflight)")
-            self._fsm.get_logger().error(
-                f"INIT: 初始化超时 (30s), 未就绪: {', '.join(missing) or 'unknown'}"
-            )
-            return "ERROR"
 
         return None
 

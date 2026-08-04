@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import inspect
+import threading
+import time
 import unittest
 
 
@@ -69,7 +71,10 @@ class MissionSetpointContractTest(unittest.TestCase):
         bridge._target_ned = None
         bridge._target_yaw = 0.0
         bridge._target_speed = None
+        bridge._autonomous_output_enabled = True
+        bridge._output_lock = threading.RLock()
         bridge._sp_pub = Publisher()
+        bridge._lease_pub = Publisher()
         bridge.set_position_target(10.0, -2.0, -3.0, yaw=3.14, speed=0.8)
 
         bridge._heartbeat()
@@ -111,6 +116,12 @@ class MissionSetpointContractTest(unittest.TestCase):
         bridge._setpoint_lock = NoopLock()
         bridge._velocity_mode = True
         bridge._target_speed = None
+        bridge._autonomy_lease_enabled = True
+        bridge._autonomy_lease_last_seen = time.monotonic()
+        bridge._autonomy_lease_timeout_s = 0.30
+        bridge._autonomy_target_received = False
+        bridge._current_setpoint = None
+        bridge._smoothed_yaw = 0.0
 
         bridge._cmd_setpoint_cb(message)
 
@@ -140,6 +151,11 @@ class MissionSetpointContractTest(unittest.TestCase):
         bridge._target_speed = 0.8
         bridge._setpoint_lock = NoopLock()
         bridge.get_parameter = lambda _name: type("Parameter", (), {"value": 2.0})()
+        bridge._autonomy_lease_enabled = True
+        bridge._autonomy_lease_last_seen = time.monotonic()
+        bridge._autonomy_lease_timeout_s = 0.30
+        bridge._autonomy_target_received = True
+        bridge._velocity_mode = False
 
         bridge._control_loop()
 

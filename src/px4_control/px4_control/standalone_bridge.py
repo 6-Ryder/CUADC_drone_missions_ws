@@ -17,7 +17,9 @@ the drone through relay topics rather than direct PX4 DDS communication.
 """
 
 import math
+import threading
 import time
+from contextlib import nullcontext
 from typing import Optional, Tuple
 
 from rclpy.node import Node
@@ -28,6 +30,7 @@ from rclpy.qos import (
     QoSReliabilityPolicy,
 )
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Bool
 from drone_interfaces.msg import NedPositionSetpoint
 from px4_msgs.msg import (
     BatteryStatus,
@@ -58,6 +61,26 @@ def _px4_qos() -> QoSProfile:
         durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
         history=QoSHistoryPolicy.KEEP_LAST,
         depth=10,
+    )
+
+
+def _px4_latest_telemetry_qos() -> QoSProfile:
+    """Keep only the latest PX4 status/odometry sample for readiness."""
+    return QoSProfile(
+        reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        history=QoSHistoryPolicy.KEEP_LAST,
+        depth=1,
+    )
+
+
+def _autonomy_lease_qos() -> QoSProfile:
+    """Reliable, latched lease state shared with the DDS-owning bridge."""
+    return QoSProfile(
+        reliability=QoSReliabilityPolicy.RELIABLE,
+        durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        history=QoSHistoryPolicy.KEEP_LAST,
+        depth=1,
     )
 
 
@@ -109,12 +132,19 @@ class StandaloneBridge:
         self._armed: bool = False
         self._offboard: bool = False
         self._landed: bool = True
+        self._land_ready: bool = False
         self._preflight_ok: bool = False
         self._current_yaw: float = 0.0
         self._battery_remaining: float = 1.0
         self._battery_ready: bool = False
+        self._last_status_time: Optional[float] = None
+        self._last_odom_time: Optional[float] = None
+        self._last_status_source_timestamp: Optional[int] = None
+        self._last_odom_source_timestamp: Optional[int] = None
 
         # ---- Setpoint state ----
+        self._output_lock = threading.RLock()
+        self._autonomous_output_enabled: bool = True
         self._target_ned: Optional[Tuple[float, float, float]] = None
         self._target_yaw: float = 0.0
         self._target_speed: Optional[float] = None
@@ -134,14 +164,19 @@ class StandaloneBridge:
         self._cmd_pub = node.create_publisher(
             VehicleCommand, "/drone/cmd/vehicle_command_relay", 10,
         )
+        self._lease_pub = node.create_publisher(
+            Bool, "/drone/cmd/autonomy_lease", _autonomy_lease_qos(),
+        )
 
         # ---- Subscriptions (PX4 telemetry) — keep refs for shutdown ----
+        latest_telemetry_qos = _px4_latest_telemetry_qos()
         self._odom_sub = node.create_subscription(
-            VehicleOdometry, "/fmu/out/vehicle_odometry", self._odom_cb, qos,
+            VehicleOdometry, "/fmu/out/vehicle_odometry", self._odom_cb,
+            latest_telemetry_qos,
         )
         status_topic = str(node.get_parameter("vehicle_status_topic").value)
         self._status_sub = node.create_subscription(
-            VehicleStatus, status_topic, self._status_cb, qos,
+            VehicleStatus, status_topic, self._status_cb, latest_telemetry_qos,
         )
         self._land_sub = node.create_subscription(
             VehicleLandDetected, "/fmu/out/vehicle_land_detected", self._land_cb, qos,
@@ -165,23 +200,27 @@ class StandaloneBridge:
 
     def _heartbeat(self) -> None:
         """10Hz — publish current setpoint to maintain offboard mode."""
-        if self._shutdown:
-            return
-        if self._velocity_mode:
-            msg = Twist()
-            msg.linear.x = float(self._vel_target[0])
-            msg.linear.y = float(self._vel_target[1])
-            msg.linear.z = float(self._vel_target[2])
-            self._vel_pub.publish(msg)
-        elif self._target_ned is not None:
-            msg = NedPositionSetpoint()
-            msg.north = float(self._target_ned[0])
-            msg.east = float(self._target_ned[1])
-            msg.down = float(self._target_ned[2])
-            msg.yaw = float(self._target_yaw)
-            msg.use_speed = self._target_speed is not None
-            msg.speed = float(self._target_speed) if msg.use_speed else 0.0
-            self._sp_pub.publish(msg)
+        with self._output_guard():
+            if self._shutdown:
+                return
+            self._publish_autonomy_lease_locked()
+            if not self._outputs_enabled():
+                return
+            if self._velocity_mode:
+                msg = Twist()
+                msg.linear.x = float(self._vel_target[0])
+                msg.linear.y = float(self._vel_target[1])
+                msg.linear.z = float(self._vel_target[2])
+                self._vel_pub.publish(msg)
+            elif self._target_ned is not None:
+                msg = NedPositionSetpoint()
+                msg.north = float(self._target_ned[0])
+                msg.east = float(self._target_ned[1])
+                msg.down = float(self._target_ned[2])
+                msg.yaw = float(self._target_yaw)
+                msg.use_speed = self._target_speed is not None
+                msg.speed = float(self._target_speed) if msg.use_speed else 0.0
+                self._sp_pub.publish(msg)
 
     # ----------------------------------------------------------------
     # Lifecycle
@@ -200,6 +239,7 @@ class StandaloneBridge:
         if self._shutdown:
             return
         self._shutdown = True
+        self.stop_autonomous_output()
         if self._hb_timer is not None:
             self._hb_timer.cancel()
             self._hb_timer = None
@@ -229,6 +269,11 @@ class StandaloneBridge:
     # ----------------------------------------------------------------
 
     def _odom_cb(self, msg: VehicleOdometry) -> None:
+        if not self._accept_new_source_timestamp(
+            "_last_odom_source_timestamp",
+            getattr(msg, "timestamp_sample", getattr(msg, "timestamp", None)),
+        ):
+            return
         self._position = Position(
             north=float(msg.position[0]),
             east=float(msg.position[1]),
@@ -239,15 +284,38 @@ class StandaloneBridge:
             ve=float(msg.velocity[1]),
             vd=float(msg.velocity[2]),
         )
+        self._last_odom_time = time.monotonic()
 
     def _status_cb(self, msg: VehicleStatus) -> None:
+        if not self._accept_new_source_timestamp(
+            "_last_status_source_timestamp", getattr(msg, "timestamp", None),
+        ):
+            return
         self._armed = (msg.arming_state == 2)
         self._offboard = (msg.nav_state == NAV_STATE_OFFBOARD)
         self._preflight_ok = msg.pre_flight_checks_pass
         self._telemetry_ready = True  # 收到状态后允许发送指令
+        self._last_status_time = time.monotonic()
+
+    def _accept_new_source_timestamp(self, attribute: str, timestamp) -> bool:
+        """Reject a replayed or out-of-order PX4 sample when it has a clock."""
+        if timestamp is None:
+            return True
+        try:
+            source_timestamp = int(timestamp)
+        except (TypeError, ValueError):
+            return True
+        if source_timestamp <= 0:
+            return True
+        previous = getattr(self, attribute)
+        if previous is not None and source_timestamp <= previous:
+            return False
+        setattr(self, attribute, source_timestamp)
+        return True
 
     def _land_cb(self, msg: VehicleLandDetected) -> None:
         self._landed = msg.landed
+        self._land_ready = True
 
     def _attitude_cb(self, msg: VehicleAttitude) -> None:
         q = msg.q  # [w, x, y, z]
@@ -296,6 +364,11 @@ class StandaloneBridge:
         return self._landed
 
     @property
+    def land_ready(self) -> bool:
+        """Return whether a PX4 land-detection sample has arrived."""
+        return self._land_ready
+
+    @property
     def battery_remaining(self) -> float:
         return self._battery_remaining
 
@@ -308,26 +381,91 @@ class StandaloneBridge:
         """PX4 飞控自检通过 (含 RC/GPS/传感器等所有 arming check)."""
         return self._preflight_ok
 
+    @property
+    def autonomous_output_enabled(self) -> bool:
+        """Return whether autonomous position/velocity output is enabled."""
+        with self._output_guard():
+            return self._outputs_enabled()
+
+    def telemetry_fresh(self, now: float, max_age_s: float = 2.0) -> bool:
+        """Return whether status and odometry were both received recently."""
+        now = float(now)
+        max_age_s = float(max_age_s)
+        if not math.isfinite(now) or not math.isfinite(max_age_s):
+            return False
+        if max_age_s < 0.0:
+            return False
+        if self._last_status_time is None or self._last_odom_time is None:
+            return False
+        status_age = now - self._last_status_time
+        odom_age = now - self._last_odom_time
+        return (
+            0.0 <= status_age <= max_age_s
+            and 0.0 <= odom_age <= max_age_s
+        )
+
     # -- Setpoints --
 
     def set_position_target(self, north: float, east: float, down: float,
                             yaw: float = 0.0,
                             speed: Optional[float] = None) -> None:
         """Set position control target (NED)."""
-        self._velocity_mode = False
-        self._target_ned = (float(north), float(east), float(down))
-        self._target_yaw = float(yaw)
-        self._target_speed = (
-            float(speed)
-            if speed is not None and math.isfinite(speed) and speed > 0.0
-            else None
-        )
+        with self._output_guard():
+            if not self._outputs_enabled():
+                return
+            self._velocity_mode = False
+            self._target_ned = (float(north), float(east), float(down))
+            self._target_yaw = float(yaw)
+            self._target_speed = (
+                float(speed)
+                if speed is not None and math.isfinite(speed) and speed > 0.0
+                else None
+            )
 
     def set_velocity_target(self, vn: float, ve: float, vd: float,
                             yaw_rate: float = 0.0) -> None:
         """Set velocity control target (NED)."""
-        self._velocity_mode = True
-        self._vel_target = (float(vn), float(ve), float(vd))
+        with self._output_guard():
+            if not self._outputs_enabled():
+                return
+            self._velocity_mode = True
+            self._target_ned = None
+            self._target_speed = None
+            self._vel_target = (float(vn), float(ve), float(vd))
+
+    def hold_for_takeover(self) -> None:
+        """Atomically replace the active target with a zero-velocity hold."""
+        with self._output_guard():
+            if not self._outputs_enabled():
+                return
+            self._target_ned = None
+            self._target_speed = None
+            self._velocity_mode = True
+            self._vel_target = (0.0, 0.0, 0.0)
+
+    def stop_autonomous_output(self) -> None:
+        """Latch setpoint output off and clear every position/velocity target."""
+        with self._output_guard():
+            self._autonomous_output_enabled = False
+            self._target_ned = None
+            self._target_speed = None
+            self._velocity_mode = False
+            self._vel_target = (0.0, 0.0, 0.0)
+            self._publish_autonomy_lease_locked()
+
+    def _publish_autonomy_lease_locked(self) -> None:
+        """Publish the current relay lease while holding the output lock."""
+        message = Bool()
+        message.data = self._outputs_enabled() and not self._shutdown
+        self._lease_pub.publish(message)
+
+    def _outputs_enabled(self) -> bool:
+        """Support legacy test doubles while real instances use the latch."""
+        return getattr(self, "_autonomous_output_enabled", True)
+
+    def _output_guard(self):
+        """Return the output-state lock, or a no-op guard for old test doubles."""
+        return getattr(self, "_output_lock", nullcontext())
 
     # -- Commands --
 

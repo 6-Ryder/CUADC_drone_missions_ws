@@ -19,6 +19,7 @@ import math
 import time
 from typing import Optional
 
+from drone_utils.progress_monitor import ProgressMonitor
 
 class PrecisionLandState:
     """精准降落状态处理器."""
@@ -34,6 +35,7 @@ class PrecisionLandState:
         self._vision_lost_start: float = 0.0
         self._has_landing_target: bool = False
         self._landing_done: bool = False
+        self._disarm_requested: bool = False
         self._blind_start_time: float = 0.0
         self._touchdown_candidate_start: float = 0.0
         # 伺服状态
@@ -42,6 +44,9 @@ class PrecisionLandState:
         self._servo_last_log_time: float = 0.0
         self._last_target_center: Optional[tuple[float, float]] = None
         self._last_target_jump_log_time: float = 0.0
+        self._vision_reacquire_used: bool = False
+        self._search_progress: Optional[ProgressMonitor] = None
+        self._blind_progress: Optional[ProgressMonitor] = None
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -51,6 +56,7 @@ class PrecisionLandState:
         self._vision_lost_start = 0.0
         self._has_landing_target = False
         self._landing_done = False
+        self._disarm_requested = False
         self._blind_start_time = 0.0
         self._touchdown_candidate_start = 0.0
         self._servo_converged_count = 0
@@ -58,6 +64,9 @@ class PrecisionLandState:
         self._servo_last_log_time = 0.0
         self._last_target_center = None
         self._last_target_jump_log_time = 0.0
+        self._vision_reacquire_used = False
+        self._search_progress = self._new_search_progress()
+        self._blind_progress = None
 
         self._fsm.set_vision_mode("landing")
 
@@ -68,6 +77,9 @@ class PrecisionLandState:
 
     def execute(self) -> Optional[str]:
         # 检查是否已着陆
+        if self._disarm_requested:
+            return self._finish_touchdown()
+
         if self._fsm.bridge.is_landed():
             self._fsm.get_logger().info("PRECISION_LAND: 已着陆")
             return self._finish_touchdown()
@@ -95,9 +107,18 @@ class PrecisionLandState:
         if self._has_landing_target and self._vision_lost_start > 0:
             lost_duration = time.time() - self._vision_lost_start
             if lost_duration > vision_lost_to:
-                self._fsm.get_logger().error("PRECISION_LAND: H 目标持续丢失")
+                if not self._vision_reacquire_used:
+                    self._vision_reacquire_used = True
+                    self._fsm.get_logger().warn(
+                        "PRECISION_LAND: H 目标持续丢失, 清除本次锁定后重捕获一次"
+                    )
+                    self._reset_for_h_reacquire()
+                    return None
                 self._fsm.fc.stop_velocity()
-                return "ERROR"
+                self._fsm.request_takeover(
+                    "PRECISION_LAND: H target was lost after reacquire"
+                )
+                return None
 
         # 阶段逻辑
         if self._phase == self.PHASE_SEARCH:
@@ -106,20 +127,35 @@ class PrecisionLandState:
             return self._execute_servo(landing_target)
         return None
 
+    @property
+    def final_disarm_pending(self) -> bool:
+        """Whether a touchdown-confirmed PX4 disarm is awaiting status."""
+        return self._disarm_requested and not self._landing_done
+
     def _execute_search(self, has_target: bool) -> Optional[str]:
         """Phase 1: 搜索 H 标识."""
         if has_target:
             self._fsm.get_logger().info("PRECISION_LAND: 检测到 H 标识, 开始伺服下降")
             self._phase = self.PHASE_SERVO
             self._servo_converged_count = 0
+            if self._search_progress is not None:
+                self._search_progress.reset()
             return None
 
-        # 没有 H 目标时不得从搜索高度盲降。
-        elapsed = time.time() - self._start_time
-        if elapsed > 15.0:
-            self._fsm.get_logger().error("PRECISION_LAND: H 标识搜索超时")
-            self._fsm.loiter()
-            return "ERROR"
+        # 没有 H 目标时不得从搜索高度盲降。仅在确实没有任何视觉
+        # 进展时重新发一次相同悬停搜索目标，随后等待人工接管。
+        if self._search_progress is not None:
+            now = time.monotonic()
+            if self._search_progress.observe(1.0, now=now):
+                if self._search_progress.mark_retry(now=now):
+                    self._fsm.get_logger().warn(
+                        "PRECISION_LAND: H 搜索无进展, 原地重试一次"
+                    )
+                    self._fsm.loiter()
+                else:
+                    self._fsm.request_takeover(
+                        "PRECISION_LAND: H target was not acquired after retry"
+                    )
         return None
 
     def _execute_servo(self, target: Optional[dict]) -> Optional[str]:
@@ -266,26 +302,33 @@ class PrecisionLandState:
         )
         self._fsm.fc.set_velocity_body(0.0, 0.0, descent)
 
-        if self._sim_touchdown_confirmed():
+        if self._fallback_touchdown_confirmed():
             self._fsm.get_logger().info(
-                "PRECISION_LAND: SITL 近地停滞持续满足, 确认接地"
+                "PRECISION_LAND: 近地静止持续满足, 备用确认接地"
             )
             return self._finish_touchdown()
 
-        elapsed = time.time() - self._blind_start_time
-        timeout = float(self._fsm.get_param("landing_blind_timeout", 45.0))
-        if self._blind_start_time > 0.0 and elapsed > timeout:
-            self._fsm.fc.stop_velocity()
-            self._fsm.get_logger().error(
-                "PRECISION_LAND: 盲降超时且未确认接地, 已停止下降"
-            )
-            return "ERROR"
+        if self._blind_progress is not None:
+            pos = self._fsm.bridge.get_current_position()
+            altitude = abs(self._fsm.fc.ned_to_altitude(pos.down))
+            now = time.monotonic()
+            if self._blind_progress.observe(altitude, now=now):
+                if self._blind_progress.mark_retry(now=now):
+                    self._fsm.get_logger().warn(
+                        "PRECISION_LAND: 盲降无进展, 重发垂直下降一次"
+                    )
+                    self._fsm.fc.set_velocity_body(0.0, 0.0, descent)
+                else:
+                    self._fsm.fc.stop_velocity()
+                    self._fsm.request_takeover(
+                        "PRECISION_LAND: blind descent made no progress after retry"
+                    )
 
         return None
 
-    def _sim_touchdown_confirmed(self) -> bool:
-        """Confirm a SITL touchdown from near-zero height and sustained stillness."""
-        if not bool(self._fsm.get_param("sim_mode", True)):
+    def _fallback_touchdown_confirmed(self) -> bool:
+        """Use local stillness only after visual alignment and blind descent."""
+        if not self._visual_alignment_latched or self._phase != self.PHASE_BLIND:
             self._touchdown_candidate_start = 0.0
             return False
 
@@ -320,12 +363,18 @@ class PrecisionLandState:
         self._touchdown_candidate_start = 0.0
         return False
 
-    def _finish_touchdown(self) -> str:
-        """Stop Offboard motion, disarm on confirmed ground, and complete once."""
-        if not self._landing_done:
-            self._fsm.fc.stop_velocity()
+    def _finish_touchdown(self) -> Optional[str]:
+        """Hold until PX4 confirms the final ground disarm, then complete."""
+        self._fsm.fc.stop_velocity()
+        if not self._disarm_requested:
             self._fsm.bridge.force_disarm()
-            self._landing_done = True
+            self._disarm_requested = True
+            return None
+
+        if self._fsm.bridge.is_armed():
+            return None
+
+        self._landing_done = True
         return "COMPLETE"
 
     def _switch_to_blind(self):
@@ -333,9 +382,36 @@ class PrecisionLandState:
         self._phase = self.PHASE_BLIND
         self._blind_start_time = time.time()
         self._touchdown_candidate_start = 0.0
+        self._blind_progress = self._new_blind_progress()
         self._fsm.get_logger().info("PRECISION_LAND: Phase 3 - 盲降模式")
         self._fsm.set_vision_mode("none")
 
     def exit(self):
         self._fsm.set_vision_mode("none")
         self._fsm.logger.log_state("PRECISION_LAND", "COMPLETE", "降落完成")
+
+    def _reset_for_h_reacquire(self) -> None:
+        """Clear only the local H lock before retrying the same landing search."""
+        self._phase = self.PHASE_SEARCH
+        self._has_landing_target = False
+        self._vision_lost_start = 0.0
+        self._servo_converged_count = 0
+        self._visual_alignment_latched = False
+        self._last_target_center = None
+        self._start_time = time.time()
+        self._search_progress = self._new_search_progress()
+        self._fsm.loiter()
+
+    def _new_search_progress(self) -> ProgressMonitor:
+        return ProgressMonitor(
+            window_s=float(self._fsm.get_param("landing_search_progress_window", 15.0)),
+            min_improvement=0.5,
+        )
+
+    def _new_blind_progress(self) -> ProgressMonitor:
+        return ProgressMonitor(
+            window_s=float(self._fsm.get_param("navigation_progress_window", 30.0)),
+            min_improvement=float(
+                self._fsm.get_param("navigation_progress_min_improvement", 0.25)
+            ),
+        )
