@@ -15,6 +15,7 @@ import time
 import math
 from typing import Optional
 
+from drone_utils.progress_monitor import ProgressMonitor
 
 class CylinderApproachState:
     """圆筒对心逼近状态 — 使用位置匹配而非 ID (vision 每帧重新分配 ID)."""
@@ -27,6 +28,7 @@ class CylinderApproachState:
         self._align_stable_count: int = 0
         self._converged: bool = False
         self._memory_arrival_count: int = 0
+        self._progress: Optional[ProgressMonitor] = None
 
     def enter(self):
         self._fsm.logger.log_state("SELECT_TARGET", "APPROACH", "开始逼近圆筒")
@@ -35,6 +37,12 @@ class CylinderApproachState:
         self._target_lost_count = 0
         self._converged = False
         self._memory_arrival_count = 0
+        self._progress = ProgressMonitor(
+            window_s=float(self._fsm.get_param("navigation_progress_window", 30.0)),
+            min_improvement=float(
+                self._fsm.get_param("navigation_progress_min_improvement", 0.25)
+            ),
+        )
 
         # 从 SELECT_TARGET 已选中的目标获取世界坐标
         if hasattr(self._fsm, "get_known_drop_targets"):
@@ -162,7 +170,8 @@ class CylinderApproachState:
     def execute(self) -> Optional[str]:
         if self._target_world_xy is None:
             self._fsm.get_logger().error("APPROACH: 没有有效投放目标")
-            return "ERROR"
+            self._fsm.request_takeover("APPROACH: no valid drop target")
+            return None
 
         cylinders = self._fsm.get_cylinders()
         markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
@@ -179,7 +188,8 @@ class CylinderApproachState:
             error = self._goto_target_xy(speed=speed)
         except ValueError as exc:
             self._fsm.get_logger().error(f"APPROACH: {exc}")
-            return "ERROR"
+            self._fsm.request_takeover(f"APPROACH: {exc}")
+            return None
 
         tolerance_px = float(self._fsm.get_param("drop_align_pixel_tolerance", 35.0))
         pixel_error = float("inf")
@@ -218,9 +228,18 @@ class CylinderApproachState:
             self._fsm.get_logger().warn("APPROACH: 到达静态目标点, 进入低空视觉复查")
             return "DESCEND_TO_DROP"
 
-        if elapsed > 30.0:
-            self._fsm.get_logger().error("APPROACH: 逼近超时")
-            return "ERROR"
+        if self._progress is not None:
+            now = time.monotonic()
+            if self._progress.observe(error, now=now):
+                if self._progress.mark_retry(now=now):
+                    self._fsm.get_logger().warn(
+                        "APPROACH: 逼近无进展, 保持同一目标重发一次"
+                    )
+                    self._goto_target_xy(speed=speed)
+                else:
+                    self._fsm.request_takeover(
+                        "APPROACH: target made no progress after retry"
+                    )
 
         return None
 

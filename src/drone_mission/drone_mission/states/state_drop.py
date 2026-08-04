@@ -20,6 +20,7 @@ from drone_mission.precision_align_controller import (
     PrecisionAlignController,
     PrecisionAlignResult,
 )
+from drone_utils.progress_monitor import ProgressMonitor
 
 
 class DropState:
@@ -49,6 +50,9 @@ class DropState:
         self._descent_ready_latched: bool = False
         self._descend_stall_count: int = 0
         self._descent_initial_error: float = 0.0
+        self._descent_progress: Optional[ProgressMonitor] = None
+        self._ascend_progress: Optional[ProgressMonitor] = None
+        self._alignment_progress: Optional[ProgressMonitor] = None
 
     # ---- 子状态切换 ----
 
@@ -75,6 +79,9 @@ class DropState:
         self._descent_ready_latched = False
         self._descend_stall_count = 0
         self._descent_initial_error = 0.0
+        self._descent_progress = None
+        self._ascend_progress = None
+        self._alignment_progress = None
         self._visual_aligner.reset()
         self._precision_aligner.reset()
         # 停滞检测: pixel_error 在低值附近振荡但无法收敛 → 提前触发最终下降
@@ -97,6 +104,8 @@ class DropState:
         pos = self._fsm.bridge.get_current_position()
         self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
         self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_h), speed=0.5)
+        self._descent_progress = self._new_navigation_progress()
+        self._alignment_progress = self._new_alignment_progress()
 
     def _enter_drop(self):
         self._fsm.get_logger().info("DROP: 执行投放")
@@ -119,6 +128,7 @@ class DropState:
 
         pos = self._fsm.bridge.get_current_position()
         self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(takeoff_h), speed=1.0)
+        self._ascend_progress = self._new_navigation_progress()
 
     def execute(self) -> Optional[str]:
         if self._sub_state == "DESCEND_TO_DROP":
@@ -142,6 +152,17 @@ class DropState:
 
         height_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
         descent_ready = self._check_descent_ready(height_error)
+        if not descent_ready and self._descent_progress is not None:
+            now = time.monotonic()
+            if self._descent_progress.observe(height_error, now=now):
+                if self._descent_progress.mark_retry(now=now):
+                    self._fsm.get_logger().warn(
+                        "DESCEND: 高度无进展, 原地重发同一降高目标一次"
+                    )
+                    self._command_descend_target(drop_h)
+                else:
+                    self._takeover("DESCEND: altitude made no progress after retry")
+                    return None
         if self._precision_enabled() and not descent_ready:
             self._warn_descend_throttled(
                 "DESCEND: 等待下降到位 "
@@ -204,8 +225,7 @@ class DropState:
                 self._stall_ref_error = float("inf")
             # ── 停滞检测结束 ──
 
-            align_timeout = self._align_timeout()
-            if elapsed > align_timeout:
+            if self._alignment_stalled(status):
                 if self._retry_precision_align_in_place(drop_h, "低空精校超时"):
                     return None
 
@@ -215,54 +235,32 @@ class DropState:
                     f"smooth=({status.smooth_dx_norm:+.4f},{status.smooth_dy_norm:+.4f}) "
                     f"retries={self._descend_retry_count}"
                 )
-                return "ERROR"
+                self._takeover("DESCEND: precision alignment retry exhausted")
+                return None
 
             if self._nudge_to_visible_drop_target(drop_h):
                 return None
             if self._precision_align_failed:
                 self._precision_align_failed = False
                 self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
-                return "ERROR"
+                self._takeover("DESCEND: precision alignment target lost after retry")
+                return None
             self._warn_descend_throttled("DESCEND: 低空精校未取得可用目标, 继续等待复查")
 
-        if descent_ready:
+        if descent_ready and not self._precision_enabled():
             if self._drop_target_is_centered():
                 if self._precision_enabled() and self._start_final_descent_if_needed():
                     return None
                 self._fsm.get_logger().info("DESCEND: 到达投放高度且目标居中")
                 return "EXECUTE_DROP"
 
-            align_timeout = self._align_timeout()
-            if elapsed > align_timeout:
-                # 梯度下降有进展 → 原地重置重试, 不回升
-                if (self._descend_retry_count < 1
-                        and math.isfinite(self._descend_best_pixel_error)
-                        and self._descend_best_pixel_error < 250):
-                    best_so_far = self._descend_best_pixel_error
-                    self._descend_retry_count += 1
-                    self._visual_aligner.reset()
-                    self._precision_aligner.reset(self._selected_memory_xy())
-                    self._start_time = time.time()
-                    self._descend_best_pixel_error = float("inf")
-                    self._fsm.get_logger().info(
-                        f"DESCEND: 超时但 best_err={best_so_far:.0f}px, "
-                        f"原地重置梯度下降 (retry={self._descend_retry_count})"
-                    )
-                    return None
-
-                self._fsm.get_logger().error(
-                    "DESCEND: 低空视觉校准超时 "
-                    f"source={status.source} pixel_error={status.pixel_error:.1f}px "
-                    f"retries={self._descend_retry_count}"
-                )
-                return "ERROR"
-
             if self._nudge_to_visible_drop_target(drop_h):
                 return None
             if self._precision_align_failed:
                 self._precision_align_failed = False
                 self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
-                return "ERROR"
+                self._takeover("DESCEND: precision alignment target lost after retry")
+                return None
             self._warn_descend_throttled("DESCEND: 到达投放高度但目标未居中/不可见, 继续等待复查")
 
         legacy_recheck_timeout = 15.0
@@ -270,8 +268,18 @@ class DropState:
             if self._drop_target_is_centered():
                 self._fsm.get_logger().warn("DESCEND: 复查超时但投放许可通过, 执行投放")
                 return "EXECUTE_DROP"
+            if self._descend_retry_count < 1:
+                self._descend_retry_count += 1
+                self._visual_aligner.reset()
+                self._start_time = time.time()
+                self._command_descend_target(drop_h)
+                self._fsm.get_logger().warn(
+                    "DESCEND: 复查无结果, 原地重试同一低空校准一次"
+                )
+                return None
             self._fsm.get_logger().error("DESCEND: 复查超时且投放许可失败")
-            return "ERROR"
+            self._takeover("DESCEND: drop alignment was not confirmed after retry")
+            return None
 
         return None
 
@@ -387,6 +395,8 @@ class DropState:
         self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(final_h))
         speed = float(self._fsm.get_param("precision_align_final_descent_speed", 0.25))
         self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(final_h), speed=speed)
+        self._descent_progress = self._new_navigation_progress()
+        self._alignment_progress = self._new_alignment_progress()
         self._fsm.get_logger().info(
             "DESCEND: 初次精校完成, 定点直降至最终投放高度后复查 "
             f"{align_h:.2f}m → {final_h:.2f}m"
@@ -399,7 +409,7 @@ class DropState:
         return self._visual_aligner.last_status
 
     def _retry_precision_align_in_place(self, drop_h: float, reason: str) -> bool:
-        max_retries = int(self._fsm.get_param("precision_align_max_retries", 2))
+        max_retries = int(self._fsm.get_param("precision_align_max_retries", 1))
         if self._descend_retry_count >= max_retries:
             return False
 
@@ -412,6 +422,8 @@ class DropState:
         pos = self._fsm.bridge.get_current_position()
         self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
         self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_h), speed=0.0)
+        self._descent_progress = self._new_navigation_progress()
+        self._alignment_progress = self._new_alignment_progress()
         self._fsm.get_logger().warn(
             f"DESCEND: {reason}, 低空原地重置精校 "
             f"(retry={self._descend_retry_count}/{max_retries})"
@@ -492,13 +504,15 @@ class DropState:
             if self._drop_success:
                 self._fsm.get_logger().info("DROP: 投放成功")
             else:
-                self._fsm.get_logger().error("DROP: 舵机未确认投放, 中止任务")
-                return "ERROR"
+                self._fsm.get_logger().error("DROP: 舵机未确认投放, 等待人工接管")
+                self._takeover("DROP: servo did not confirm the release")
+                return None
             return "ASCEND"
 
         if time.time() - self._start_time > timeout:
-            self._fsm.get_logger().warn("DROP: 投放结果不明确, 中止任务")
-            return "ERROR"
+            self._fsm.get_logger().warn("DROP: 投放结果不明确, 等待人工接管")
+            self._takeover("DROP: release result remained unconfirmed")
+            return None
         return None
 
     def _execute_ascend(self) -> Optional[str]:
@@ -515,11 +529,64 @@ class DropState:
             else:
                 return "TRANSIT_TO_RECON_ZONE"
 
-        if time.time() - self._start_time > 15.0:
-            self._fsm.get_logger().error("ASCEND: 未回到巡航高度")
-            return "ERROR"
+        if self._ascend_progress is not None:
+            altitude_error = abs(self._fsm.fc.ned_to_altitude(pos.down) - takeoff_h)
+            now = time.monotonic()
+            if self._ascend_progress.observe(altitude_error, now=now):
+                if self._ascend_progress.mark_retry(now=now):
+                    self._fsm.get_logger().warn(
+                        "ASCEND: 高度无进展, 重发同一回升目标一次"
+                    )
+                    self._command_ascend_target()
+                else:
+                    self._takeover("ASCEND: altitude made no progress after retry")
 
         return None
+
+    def _new_navigation_progress(self) -> ProgressMonitor:
+        return ProgressMonitor(
+            window_s=float(self._fsm.get_param("navigation_progress_window", 30.0)),
+            min_improvement=float(
+                self._fsm.get_param("navigation_progress_min_improvement", 0.25)
+            ),
+        )
+
+    def _new_alignment_progress(self) -> ProgressMonitor:
+        return ProgressMonitor(
+            window_s=self._align_timeout(),
+            min_improvement=float(
+                self._fsm.get_param("visual_progress_min_improvement", 2.0)
+            ),
+        )
+
+    def _alignment_stalled(self, status) -> bool:
+        if self._alignment_progress is None or not math.isfinite(status.pixel_error):
+            return False
+        return self._alignment_progress.observe(
+            status.pixel_error, now=time.monotonic()
+        )
+
+    def _command_descend_target(self, drop_height: float) -> None:
+        pos = self._fsm.bridge.get_current_position()
+        self._fsm.fc.goto_ned(
+            pos.north,
+            pos.east,
+            self._fsm.fc.altitude_to_ned(drop_height),
+            speed=0.5,
+        )
+
+    def _command_ascend_target(self) -> None:
+        takeoff_h = self._fsm.get_param("takeoff_height", 5.0)
+        pos = self._fsm.bridge.get_current_position()
+        self._fsm.fc.goto_ned(
+            pos.north,
+            pos.east,
+            self._fsm.fc.altitude_to_ned(takeoff_h),
+            speed=1.0,
+        )
+
+    def _takeover(self, reason: str) -> None:
+        self._fsm.request_takeover(reason)
 
     def exit(self):
         self._fsm.logger.log_state(self._sub_state, "NEXT",

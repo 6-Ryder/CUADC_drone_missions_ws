@@ -14,6 +14,7 @@ TRANSIT 状态 — 区域间飞行.
 import time
 from typing import Optional, Tuple
 
+from drone_utils.progress_monitor import ProgressMonitor
 
 
 class TransitState:
@@ -29,6 +30,8 @@ class TransitState:
         self._target_world: Optional[Tuple[float, float, float]] = None
         self._target_state: str = ""
         self._label: str = "TRANSIT"
+        self._target_ned: Optional[Tuple[float, float, float]] = None
+        self._progress: Optional[ProgressMonitor] = None
 
     def configure(self, target_world_xyz: Tuple[float, float, float],
                   target_state: str, label: str = "TRANSIT"):
@@ -64,12 +67,17 @@ class TransitState:
         )
         self._fsm.logger.log_state(from_state, self._label, f"飞向 ({tx:.1f},{ty:.1f})")
 
-        # 设置航点
-        speed = self._fsm.get_param("transit_speed", 2.0)
         from px4_control.telemetry import world_to_ned
         tn, te, _ = world_to_ned(tx, ty, 0)
         td = self._fsm.fc.altitude_to_ned(tz)
-        self._fsm.fc.goto_ned(tn, te, td, yaw=0.0, speed=speed)
+        self._target_ned = (tn, te, td)
+        self._progress = ProgressMonitor(
+            window_s=float(self._fsm.get_param("navigation_progress_window", 30.0)),
+            min_improvement=float(
+                self._fsm.get_param("navigation_progress_min_improvement", 0.25)
+            ),
+        )
+        self._command_target()
 
     def execute(self) -> Optional[str]:
         if self._target_world is None:
@@ -78,10 +86,11 @@ class TransitState:
         tx, ty, tz = self._target_world
         pos = self._fsm.fc.get_position()
 
-        # 导入坐标变换
-        from px4_control.telemetry import world_to_ned
-        tn, te, _ = world_to_ned(tx, ty, 0)
-        td = self._fsm.fc.altitude_to_ned(tz)
+        if self._target_ned is None or self._progress is None:
+            self._fsm.request_takeover(f"{self._label}: target was not initialized")
+            return None
+
+        tn, te, td = self._target_ned
 
         dist = pos.distance_to(type(pos)(tn, te, td))
         tolerance = self._fsm.get_param("waypoint_tolerance", 0.5)
@@ -99,13 +108,32 @@ class TransitState:
             )
             return self._target_state
 
-        # 超时
-        timeout = self._fsm.get_param("waypoint_timeout", 120.0)
-        if elapsed > timeout:
-            self._fsm.get_logger().error(f"{self._label}: 未到达目标航点")
-            return "ERROR"
+        now = time.monotonic()
+        if self._progress.observe(dist, now=now):
+            if self._progress.mark_retry(now=now):
+                self._fsm.get_logger().warn(
+                    f"{self._label}: 目标无进展, 重发同一航点一次"
+                )
+                self._command_target()
+            else:
+                self._fsm.request_takeover(
+                    f"{self._label}: target made no progress after retry"
+                )
 
         return None
+
+    def _command_target(self) -> None:
+        """Publish the configured target without replacing the recovery window."""
+        if self._target_ned is None:
+            return
+        tn, te, td = self._target_ned
+        self._fsm.fc.goto_ned(
+            tn,
+            te,
+            td,
+            yaw=0.0,
+            speed=self._fsm.get_param("transit_speed", 2.0),
+        )
 
     def exit(self):
         self._fsm.logger.log_state(self._label, self._target_state, "过渡完成")

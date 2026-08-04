@@ -37,7 +37,9 @@ def generate_launch_description():
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
-    mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
+    mission_param_file = os.path.join(
+        pkg_mission, "config", "mission_params_real.yaml"
+    )
 
     camera_device_arg = DeclareLaunchArgument(
         "camera_device",
@@ -183,12 +185,6 @@ def generate_launch_description():
             mission_param_file,
             {
                 "sim_mode": False,
-                "precision_align_image_width": 640.0,
-                "precision_align_image_height": 480.0,
-                "camera_fx": 400.0,
-                "camera_fy": 400.0,
-                "camera_cx": 320.0,
-                "camera_cy": 240.0,
                 "home_x": LaunchConfiguration("home_x"),
                 "home_y": LaunchConfiguration("home_y"),
                 "home_z": LaunchConfiguration("home_z"),

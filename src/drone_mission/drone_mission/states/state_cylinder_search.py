@@ -14,6 +14,7 @@ CYLINDER_SEARCH 状态 — 悬停搜索圆筒 + 视觉检测 + 半径排序.
 import time
 from typing import Optional, List
 
+from drone_utils.progress_monitor import ProgressMonitor
 
 class CylinderSearchState:
     """投放区圆筒搜索状态."""
@@ -27,6 +28,7 @@ class CylinderSearchState:
         self._detection_stable_count: int = 0
         self._last_cylinder_count: int = 0
         self._min_cylinders_required: int = 2
+        self._target_progress: Optional[ProgressMonitor] = None
 
     def enter(self):
         self._fsm.logger.log_state("TRANSIT_TO_DROP_ZONE", "CYL_SEARCH", "开始搜索圆筒")
@@ -39,6 +41,10 @@ class CylinderSearchState:
             self._fsm.clear_known_cylinders()
         self._min_cylinders_required = int(
             self._fsm.get_param("min_drop_targets_required", 2)
+        )
+        self._target_progress = ProgressMonitor(
+            window_s=float(self._fsm.get_param("search_progress_window", 30.0)),
+            min_improvement=1.0,
         )
 
         # 飞到投放区中心
@@ -104,6 +110,22 @@ class CylinderSearchState:
             )
             return "SELECT_TARGET"
 
+        if self._target_progress is not None:
+            missing_targets = float(max(0, self._min_cylinders_required - known_count))
+            now = time.monotonic()
+            if self._target_progress.observe(missing_targets, now=now):
+                if self._target_progress.mark_retry(now=now):
+                    self._fsm.get_logger().warn(
+                        "CYL_SEARCH: 候选不足且无进展, 重走同一搜索路径一次"
+                    )
+                    self._start_time = time.time()
+                    self._start_scan()
+                else:
+                    self._fsm.request_takeover(
+                        "CYL_SEARCH: insufficient targets after one search retry"
+                    )
+                    return None
+
         # 扫描策略: 如果 5s 后还没检测到足够圆筒, 进行慢速扫描
         if elapsed > 10.0 and self._scan_phase == 0:
             self._scan_phase = 1
@@ -114,18 +136,11 @@ class CylinderSearchState:
         if self._scan_phase == 1:
             return self._execute_scan()
 
-        # 超时
-        timeout = self._fsm.get_param("state_max_duration", 180.0)
-        if elapsed > timeout:
-            self._fsm.get_logger().error("CYL_SEARCH: 搜索超时")
-            if known_count > 0 or cyl_count > 0 or (allow_marker_fallback and marker_count > 0):
-                return "SELECT_TARGET"
-            return "ERROR"
-
         return None
 
     def _start_scan(self):
         """启动投放区慢速扫描."""
+        self._scan_phase = 1
         area1_n_min = self._fsm.get_param("area1_north_min", 30.0)
         area1_n_max = self._fsm.get_param("area1_north_max", 35.0)
         area1_e_min = self._fsm.get_param("area1_east_min", -4.0)
@@ -153,9 +168,11 @@ class CylinderSearchState:
                 targets = self._fsm.get_known_drop_targets()
             else:
                 targets = self._fsm.get_cylinders()
-            if len(targets) > 0:
+            if len(targets) >= self._min_cylinders_required:
                 return "SELECT_TARGET"
-            self._fsm.get_logger().warn("CYL_SEARCH: 扫描完成但未累计到投放候选, 继续悬停等待")
+            self._fsm.get_logger().warn(
+                "CYL_SEARCH: 扫描完成但候选不足, 等待同一路径重试"
+            )
             return None
 
         wp = self._scan_waypoints[self._scan_wp_idx]

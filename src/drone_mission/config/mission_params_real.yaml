@@ -1,0 +1,165 @@
+# 无人机自主任务飞行 — 真机全流程参数
+# 以已实飞 test_forward_recon 启动值作为完整任务的初始控制基线
+# 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
+# 原点: 起飞点 H (world: 4, 10, 0)
+# 飞行方向: 向北 (NED north 正方向)
+/mission_state_machine:
+  ros__parameters:
+    # 真机当前 PX4 固件发布 v1；SITL launch 会覆盖为 v4。
+    vehicle_status_topic: "/fmu/out/vehicle_status_v1"
+
+    # --- 坐标系原点 (北向场地: World X=East, Y=North) ---
+    home_x: 4.0
+    home_y: 10.0
+    home_z: 0.0
+
+    # --- 飞行方向 (PX4 NED 主飞行轴) ---
+    flight_axis: "north"          # "east" | "north" — 主飞行轴朝向
+    drop_distance: 32.5           # Home → 投放区距离 (m, NED 沿 flight_axis)
+    recon_distance: 57.5          # Home → 侦察区距离 (m, NED 沿 flight_axis)
+
+    # --- 任务全局参数 ---
+    takeoff_height: 5.0           # 巡航飞行高度 (m, NED z 负值)
+    waypoint_tolerance: 0.5       # 航点到达容差 (m)
+    takeoff_tolerance: 0.3        # 起飞到达容差 (m)
+    control_frequency: 20.0       # 控制循环频率 (Hz)
+    max_error_count: 5            # 最大错误次数, 超过则中止任务
+    waypoint_timeout: 120.0       # 单航点超时 (s)
+    land_altitude: 0.15           # 着陆确认高度 (m)
+
+    # --- 速度参数 ---
+    sweep_speed: 0.8              # 已实飞侦察扫描速度 (m/s)
+    transit_speed: 2.0            # 已实飞中转速度 (m/s)
+    return_speed: 3.8             # 已实飞返航速度 (m/s)
+    return_altitude: 5.0           # 全流程从末航点直接返航时的目标高度 (m)
+    navigation_progress_window: 30.0  # 仅无进展时的同目标重发观察窗口 (s)
+    navigation_progress_min_improvement: 0.25 # 窗口内最低距离改进 (m)
+    search_progress_window: 30.0      # 投放目标不足时，重走原搜索路径前的观察窗口 (s)
+    visual_progress_min_improvement: 2.0 # 像素精校窗口内最低误差改进 (px)
+
+    # --- 投放控制 ---
+    max_drops: 2                  # 最大投放次数 (需与 servo pwm_positions 长度-1 一致)
+
+    # --- Area 1: 投放区 ---
+    # NED: north=[30,35], east=[-4,4] (Home 北 32.5m, 横跨 X:0~8m)
+    area1_north_min: 30.0
+    area1_north_max: 35.0
+    area1_east_min: -4.0
+    area1_east_max: 4.0
+    area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
+    area1_search_altitude: 5.0    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
+
+    # --- Area 2: 侦察区 ---
+    # NED: north=[55,60], east=[-4,4] (Home 北 57.5m, 横跨 X:0~8m)
+    area2_north_min: 55.0
+    area2_north_max: 60.0
+    area2_east_min: -4.0
+    area2_east_max: 4.0
+    area2_altitude: 3.0           # 已实飞侦察扫描高度 (m, NED z 负值)
+
+    # --- 弓字形覆盖参数 ---
+    grid_spacing: 1.67            # 网格间距 (m), 对齐 PathPlanner 默认值
+    sweep_margin_north: 1.0       # 长边界 (north) 内缩 (m)
+    sweep_margin_east: 0.5        # 段边界 (east) 内缩 (m)
+    recon_require_full_path: true # 侦察区必须走完整弓字形路径, 覆盖率仅作监控
+
+    # --- 投放策略参数 ---
+    min_radius_first: true        # 第一轮选最小半径筒
+    min_drop_targets_required: 2  # 搜索阶段至少累计到的投放目标数
+    cylinder_memory_merge_distance: 0.75  # 同一圆筒世界坐标合并距离 (m)
+    cylinder_memory_min_observations: 1   # 目标进入候选库所需观测次数
+    drop_marker_min_confidence: 0.35      # 圆筒检测不稳时蓝色投放标识兜底阈值
+    drop_marker_fallback_delay: 15.0      # 搜索圆筒失败后才允许使用蓝色标识候选
+    marker_memory_merge_distance: 0.75    # 同一蓝色标识世界坐标合并距离 (m)
+    marker_memory_min_observations: 3     # 蓝色标识进入候选库所需观测次数
+    drop_descend_height: 2.0      # 投放降高高度 (m)
+    drop_confirmation_timeout: 5.0  # 必须大于舵机层 3s 总预算 (s)
+    drop_align_pixel_tolerance: 35.0 # 投放前圆筒中心允许像素误差
+    # ── 低空视觉校准: 梯度下降探测 ──
+    drop_visual_align_probe_step: 0.40 # 单次探测步长 (m), 信号大于噪声(~30px)
+    drop_visual_align_probe_speed: 0.30 # 探测移动速度 (m/s)
+    drop_visual_align_probe_settle: 1.0 # 探测后稳定等待时间 (s)
+    drop_visual_align_world_gate: 1.5 # 当前视觉目标与记忆目标最大匹配距离 (m)
+    drop_visual_align_stable_frames: 6 # 连续居中帧数后才允许投放
+    drop_visual_align_timeout: 18.0 # 低空视觉校准最长等待时间 (s)
+    drop_visual_align_brake_threshold: 80.0 # pixel_error 进入此阈值后悬停 (px)
+    drop_visual_align_brake_timeout: 4.0 # 刹车悬停最长持续时间 (s)
+    drop_visual_align_hover_time: 2.5 # 探测提交后悬停观察时间 (s), 给 is_centered 稳定机会
+    drop_visual_align_lock_tolerance: 2.0 # 目标锁定容差 (m), 锁定后只接受世界坐标在此范围内的目标
+    # ── 低空视觉精校: CUADC 风格像素闭环 (默认替代梯度下降探测) ──
+    precision_align_enable: true          # true=使用新精校控制器, false=回退 DropVisualAligner
+    precision_align_target_source: "cylinder" # cylinder=最终投放追选中圆筒, marker 仅兜底
+    precision_align_image_width: 640.0
+    precision_align_image_height: 480.0
+    precision_align_alpha: 0.55           # EMA 平滑系数, 兼顾检测抖动和闭环响应
+    precision_align_gain: 1.25            # 归一化像素误差 → 机体系速度比例
+    precision_align_max_speed: 0.25       # 粗调水平合速度上限 (m/s)
+    precision_align_fine_pixel_error: 90.0 # 进入精调速度限制的像素误差
+    precision_align_fine_max_speed: 0.065 # 精调水平合速度上限 (m/s)
+    precision_align_min_correction_speed: 0.012 # 保证小误差修正高于飞控响应死区
+    precision_align_step_s: 0.18          # 粗调速度脉冲持续时间 (s)
+    precision_align_fine_step_s: 0.12     # 精调短脉冲, 避免越过中心
+    precision_align_hover_s: 0.04         # 每步后短暂停稳并获取新观测 (s)
+    precision_align_timeout: 25.0         # 单阶段低空精校最长等待时间 (s)
+    precision_align_max_retries: 1        # 精校超时/丢失后仅允许一次低空原地重置
+    precision_align_image_x_to_right_sign: 1.0   # +1: 图像右侧目标 → 机体右移
+    precision_align_image_y_to_forward_sign: -1.0 # CUADC 标定: 图像下侧目标 → 机体后退
+    precision_align_threshold_norm_x: 0.008 # 归一化水平误差阈值 (约 10.2px)
+    precision_align_threshold_norm_y: 0.008 # 归一化垂直误差阈值 (约 7.7px)
+    precision_align_raw_pixel_tolerance: 9.0 # 当前帧必须保持厘米级像素误差
+    precision_align_smooth_pixel_tolerance: 7.0 # 平滑误差必须保持在中心附近
+    precision_align_stable_frames: 5      # 连续稳定帧后进入最终刹车复查
+    precision_align_final_brake_s: 0.5    # 投放前零速度悬停复查时间 (s)
+    precision_align_release_max_horizontal_speed: 0.04 # 释放时最大水平速度 (m/s)
+    precision_align_min_confidence: 0.25
+    precision_align_target_world_gate: 1.5  # 初次锁定与粗定位记忆目标匹配的世界坐标门限 (m)
+    precision_align_max_jump_diag_ratio: 0.55 # CUADC 像素跳变拒绝阈值 (占图像对角线)
+    precision_align_reject_center_ratio: 0.28 # 跳变候选仍远离中心时拒绝
+    precision_align_reacquire_after_lost: 12   # 丢失 N 帧后清除像素锁定, 近中心重捕获
+    precision_align_max_lost_frames: 48       # 丢失超限后放弃当前目标
+    precision_align_drop_height_tolerance: 0.50 # 进入精校/投放的高度误差 (m), SITL 稳态~0.42m, 需留余量
+    precision_align_final_descent_enable: true  # 先在2m捕获, 再降至最终高度重精校
+    precision_align_final_drop_height: 1.25     # 最终投放高度, 降低落体漂移和像素厘米换算
+    precision_align_final_descent_speed: 0.25   # 最终降高速度 (m/s)
+    precision_align_log_interval: 0.75
+    cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
+    cylinder_approach_slow_speed: 0.15   # 接近对心后慢速微调
+    cylinder_approach_memory_speed: 0.25 # 丢帧时向记忆圆心粗靠近速度
+    camera_fx: 400.0
+    camera_fy: 400.0
+    camera_cx: 320.0
+    camera_cy: 240.0
+
+    # --- 精准降落参数 ---
+    landing_search_altitude: 5.0  # 搜索H标识高度 (m)
+    landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
+    landing_blind_altitude: 1.5   # 稳定对心后切入盲降高度 (m)
+    landing_blind_align_tolerance_px: 30.0  # 切入盲降前最大像素误差
+    landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
+    landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
+    landing_precision_target: 0.1 # 目标水平精度 (m)
+    # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
+    landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)
+    landing_servo_max_horizontal_vel: 0.6  # 最大水平修正速度 (m/s)
+    landing_servo_deadzone_px: 12.0     # 像素死区 (px), 进入后停止水平修正
+    landing_servo_x_to_right_sign: 1.0  # u轴→右移符号
+    landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)
+    landing_target_min_confidence: 0.60  # 过滤近地低置信度 H 畸变
+    landing_target_max_jump_px: 80.0  # 连续帧 H 中心最大允许跳变，超过则悬停
+    landing_descent_fast: 0.4           # >3m 下降速度 (m/s)
+    landing_descent_medium: 0.25        # 1.5-3m 下降速度 (m/s)
+    landing_descent_slow: 0.12          # <1.5m 下降速度 (m/s)
+    # PX4 接地检测要求下降意图 >= 1.1 * LNDMC_Z_VEL_MAX (当前为 0.275m/s)
+    landing_blind_descent_speed: 0.30   # 对心后近地纯垂直 Offboard 下降速度
+    landing_search_progress_window: 15.0 # H 搜索无进展后才允许原地重试一次 (s)
+    # PX4 land_detected 为主；仅已视觉对心且进入盲降后才允许严格静止备用确认
+    landing_touchdown_max_altitude: 0.10
+    landing_touchdown_max_horizontal_speed: 0.10
+    landing_touchdown_max_vertical_speed: 0.05
+    landing_touchdown_hold_time: 2.0
+
+    # --- 异常处理参数 ---
+    battery_warning: 0.25         # 低电量警告阈值 (比例)
+    battery_critical: 0.15        # 严重低电量阈值 (比例)
+    vision_loss_timeout: 3.0      # 视觉连续丢失超时 (s)
+    state_max_duration: 0.0       # 不用固定总时长中止真机任务，只监测无进展

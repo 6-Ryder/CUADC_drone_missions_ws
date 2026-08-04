@@ -15,3 +15,4 @@
     pwm_positions: [1150.0, 1700.0, 2150.0]  # 投放位置序列 (μs)
     drop_delay_ms: 1000.0         # 投放保持延时 (ms)
     drop_timeout_s: 3.0           # ACK + 舵机保持的总时间预算 (s)
+    command_retries: 1            # 仅 ACK 超时时重发同一绝对 PWM 一次

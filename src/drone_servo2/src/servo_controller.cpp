@@ -96,17 +96,22 @@ public:
     rclcpp::Node * node,
     double init_pwm_us,
     double pwm_min, double pwm_max,
-    double command_timeout_s)
+    double command_timeout_s,
+    int command_retries)
   : node_(node),
     init_pwm_(init_pwm_us),
     current_pwm_(init_pwm_us),
     pwm_min_(pwm_min), pwm_max_(pwm_max),
     pwm_center_((pwm_min + pwm_max) / 2.0),
     pwm_half_range_((pwm_max - pwm_min) / 2.0),
-    command_timeout_s_(command_timeout_s)
+    command_timeout_s_(command_timeout_s),
+    command_retries_(command_retries)
   {
     if (pwm_min_ >= pwm_max_) {
       throw std::invalid_argument("pwm_min must be less than pwm_max");
+    }
+    if (command_retries_ < 0) {
+      throw std::invalid_argument("command_retries must be non-negative");
     }
     cmd_pub_ = node_->create_publisher<VehicleCommand>(
       "/drone/cmd/vehicle_command_relay", 10);
@@ -150,34 +155,53 @@ public:
 private:
   bool send_pwm_command(double pwm_us)
   {
-    {
-      std::lock_guard<std::mutex> lock(ack_mutex_);
-      awaiting_ack_ = true;
-      ack_received_ = false;
-      ack_accepted_ = false;
-    }
+    for (int attempt = 0; attempt <= command_retries_; ++attempt) {
+      {
+        std::lock_guard<std::mutex> lock(ack_mutex_);
+        awaiting_ack_ = true;
+        ack_received_ = false;
+        ack_accepted_ = false;
+      }
 
-    send_actuator_cmd(pwm_to_normalized(pwm_us));
+      // Retrying must use this exact absolute position; DropManager has not
+      // advanced its sequence until this method returns true.
+      send_actuator_cmd(pwm_to_normalized(pwm_us));
 
-    std::unique_lock<std::mutex> lock(ack_mutex_);
-    bool received = ack_cv_.wait_for(
-      lock, std::chrono::duration<double>(command_timeout_s_),
-      [this] {return ack_received_;});
-    awaiting_ack_ = false;
+      std::unique_lock<std::mutex> lock(ack_mutex_);
+      bool received = ack_cv_.wait_for(
+        lock, std::chrono::duration<double>(command_timeout_s_),
+        [this] {return ack_received_;});
+      awaiting_ack_ = false;
 
-    if (!received) {
+      if (received) {
+        if (!ack_accepted_) {
+          // A real rejection is definitive. Never repeat a rejected release.
+          RCLCPP_ERROR(node_->get_logger(), "PX4 拒绝舵机命令");
+          return false;
+        }
+
+        // The only mutation of the trusted actuator position follows an
+        // accepted ACK, including after a timeout retry.
+        current_pwm_.store(pwm_us);
+        return true;
+      }
+
+      if (attempt < command_retries_) {
+        RCLCPP_WARN(
+          node_->get_logger(),
+          "PX4 舵机命令 ACK 超时 (%.1fs), 重发相同 PWM %.0fμs (%d/%d)",
+          command_timeout_s_, pwm_us, attempt + 1, command_retries_);
+        continue;
+      }
+
       RCLCPP_ERROR(
         node_->get_logger(),
-        "PX4 舵机命令 ACK 超时 (%.1fs)", command_timeout_s_);
-      return false;
-    }
-    if (!ack_accepted_) {
-      RCLCPP_ERROR(node_->get_logger(), "PX4 拒绝舵机命令");
+        "PX4 舵机命令 ACK 超时 (%.1fs), 同一 PWM 重试耗尽",
+        command_timeout_s_);
       return false;
     }
 
-    current_pwm_.store(pwm_us);
-    return true;
+    return false;
   }
 
   void handle_ack(const VehicleCommandAck & ack)
@@ -238,6 +262,7 @@ private:
   double pwm_min_, pwm_max_;
   double pwm_center_, pwm_half_range_;
   double command_timeout_s_;
+  int command_retries_;
   std::atomic<bool> ready_{false};
   std::mutex ack_mutex_;
   std::condition_variable ack_cv_;
@@ -368,11 +393,14 @@ public:
     double pwm_max = positions.back();
     double delay_ms = get_parameter("drop_delay_ms").as_double();
     double timeout_s = get_parameter("drop_timeout_s").as_double();
-    double command_timeout_s = timeout_s - delay_ms / 1000.0;
-    if (command_timeout_s <= 0.0) {
+    int command_retries = static_cast<int>(
+      get_parameter("command_retries").as_int());
+    double command_budget_s = timeout_s - delay_ms / 1000.0;
+    if (command_retries < 0 || command_budget_s <= 0.0) {
       throw std::invalid_argument(
-              "drop_timeout_s must be greater than drop_delay_ms / 1000");
+              "invalid command_retries or drop_timeout_s budget");
     }
+    double command_timeout_s = command_budget_s / (command_retries + 1);
 
     if (is_sitl) {
       servo_ = std::make_unique<ServoMock>(init_pwm);
@@ -380,7 +408,7 @@ public:
     } else {
       auto hardware_servo = std::make_unique<PX4CommandServo>(
         this, init_pwm, pwm_min, pwm_max,
-        command_timeout_s);
+        command_timeout_s, command_retries);
       hardware_servo_ = hardware_servo.get();
       servo_ = std::move(hardware_servo);
       RCLCPP_INFO(
@@ -441,6 +469,7 @@ private:
       std::vector<double>{1150.0, 1700.0, 2150.0});
     declare_parameter("drop_delay_ms", 1000.0);
     declare_parameter("drop_timeout_s", 3.0);
+    declare_parameter("command_retries", 1);
   }
 
   void handle_drop_request(

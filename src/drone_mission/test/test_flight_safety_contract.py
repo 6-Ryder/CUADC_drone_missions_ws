@@ -30,6 +30,8 @@ class _TaskLogger:
 class _Bridge:
     def __init__(self):
         self.offboard = False
+        self.offboard_requests = 0
+        self.armed = True
         self.land_commands = 0
         self.force_disarms = 0
         self.landed = False
@@ -38,13 +40,16 @@ class _Bridge:
         return self.offboard
 
     def set_offboard_mode(self):
-        pass
+        self.offboard_requests += 1
 
     def land_at_current(self):
         self.land_commands += 1
 
     def is_landed(self):
         return self.landed
+
+    def is_armed(self):
+        return self.armed
 
     def get_telemetry(self):
         return type(
@@ -60,10 +65,14 @@ class _Bridge:
 class _FlightController:
     def __init__(self):
         self.takeoff_calls = 0
+        self.loiter_calls = 0
         self.velocity_commands = []
 
     def takeoff(self, _height):
         self.takeoff_calls += 1
+
+    def loiter(self):
+        self.loiter_calls += 1
 
     def set_velocity_body(self, *command):
         self.velocity_commands.append(command)
@@ -85,6 +94,8 @@ class _FSM:
         self.bridge = _Bridge()
         self.fc = _FlightController()
         self.logger = _TaskLogger()
+        self.offboard_confirmations = 0
+        self.takeovers = []
 
     def get_logger(self):
         return _Logger()
@@ -97,6 +108,15 @@ class _FSM:
 
     def set_vision_mode(self, _mode):
         pass
+
+    def mark_offboard_confirmed(self):
+        self.offboard_confirmations += 1
+
+    def request_takeover(self, reason):
+        self.takeovers.append(reason)
+
+    def loiter(self):
+        self.fc.stop_velocity()
 
 
 def test_takeoff_waits_for_confirmed_offboard(monkeypatch):
@@ -116,25 +136,55 @@ def test_takeoff_waits_for_confirmed_offboard(monkeypatch):
     fsm.bridge.offboard = True
     assert state.execute() is None
     assert fsm.fc.takeoff_calls == 1
+    assert fsm.offboard_confirmations == 1
 
 
-def test_takeoff_timeout_is_an_error(monkeypatch):
+def test_takeoff_prestreams_a_hold_before_requesting_offboard(monkeypatch):
+    fsm = _FSM()
+    state = TakeoffState(fsm)
+    monotonic = [0.0]
+    monkeypatch.setattr("drone_mission.states.state_takeoff.time.time", lambda: 0.0)
+    monkeypatch.setattr(
+        "drone_mission.states.state_takeoff.time.monotonic", lambda: monotonic[0],
+    )
+
+    state.enter()
+    assert fsm.fc.loiter_calls == 1
+
+    # RC is already armed, but the required prestream has not elapsed.
+    assert state.execute() is None
+    assert state.execute() is None
+    assert fsm.bridge.offboard_requests == 0
+
+    monotonic[0] = 1.0
+    assert state.execute() is None
+    assert fsm.bridge.offboard_requests == 1
+
+
+def test_takeoff_offboard_stall_retries_once_then_requests_takeover(monkeypatch):
     fsm = _FSM()
     state = TakeoffState(fsm)
     state._sub_phase = state.SUB_OFFBOARD
     state._sub_phase_start = 0.0
     state._offboard_cmd_sent = True
     state._start_time = 0.0
-    monkeypatch.setattr(
-        "drone_mission.states.state_takeoff.time.time", lambda: 16.0,
-    )
+    now = [16.0]
+    monkeypatch.setattr("drone_mission.states.state_takeoff.time.time", lambda: now[0])
 
-    assert state.execute() == "ERROR"
+    assert state.execute() is None
+    assert fsm.takeovers == []
+
+    now[0] = 32.0
+    assert state.execute() is None
+    assert fsm.takeovers == ["TAKEOFF: Offboard was not confirmed after retry"]
 
 
 def test_drop_hardware_failure_stops_the_mission():
-    state = DropState(_FSM())
-    assert state._execute_drop() == "ERROR"
+    fsm = _FSM()
+    state = DropState(fsm)
+
+    assert state._execute_drop() is None
+    assert fsm.takeovers == ["DROP: servo did not confirm the release"]
 
 
 def test_descent_ready_remains_latched_during_precision_alignment():
@@ -243,7 +293,7 @@ def test_precision_land_blind_descent_stays_offboard_and_can_trigger_land_detect
     assert fsm.bridge.force_disarms == 0
 
 
-def test_precision_land_never_hands_visual_loss_to_px4_land(monkeypatch):
+def test_precision_land_reacquires_lost_h_once_then_requests_takeover(monkeypatch):
     fsm = _FSM()
     fsm.get_landing_target = lambda: None
     fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
@@ -251,13 +301,21 @@ def test_precision_land_never_hands_visual_loss_to_px4_land(monkeypatch):
     state._has_landing_target = True
     state._vision_lost_start = 1.0
     monkeypatch.setattr(
-        "drone_mission.states.state_precision_land.time.time", lambda: 5.0,
+        "drone_mission.states.state_precision_land.time.time", lambda: now[0],
     )
+    now = [5.0]
 
-    assert state.execute() == "ERROR"
+    assert state.execute() is None
+    assert fsm.takeovers == []
     assert fsm.fc.velocity_commands[-1] == (0.0, 0.0, 0.0)
     assert fsm.bridge.land_commands == 0
     assert fsm.bridge.force_disarms == 0
+
+    state._has_landing_target = True
+    state._vision_lost_start = 1.0
+    now[0] = 9.0
+    assert state.execute() is None
+    assert fsm.takeovers == ["PRECISION_LAND: H target was lost after reacquire"]
 
 
 def test_precision_land_sim_touchdown_requires_stable_window_then_disarms(
@@ -272,6 +330,7 @@ def test_precision_land_sim_touchdown_requires_stable_window_then_disarms(
     )()
     state = PrecisionLandState(fsm)
     state._phase = state.PHASE_BLIND
+    state._visual_alignment_latched = True
     state._blind_start_time = 1.0
     now = [10.0]
     monkeypatch.setattr(
@@ -282,9 +341,12 @@ def test_precision_land_sim_touchdown_requires_stable_window_then_disarms(
     assert fsm.bridge.force_disarms == 0
 
     now[0] = 12.1
-    assert state.execute() == "COMPLETE"
+    assert state.execute() is None
     assert fsm.bridge.force_disarms == 1
     assert fsm.bridge.land_commands == 0
+
+    fsm.bridge.armed = False
+    assert state.execute() == "COMPLETE"
 
 
 def test_precision_land_real_flight_does_not_use_local_altitude_fallback(
@@ -312,12 +374,67 @@ def test_precision_land_real_flight_does_not_use_local_altitude_fallback(
     assert fsm.bridge.force_disarms == 0
 
 
-def test_precision_land_landed_telemetry_disarms_then_completes():
+def test_precision_land_real_fallback_requires_alignment_and_blind_descent(
+    monkeypatch,
+):
+    fsm = _FSM()
+    fsm.get_param = lambda name, default: False if name == "sim_mode" else default
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    fsm.bridge.get_telemetry = lambda: type(
+        "Telemetry",
+        (),
+        {"velocity": Velocity(vn=0.0, ve=0.0, vd=0.0)},
+    )()
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_BLIND
+    state._visual_alignment_latched = True
+    state._blind_start_time = 1.0
+    now = [10.0]
+    monkeypatch.setattr(
+        "drone_mission.states.state_precision_land.time.time", lambda: now[0],
+    )
+
+    assert state.execute() is None
+    now[0] = 12.1
+    assert state.execute() is None
+    assert fsm.bridge.force_disarms == 1
+
+    fsm.bridge.armed = False
+    assert state.execute() == "COMPLETE"
+
+
+def test_precision_land_keeps_the_lease_until_px4_confirms_final_disarm():
     fsm = _FSM()
     fsm.bridge.landed = True
     state = PrecisionLandState(fsm)
 
+    assert state.execute() is None
+    assert fsm.bridge.force_disarms == 1
+
+    # A live zero-velocity setpoint must remain while the VehicleCommand is
+    # in flight, so the relay lease cannot gate that final disarm command.
+    assert state.execute() is None
+    assert fsm.bridge.force_disarms == 1
+
+    fsm.bridge.armed = False
     assert state.execute() == "COMPLETE"
+
+
+def test_precision_land_does_not_resume_descent_while_final_disarm_is_pending():
+    fsm = _FSM()
+    fsm.bridge.landed = True
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    state = PrecisionLandState(fsm)
+    state._phase = state.PHASE_BLIND
+
+    assert state.execute() is None
+    assert fsm.bridge.force_disarms == 1
+
+    # PX4's landed estimate must not be allowed to restart a descent after the
+    # terminal disarm request has already been sent.
+    fsm.bridge.landed = False
+    assert state.execute() is None
+    assert fsm.fc.velocity_commands[-1] == (0.0, 0.0, 0.0)
     assert fsm.bridge.force_disarms == 1
 
 
@@ -451,7 +568,8 @@ def test_navigation_timeouts_do_not_advance_the_mission():
     ).split("def _execute_ascend", 1)[1]
 
     assert "超时, 强制进入下一状态" not in transit
-    assert 'return "ERROR"' in transit
+    assert 'return "ERROR"' not in transit
+    assert "request_takeover" in transit
     assert 'return "SELECT_TARGET" if drops' not in ascend
 
 

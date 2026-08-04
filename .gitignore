@@ -26,3 +26,6 @@ __pycache__/
 .idea/
 .claude/
 .reasonix/
+
+# Files
+docs/superpowers/

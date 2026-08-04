@@ -21,6 +21,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import PoseStamped, TwistStamped
+from std_msgs.msg import Bool
 from drone_interfaces.msg import NedPositionSetpoint
 
 from px4_msgs.msg import (
@@ -59,6 +60,16 @@ def px4_qos() -> QoSProfile:
         durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
         history=QoSHistoryPolicy.KEEP_LAST,
         depth=10,
+    )
+
+
+def autonomy_lease_qos() -> QoSProfile:
+    """QoS for the fail-closed mission-to-DDS autonomy lease."""
+    return QoSProfile(
+        reliability=QoSReliabilityPolicy.RELIABLE,
+        durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        history=QoSHistoryPolicy.KEEP_LAST,
+        depth=1,
     )
 
 
@@ -174,6 +185,15 @@ class PX4Bridge(Node):
         self._offboard_active: bool = False
         self._velocity_mode: bool = False  # True=速度控制, False=位置控制
         self._last_velocity_cmd = (0.0, 0.0, 0.0)  # 缓存速度指令, 避免心跳覆写
+        # StandaloneBridge owns the mission-side lease.  Fail closed until a
+        # live lease arrives, so a stopped/restarted FSM cannot leave this DDS
+        # node replaying an old relay setpoint.
+        self._autonomy_lease_enabled: bool = False
+        self._autonomy_lease_last_seen: Optional[float] = None
+        self._autonomy_lease_timeout_s = float(
+            self.get_parameter("autonomy_lease_timeout_s").value
+        )
+        self._autonomy_target_received: bool = False
 
         # ---- 订阅 Mission FSM 的 setpoint 指令 (NED) ----
         self._cmd_sp_sub = self.create_subscription(
@@ -192,6 +212,10 @@ class PX4Bridge(Node):
         self._cmd_relay_sub = self.create_subscription(
             VehicleCommand, "/drone/cmd/vehicle_command_relay",
             self._cmd_relay_cb, 10,
+        )
+        self._autonomy_lease_sub = self.create_subscription(
+            Bool, "/drone/cmd/autonomy_lease", self._autonomy_lease_cb,
+            autonomy_lease_qos(),
         )
 
         # ---- 定时器 ----
@@ -217,6 +241,7 @@ class PX4Bridge(Node):
         self.declare_parameter("waypoint_timeout", 120.0)
         self.declare_parameter("land_altitude", 0.15)
         self.declare_parameter("max_setpoint_speed_limit", 5.0)
+        self.declare_parameter("autonomy_lease_timeout_s", 0.30)
         self.declare_parameter("home_x", 4.0)
         self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)
@@ -282,6 +307,8 @@ class PX4Bridge(Node):
 
     def _cmd_relay_cb(self, msg: VehicleCommand):
         """中继 VehicleCommand — 从 /drone/cmd/vehicle_command_relay 转发到 PX4."""
+        if not self._autonomy_lease_valid():
+            return
         self._cmd_pub.publish(msg)
         self.get_logger().debug(
             f"VehicleCommand relay: cmd={msg.command} "
@@ -291,22 +318,34 @@ class PX4Bridge(Node):
     def _cmd_setpoint_cb(self, msg: NedPositionSetpoint):
         """接收 Mission FSM 的 setpoint 指令并更新目标."""
         with self._setpoint_lock:
-            self._velocity_mode = False
-            self._target_setpoint = Position(
+            if not self._autonomy_lease_valid_locked():
+                return
+            target = Position(
                 north=float(msg.north),
                 east=float(msg.east),
                 down=float(msg.down),
             )
+            if not self._autonomy_target_received:
+                self._current_setpoint = target
+                self._smoothed_yaw = float(msg.yaw)
+            self._velocity_mode = False
+            self._target_setpoint = target
             self._target_yaw = float(msg.yaw)
             speed = float(msg.speed)
             self._target_speed = (
                 speed if msg.use_speed and math.isfinite(speed) and speed > 0.0 else None
             )
+            self._autonomy_target_received = True
 
     def _cmd_velocity_cb(self, msg):
         """接收 Mission FSM 的速度指令 (NED velocity)."""
         with self._setpoint_lock:
+            if not self._autonomy_lease_valid_locked():
+                return
             self._velocity_mode = True
+            self._target_setpoint = None
+            self._target_speed = None
+            self._autonomy_target_received = True
         self.publish_velocity_cmd(
             float(msg.linear.x),   # vn
             float(msg.linear.y),   # ve
@@ -317,7 +356,12 @@ class PX4Bridge(Node):
     def _vision_velocity_cb(self, msg: TwistStamped):
         """Forward visual-servo velocity, which is expressed in NED."""
         with self._setpoint_lock:
+            if not self._autonomy_lease_valid_locked():
+                return
             self._velocity_mode = True
+            self._target_setpoint = None
+            self._target_speed = None
+            self._autonomy_target_received = True
         self.publish_velocity_cmd(
             float(msg.twist.linear.x),
             float(msg.twist.linear.y),
@@ -365,27 +409,31 @@ class PX4Bridge(Node):
 
         缓存速度指令以防止 _offboard_heartbeat 覆写为 NAN.
         """
-        # 缓存速度指令, 供心跳持续发布
-        self._last_velocity_cmd = (float(vn), float(ve), float(vd))
+        with self._setpoint_lock:
+            if not self._autonomy_lease_valid_locked():
+                return
+            # 缓存速度指令, 供心跳持续发布
+            self._last_velocity_cmd = (float(vn), float(ve), float(vd))
+            self._autonomy_target_received = True
 
-        # 发布到 ROS2 话题 (供监控/日志)
-        vel = TwistStamped()
-        vel.header.stamp = self.get_clock().now().to_msg()
-        vel.header.frame_id = "ned"
-        vel.twist.linear.x = vn
-        vel.twist.linear.y = ve
-        vel.twist.linear.z = vd
-        vel.twist.angular.z = yaw_rate
-        self._vel_pub.publish(vel)
+            # 发布到 ROS2 话题 (供监控/日志)
+            vel = TwistStamped()
+            vel.header.stamp = self.get_clock().now().to_msg()
+            vel.header.frame_id = "ned"
+            vel.twist.linear.x = vn
+            vel.twist.linear.y = ve
+            vel.twist.linear.z = vd
+            vel.twist.angular.z = yaw_rate
+            self._vel_pub.publish(vel)
 
-        # 直接作为 TrajectorySetpoint 的 velocity 域发布到 PX4
-        setpoint = TrajectorySetpoint()
-        setpoint.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        setpoint.position = [float('nan'), float('nan'), float('nan')]
-        setpoint.yaw = float('nan')
-        setpoint.velocity = [float(vn), float(ve), float(vd)]
-        setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
-        self._trajectory_pub.publish(setpoint)
+            # 直接作为 TrajectorySetpoint 的 velocity 域发布到 PX4
+            setpoint = TrajectorySetpoint()
+            setpoint.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+            setpoint.position = [float('nan'), float('nan'), float('nan')]
+            setpoint.yaw = float('nan')
+            setpoint.velocity = [float(vn), float(ve), float(vd)]
+            setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+            self._trajectory_pub.publish(setpoint)
 
     # ================================================================
     # 心跳 + 控制循环
@@ -398,40 +446,42 @@ class PX4Bridge(Node):
         必须持续发布 OffboardControlMode + TrajectorySetpoint,
         否则 PX4 会自动退出 Offboard 模式 (>0.5s 无信号).
         """
-        # OffboardControlMode: 声明控制类型
-        offboard_mode = OffboardControlMode()
-        offboard_mode.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        offboard_mode.position = not self._velocity_mode
-        offboard_mode.velocity = self._velocity_mode
-        offboard_mode.acceleration = False
-        offboard_mode.attitude = False
-        offboard_mode.body_rate = False
-        self._offboard_mode_pub.publish(offboard_mode)
-
-        # TrajectorySetpoint: 位置/速度指令
-        setpoint = TrajectorySetpoint()
-        setpoint.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-
         with self._setpoint_lock:
+            if not self._autonomy_lease_valid_locked() or not self._autonomy_target_received:
+                return
             sp = self._current_setpoint
             yaw = self._smoothed_yaw
             is_vel_mode = self._velocity_mode
 
-        if is_vel_mode:
-            # 速度模式: 位置=NAN, 速度=缓存的上次指令 (避免覆写为 NAN)
-            setpoint.position = [float('nan'), float('nan'), float('nan')]
-            setpoint.yaw = float('nan')
-            vn, ve, vd = self._last_velocity_cmd
-            setpoint.velocity = [float(vn), float(ve), float(vd)]
-            setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
-        else:
-            setpoint.position = [float(sp.north), float(sp.east), float(sp.down)]
-            setpoint.yaw = float(yaw)
-            # NAN 表示"不控制此轴"
-            setpoint.velocity = [float('nan'), float('nan'), float('nan')]
-            setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+            # OffboardControlMode: 声明控制类型
+            offboard_mode = OffboardControlMode()
+            offboard_mode.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+            offboard_mode.position = not is_vel_mode
+            offboard_mode.velocity = is_vel_mode
+            offboard_mode.acceleration = False
+            offboard_mode.attitude = False
+            offboard_mode.body_rate = False
+            self._offboard_mode_pub.publish(offboard_mode)
 
-        self._trajectory_pub.publish(setpoint)
+            # TrajectorySetpoint: 位置/速度指令
+            setpoint = TrajectorySetpoint()
+            setpoint.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+
+            if is_vel_mode:
+                # 速度模式: 位置=NAN, 速度=缓存的上次指令 (避免覆写为 NAN)
+                setpoint.position = [float('nan'), float('nan'), float('nan')]
+                setpoint.yaw = float('nan')
+                vn, ve, vd = self._last_velocity_cmd
+                setpoint.velocity = [float(vn), float(ve), float(vd)]
+                setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+            else:
+                setpoint.position = [float(sp.north), float(sp.east), float(sp.down)]
+                setpoint.yaw = float(yaw)
+                # NAN 表示"不控制此轴"
+                setpoint.velocity = [float('nan'), float('nan'), float('nan')]
+                setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+
+            self._trajectory_pub.publish(setpoint)
 
     def _control_loop(self):
         """
@@ -441,6 +491,10 @@ class PX4Bridge(Node):
         实现平滑的位置过渡, 避免突然跳变.
         """
         with self._setpoint_lock:
+            if not self._autonomy_lease_valid_locked() or not self._autonomy_target_received:
+                return
+            if self._velocity_mode:
+                return
             target = self._target_setpoint
             current = self._current_setpoint
             target_yaw = self._target_yaw
@@ -476,6 +530,44 @@ class PX4Bridge(Node):
         with self._setpoint_lock:
             self._current_setpoint = Position(new_north, new_east, new_down)
             self._smoothed_yaw = new_yaw
+
+    def _autonomy_lease_cb(self, msg: Bool) -> None:
+        """Accept a live mission relay lease or fail closed on revocation."""
+        with self._setpoint_lock:
+            if bool(msg.data):
+                self._autonomy_lease_enabled = True
+                self._autonomy_lease_last_seen = time.monotonic()
+                return
+            self._clear_autonomy_output_locked()
+
+    def _autonomy_lease_valid(self) -> bool:
+        """Return whether the source lease is present and within its deadline."""
+        with self._setpoint_lock:
+            return self._autonomy_lease_valid_locked()
+
+    def _autonomy_lease_valid_locked(self) -> bool:
+        """Lease check for callers already holding ``_setpoint_lock``."""
+        if not self._autonomy_lease_enabled or self._autonomy_lease_last_seen is None:
+            return False
+        now = time.monotonic()
+        if (
+            now < self._autonomy_lease_last_seen
+            or now - self._autonomy_lease_last_seen > self._autonomy_lease_timeout_s
+        ):
+            self._clear_autonomy_output_locked()
+            return False
+        return True
+
+    def _clear_autonomy_output_locked(self) -> None:
+        """Invalidate every cached autonomous setpoint while holding the lock."""
+        self._autonomy_lease_enabled = False
+        self._autonomy_lease_last_seen = None
+        self._autonomy_target_received = False
+        self._velocity_mode = False
+        self._target_setpoint = None
+        self._current_setpoint = None
+        self._target_speed = None
+        self._last_velocity_cmd = (0.0, 0.0, 0.0)
 
     # ================================================================
     # 公开接口 (供 FlightController 和 Mission 层调用)

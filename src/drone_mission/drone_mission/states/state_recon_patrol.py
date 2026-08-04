@@ -13,6 +13,7 @@ RECON_PATROL 状态 — 降低高度后的弓字形全覆盖巡视.
 import time
 from typing import Optional, List
 
+from drone_utils.progress_monitor import ProgressMonitor
 
 class ReconPatrolState:
     """侦察区弓字形全覆盖巡视状态 (纯路径覆盖)."""
@@ -26,6 +27,7 @@ class ReconPatrolState:
         self._last_progress_log: float = 0.0
         self._waypoint_stable_count: int = 0
         self._waypoint_stable_required: int = 8  # 20Hz 下=0.4s 稳定确认
+        self._waypoint_progress: Optional[ProgressMonitor] = None
 
     def enter(self):
         self._fsm.logger.log_state("TRANSIT_TO_RECON_ZONE", "RECON_PATROL",
@@ -35,6 +37,12 @@ class ReconPatrolState:
         self._coverage_complete = False
         self._last_progress_log = 0.0
         self._waypoint_stable_count = 0
+        self._waypoint_progress = ProgressMonitor(
+            window_s=float(self._fsm.get_param("navigation_progress_window", 30.0)),
+            min_improvement=float(
+                self._fsm.get_param("navigation_progress_min_improvement", 0.25)
+            ),
+        )
 
         # 侦察阶段只记录覆盖率，不需要运行两套目标检测模型。
         self._fsm.set_vision_mode("coverage_reset")
@@ -93,14 +101,18 @@ class ReconPatrolState:
             self._fsm.get_logger().info(
                 f"RECON_PATROL: 全部扫描航点完成, coverage={cov_ratio:.1%}"
             )
+            if hasattr(self._fsm, "mark_recon_path_completed"):
+                self._fsm.mark_recon_path_completed()
             return "RETURN_TO_HOME"
 
         current_wp = self._waypoints[self._wp_idx]
 
         # 检查是否到达当前航点 (需连续稳定多帧, 防止偶然穿过容差边界后漂出)
         wp_target = (current_wp["north"], current_wp["east"], current_wp["down"])
-        if self._fsm.fc.reached(wp_target,
-                                self._fsm.get_param("waypoint_tolerance", 0.5)):
+        at_waypoint = self._fsm.fc.reached(
+            wp_target, self._fsm.get_param("waypoint_tolerance", 0.5)
+        )
+        if at_waypoint:
             self._waypoint_stable_count += 1
         else:
             self._waypoint_stable_count = max(0, self._waypoint_stable_count - 1)
@@ -113,27 +125,34 @@ class ReconPatrolState:
                 # after reaching scan altitude, before flying the first strip.
                 self._fsm.set_vision_mode("coverage")
             if self._wp_idx < len(self._waypoints):
+                self._waypoint_progress.reset()
                 self._fly_to_wp(self._wp_idx)
 
-        # 航点超时保护
-        if self._fsm.fc.is_waypoint_timed_out():
-            self._fsm.get_logger().error(
-                f"RECON_PATROL: 航点超时 wp={self._wp_idx}"
+        if (
+            not at_waypoint
+            and self._wp_idx < len(self._waypoints)
+            and self._waypoint_progress
+        ):
+            current_wp = self._waypoints[self._wp_idx]
+            pos = self._fsm.fc.get_position()
+            error = pos.distance_to(
+                type(pos)(current_wp["north"], current_wp["east"], current_wp["down"])
             )
-            self._fsm.bridge.return_to_launch()
-            return "ERROR"
+            now = time.monotonic()
+            if self._waypoint_progress.observe(error, now=now):
+                if self._waypoint_progress.mark_retry(now=now):
+                    self._fsm.get_logger().warn(
+                        f"RECON_PATROL: 航点 {self._wp_idx} 无进展, 重发一次"
+                    )
+                    self._fly_to_wp(self._wp_idx)
+                else:
+                    self._fsm.request_takeover(
+                        "RECON_PATROL: waypoint "
+                        f"{self._wp_idx} made no progress after retry"
+                    )
+                    return None
 
-        # 全局超时
         elapsed = time.time() - self._start_time
-        max_duration = self._fsm.get_param("state_max_duration", 180.0)
-        if elapsed > max_duration:
-            cov_ratio = coverage.get("coverage_ratio", 0) if coverage else 0
-            self._fsm.get_logger().error(
-                f"RECON_PATROL: 超时 ({elapsed:.0f}s), "
-                f"coverage={cov_ratio:.1%}, 请求 PX4 RTL"
-            )
-            self._fsm.bridge.return_to_launch()
-            return "ERROR"
 
         # 每 10s 输出进度
         if elapsed - self._last_progress_log > 10.0:
