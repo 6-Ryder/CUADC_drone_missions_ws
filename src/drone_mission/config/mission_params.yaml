@@ -123,6 +123,7 @@
     camera_fy: 539.9
     camera_cx: 640.0
     camera_cy: 480.0
+    image_top_faces_forward: false   # gz 相机 x500_mono_cam_down: 画面底朝机头
 
     # --- 精准降落参数 ---
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
