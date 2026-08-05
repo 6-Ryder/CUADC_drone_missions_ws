@@ -13,12 +13,11 @@
 
 ## 2. PX4 DDS 与桥接
 
-先在地面启动环境：
+先在地面启动环境（脚本会先启动唯一 MicroXRCEAgent、等待 DDS 就绪，再启动任务节点）：
 
 ```bash
-source /opt/ros/humble/setup.bash
-source /home/ryder/drone_tasks_ws/install/setup.bash
-ros2 launch drone_bringup real_flight.launch.py
+cd /home/ryder/drone_tasks_ws
+./scripts/start_full_real_mission.sh
 ```
 
 确认真机使用 v1 话题：

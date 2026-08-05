@@ -206,14 +206,6 @@ if grep -q '"MicroXRCEAgent", "udp4"' \
   fail "install/ 中的 real_flight.launch.py 仍是旧版 (自带 Agent); 请先重建: colcon build --packages-select drone_bringup --symlink-install"
 fi
 
-# Agent 是任务唯一数据源: 意外退出时停止任务 (与旧 launch exit guard 等价).
-( while kill -0 "$AGENT_PID" 2>/dev/null; do sleep 2; done
-  if kill -0 "$$" 2>/dev/null; then
-    warn "MicroXRCEAgent 已退出, 停止任务节点 (避免 DDS 断开后继续飞行)"
-    pkill -INT -f "real_flight.launch.py" 2>/dev/null || true
-  fi ) &
-WATCHDOG_PID=$!
-
 echo ""
 echo "┌──────────────────────────────────────────────────────────┐"
 echo "│           全流程真机任务 (Jetson)                          │"
@@ -233,6 +225,15 @@ ros2 launch drone_bringup real_flight.launch.py "${LAUNCH_ARGS[@]}" \
   > "$LOG_DIR/mission.log" 2>&1 &
 LAUNCH_PID=$!
 tail -f "$LOG_DIR/mission.log" & TAIL_PID=$!
+
+# Agent 是任务唯一数据源: 意外退出时停止任务 (与旧 launch exit guard 等价).
+# 使用精确 PID 而非 pkill 模式匹配, 避免误伤并发 launch 实例或其他进程.
+( while kill -0 "$AGENT_PID" 2>/dev/null; do sleep 2; done
+  if kill -0 "$$" 2>/dev/null && kill -0 "$LAUNCH_PID" 2>/dev/null; then
+    warn "MicroXRCEAgent 已退出, 停止任务节点 (避免 DDS 断开后继续飞行)"
+    kill -INT "$LAUNCH_PID" 2>/dev/null || true
+  fi ) &
+WATCHDOG_PID=$!
 
 set +e
 wait "$LAUNCH_PID"
