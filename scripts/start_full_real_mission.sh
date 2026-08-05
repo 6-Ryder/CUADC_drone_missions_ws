@@ -199,6 +199,13 @@ fi
 # ---- Step 4: 启动任务节点 ----
 step "Step 4/4 — 启动任务节点 (real_flight.launch.py)"
 
+# 部署一致性: 若 install/ 仍是旧版 launch (自带 Agent), 会与脚本的 Agent
+# 同端口冲突 → 旧 guard 关掉整套任务。必须重建后才能执行。
+if grep -q '"MicroXRCEAgent", "udp4"' \
+    "$WORKSPACE_DIR/install/drone_bringup/share/drone_bringup/launch/real_flight.launch.py" 2>/dev/null; then
+  fail "install/ 中的 real_flight.launch.py 仍是旧版 (自带 Agent); 请先重建: colcon build --packages-select drone_bringup --symlink-install"
+fi
+
 # Agent 是任务唯一数据源: 意外退出时停止任务 (与旧 launch exit guard 等价).
 ( while kill -0 "$AGENT_PID" 2>/dev/null; do sleep 2; done
   if kill -0 "$$" 2>/dev/null; then
