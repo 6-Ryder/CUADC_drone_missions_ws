@@ -112,7 +112,7 @@ SITL launch 默认 Home 为 World `(4,10,0)`、飞行轴为 north、投放距离
 推荐入口是启动脚本，脚本持有唯一 MicroXRCEAgent（test_mission 模式）：
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 ./scripts/start_full_real_mission.sh
 ```
 
@@ -127,7 +127,7 @@ DDS_PORT=8888 ./scripts/start_full_real_mission.sh camera_device:=/dev/video0
 开机自启直接运行全流程脚本（与 test_mission 相同的启动逻辑）：
 
 ```bash
-@reboot /home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh
+@reboot /home/nvidia/CUADC_drone_missions_ws/scripts/start_full_real_mission.sh
 ```
 
 仅当飞控晚于 Jetson 上电超过 60s（脚本 DDS 等待上限）时，改用 `--agent-only`

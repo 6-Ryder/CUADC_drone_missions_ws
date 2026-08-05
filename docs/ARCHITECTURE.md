@@ -1,6 +1,6 @@
 # 当前系统架构
 
-## 工作空间总览：`drone_tasks_ws`
+## 工作空间总览：`CUADC_drone_missions_ws`
 
 这是一个**基于 ROS 2 Humble + PX4 Offboard + Gazebo SITL 的无人机自主任务系统**，部署在 Jetson Orin Nano 真机上，SITL 仿真在 x86 开发机上。
 
