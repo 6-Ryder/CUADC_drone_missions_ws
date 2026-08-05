@@ -57,12 +57,17 @@ class CoordinateTransformer:
     ----------
     K : np.ndarray
         相机内参矩阵 (3×3): [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
+    image_top_faces_forward : bool
+        True  = 相机画面顶部朝机头 (真机安装): 图像下方 (v+) → 机尾 (body -x).
+        False = 相机画面底部朝机头 (gz 合成相机 x500_mono_cam_down 的 SDF 姿态):
+                图像下方 (v+) → 机头 (body +x).
 
     """
 
-    def __init__(self, K: np.ndarray):
+    def __init__(self, K: np.ndarray, image_top_faces_forward: bool = True):
         self.K = K
         self.K_inv = np.linalg.inv(K)
+        self._image_top_faces_forward = image_top_faces_forward
 
     def update_intrinsics(self, fx: float, fy: float, cx: float, cy: float):
         """更新内参."""
@@ -115,13 +120,22 @@ class CoordinateTransformer:
         ray_cam = self.K_inv @ pixel  # 相机坐标系中的射线方向
 
         # 2. 相机 → 机体
-        # 相机安装: 垂直向下, PX4 机体系为 FRD (x前, y右, z下).
-        # R_cam_to_body: 相机 x→body right, 相机 y→body forward, 相机 z→body down.
-        R_cam_to_body = np.array([
-            [0,  1,  0],   # 相机 y → body front
-            [1,  0,  0],   # 相机 x → body right
-            [0,  0,  1],   # 相机 z (光轴) → body down
-        ])
+        # 安装方向由 image_top_faces_forward 决定 (PX4 机体系为 FRD: x前, y右, z下):
+        #   True  (真机, 画面顶朝机头): 图像下方 (v+) = 机尾 = body -x
+        #   False (gz x500_mono_cam_down): 图像下方 (v+) = 机头 = body +x
+        # (True 与 state_precision_land 的 landing_servo_y_to_forward_sign=-1 约定一致.)
+        if self._image_top_faces_forward:
+            R_cam_to_body = np.array([
+                [0, -1,  0],   # 相机 y → body rear (-x)
+                [1,  0,  0],   # 相机 x → body right (+y)
+                [0,  0,  1],   # 相机 z (光轴) → body down
+            ])
+        else:
+            R_cam_to_body = np.array([
+                [0,  1,  0],   # 相机 y → body front (+x)
+                [1,  0,  0],   # 相机 x → body right (+y)
+                [0,  0,  1],   # 相机 z (光轴) → body down
+            ])
         ray_body = R_cam_to_body @ ray_cam
 
         # 3. 机体 → World
@@ -183,11 +197,19 @@ class CoordinateTransformer:
         R_world_to_body = _quat_to_matrix_inv(q)
 
         # Body → Camera
-        R_body_to_cam = np.array([
-            [0,  1,  0],
-            [1,  0,  0],
-            [0,  0,  1],
-        ])  # R_cam_to_body 的逆 = 转置
+        # R_cam_to_body 的逆 = 转置 (与 image_top_faces_forward 分支对应)
+        if self._image_top_faces_forward:
+            R_body_to_cam = np.array([
+                [0,  1,  0],
+                [-1, 0,  0],
+                [0,  0,  1],
+            ])
+        else:
+            R_body_to_cam = np.array([
+                [0,  1,  0],
+                [1,  0,  0],
+                [0,  0,  1],
+            ])
 
         R_world_to_cam = R_body_to_cam @ R_world_to_body
 
@@ -218,16 +240,21 @@ class CoordinateTransformer:
         cx: float, cy: float,
         drone_world_x: float = 0.0,
         drone_world_y: float = 0.0,
+        image_top_faces_forward: bool = True,
     ) -> Tuple[float, float]:
         """
-        简化版 (假设相机垂直向下, 无姿态).
+        简化版 (假设相机垂直向下, 无姿态, 且偏航朝向 north).
 
         用于姿态数据不可用时的回退.
+        方向约定与补偿版一致:
+          - image_top_faces_forward=True (真机): v+ (画面下) → south
+          - False (gz SITL): v+ → north
+        u+ (画面右) → east 始终不变.
         """
-        dx = (v - cy) * altitude / fy  # 像素行 → world north (前)
-        dy = (u - cx) * altitude / fx  # 像素列 → world east  (右)
+        v_sign = -1.0 if image_top_faces_forward else 1.0
+        dx = v_sign * (v - cy) * altitude / fy  # 像素行方向 (画面下)
+        dy = (u - cx) * altitude / fx           # 像素列 u+ (画面右) → world east
 
-        # 无人机在前方看, 相机 x→右, y→前
         world_x = drone_world_x + dy
         world_y = drone_world_y + dx
         return (world_x, world_y)

@@ -12,6 +12,9 @@
     cx: 640.0                     # 1280/2
     cy: 480.0                     # 960/2
     sim_mode: true                # true=SITL ros_gz_bridge, false=GStreamer
+    # 相机画面顶是否朝机头: false=gz x500_mono_cam_down (画面底朝机头, 旧约定);
+    # 真机 real_flight.launch.py 覆盖为 true (画面顶朝机头).
+    image_top_faces_forward: false
 
     # ============================================================
     # YOLO 模型参数

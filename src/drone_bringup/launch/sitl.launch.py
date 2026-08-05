@@ -105,7 +105,9 @@ def generate_launch_description():
         executable="vision_pipeline",
         name="vision_pipeline",
         output="screen",
-        parameters=[vision_param_file],
+        parameters=[vision_param_file, {
+            "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
+        }],
         arguments=[
             "--ros-args",
             "--log-level", "info",
@@ -142,6 +144,7 @@ def generate_launch_description():
             "recon_distance": LaunchConfiguration("recon_distance"),
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
+            "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )

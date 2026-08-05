@@ -321,6 +321,8 @@ class MissionFSM(Node):
         self.declare_parameter("camera_fy", 539.9)
         self.declare_parameter("camera_cx", 640.0)
         self.declare_parameter("camera_cy", 480.0)
+        # True=画面顶朝机头 (真机), False=gz SITL 相机 (画面底朝机头)
+        self.declare_parameter("image_top_faces_forward", True)
         # 降落
         self.declare_parameter("landing_search_altitude", 5.0)
         self.declare_parameter("landing_approach_speed", 0.5)

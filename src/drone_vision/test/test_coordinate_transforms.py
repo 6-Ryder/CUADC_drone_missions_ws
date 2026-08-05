@@ -35,6 +35,45 @@ def _transformer():
     )
 
 
+def test_gz_camera_convention_v_plus_points_north():
+    """gz SITL 相机 (image_top_faces_forward=False): 像素 v+ → 世界北 (旧约定).
+
+    无人机 World(32.5, 0, 5), 水平下视. 画面下 1m → 世界北 1m.
+    """
+    tf = CoordinateTransformer(
+        np.array(
+            [
+                [539.9, 0.0, 640.0],
+                [0.0, 539.9, 480.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float64,
+        ),
+        image_top_faces_forward=False,
+    )
+    pose = ned_to_world_pose(
+        north=0.0,
+        east=32.5,
+        down=-5.0,
+        q_x=0.0,
+        q_y=0.0,
+        q_z=0.0,
+        q_w=1.0,
+    )
+    one_meter_px = 539.9 / 5.0
+    v_down_xy = tf.pixel_to_world(
+        640.0,
+        480.0 + one_meter_px,
+        pose[:3],
+        pose[3:],
+        q_convention="xyzw",
+    )
+    assert v_down_xy is not None
+    # 中心 World(32.5, 0), 画面下1m → 世界北 1m
+    assert math.isclose(v_down_xy[0], 32.5, abs_tol=1e-6)
+    assert math.isclose(v_down_xy[1], 1.0, abs_tol=1e-6)
+
+
 def test_downward_camera_center_projects_to_drone_world_xy():
     """中心像素 (640,480) 投影到无人机正下方的世界坐标."""
     tf = _transformer()
@@ -64,11 +103,11 @@ def test_downward_camera_center_projects_to_drone_world_xy():
 
 
 def test_downward_camera_pixel_axes_match_world_enu_axes():
-    """像素 x→世界东, 像素 y→世界北.
+    """像素 x→世界东, 像素 y→世界南 (画面顶朝机头安装).
 
     无人机 World(32.5, 0, 5), 水平下视.
     - 图像 u+dx (右) → 世界东移 → (32.5 + Δ, 0)
-    - 图像 v+dy (下) → 世界北移 → (32.5, 0 + Δ)
+    - 图像 v+dy (下) → 世界南移 → (32.5, 0 - Δ)
     1m 对应像素 = fx / altitude = 539.9 / 5.0
     """
     tf = _transformer()
@@ -90,7 +129,7 @@ def test_downward_camera_pixel_axes_match_world_enu_axes():
         pose[3:],
         q_convention="xyzw",
     )
-    north_xy = tf.pixel_to_world(
+    south_xy = tf.pixel_to_world(
         640.0,
         480.0 + one_meter_px,
         pose[:3],
@@ -99,9 +138,9 @@ def test_downward_camera_pixel_axes_match_world_enu_axes():
     )
 
     assert east_xy is not None
-    assert north_xy is not None
-    # home=(0,0,0): 中心 World(32.5, 0), 东1m→(33.5, 0), 北1m→(32.5, 1.0)
+    assert south_xy is not None
+    # home=(0,0,0): 中心 World(32.5, 0), 东1m→(33.5, 0), 南1m→(32.5, -1.0)
     assert math.isclose(east_xy[0], 33.5, abs_tol=1e-6)
     assert math.isclose(east_xy[1], 0.0, abs_tol=1e-6)
-    assert math.isclose(north_xy[0], 32.5, abs_tol=1e-6)
-    assert math.isclose(north_xy[1], 1.0, abs_tol=1e-6)
+    assert math.isclose(south_xy[0], 32.5, abs_tol=1e-6)
+    assert math.isclose(south_xy[1], -1.0, abs_tol=1e-6)

@@ -200,6 +200,8 @@ class VisionPipelineNode(Node):
         self.declare_parameter("fy", 400.0)
         self.declare_parameter("cx", 320.0)
         self.declare_parameter("cy", 240.0)
+        # True=画面顶朝机头 (真机), False=gz SITL 相机 (画面底朝机头)
+        self.declare_parameter("image_top_faces_forward", True)
         # 圆筒
         self.declare_parameter("cylinder_refine_enable", True)
         self.declare_parameter("cylinder_edge_blur", 5)
@@ -249,7 +251,12 @@ class VisionPipelineNode(Node):
         cx = self.get_parameter("cx").value
         cy = self.get_parameter("cy").value
         K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
-        self._coord_xform = CoordinateTransformer(K)
+        self._coord_xform = CoordinateTransformer(
+            K,
+            image_top_faces_forward=self.get_parameter(
+                "image_top_faces_forward"
+            ).value,
+        )
 
         # --- 后处理器 ---
         self._cyl_refiner = CylinderRefiner(
@@ -641,6 +648,9 @@ class VisionPipelineNode(Node):
                     md.cx, md.cy, alt, fx, fy, cx, cy,
                     drone_world_x=self._drone_pose[0],
                     drone_world_y=self._drone_pose[1],
+                    image_top_faces_forward=self.get_parameter(
+                        "image_top_faces_forward"
+                    ).value,
                 )
                 if self._coord_xform:
                     world_xy = self._coord_xform.pixel_to_world(
@@ -769,6 +779,9 @@ class VisionPipelineNode(Node):
                 t["cx"], t["cy"], alt, fx, fy, cx, cy,
                 drone_world_x=self._drone_pose[0],
                 drone_world_y=self._drone_pose[1],
+                image_top_faces_forward=self.get_parameter(
+                    "image_top_faces_forward"
+                ).value,
             )
             if self._coord_xform:
                 world_xy = self._coord_xform.pixel_to_world(

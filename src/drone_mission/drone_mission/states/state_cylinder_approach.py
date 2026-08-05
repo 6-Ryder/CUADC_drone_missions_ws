@@ -117,8 +117,13 @@ class CylinderApproachState:
         fy = float(self._fsm.get_param("camera_fy", 539.9))
         gain = float(self._fsm.get_param("cylinder_approach_pixel_gain", 0.65))
         max_step = float(self._fsm.get_param("cylinder_approach_max_step", 0.45))
+        # 方向约定 (image_top_faces_forward=True, 真机画面顶朝机头):
+        #   u+ → 东, v+ → 南 (机尾方向).
+        # 与 landing_servo_y_to_forward_sign=-1 及 pixel_to_world 一致.
+        # False (gz SITL): v+ → 北, 保持旧行为.
+        v_sign = -1.0 if self._fsm.get_param("image_top_faces_forward", True) else 1.0
         step_x = max(-max_step, min(max_step, gain * du * alt / fx))
-        step_y = max(-max_step, min(max_step, gain * dv * alt / fy))
+        step_y = max(-max_step, min(max_step, v_sign * gain * dv * alt / fy))
         target_wx = drone_wx + step_x
         target_wy = drone_wy + step_y
 

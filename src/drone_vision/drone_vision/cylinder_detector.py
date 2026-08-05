@@ -393,6 +393,8 @@ class CylinderDetectorNode(Node):
         self.declare_parameter("model_height", 640)
         self.declare_parameter("device", "cuda")
         self.declare_parameter("class_names", ["cylinder"])
+        # True=画面顶朝机头 (真机), False=gz SITL 相机 (画面底朝机头)
+        self.declare_parameter("image_top_faces_forward", True)
 
         self.declare_parameter("cylinder_refine_enable", True)
         self.declare_parameter("cylinder_edge_blur", 5)
@@ -577,10 +579,12 @@ class CylinderDetectorNode(Node):
                 det_msg.bbox_x2, det_msg.bbox_y2 = bbox[2], bbox[3]
 
             # 像素 → NED (与 pixel_to_world_simple 一致的符号约定).
-            # 下视相机: u+ (像右) → body right → NED east,
-            #           v+ (像下) → body front → NED north.
-            dx_world = (t["cy"] - cy) * alt / fy   # 像素行 → NED north
-            dy_world = (t["cx"] - cx) * alt / fx   # 像素列 → NED east
+            # image_top_faces_forward=True (真机, 画面顶朝机头):
+            #   u+ (像右) → body right → NED east, v+ (像下) → body rear → NED south.
+            # False (gz SITL): v+ → NED north (旧约定, 保持仿真行为不变).
+            v_sign = -1.0 if self.get_parameter("image_top_faces_forward").value else 1.0
+            dx_world = v_sign * (t["cy"] - cy) * alt / fy  # 像素行 → NED north/south
+            dy_world = (t["cx"] - cx) * alt / fx           # 像素列 → NED east
 
             det_msg.center_x = drone_ned_x + dy_world  # NED east
             det_msg.center_y = drone_ned_y + dx_world  # NED north

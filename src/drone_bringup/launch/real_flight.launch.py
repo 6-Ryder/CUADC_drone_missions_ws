@@ -124,6 +124,7 @@ def generate_launch_description():
                 "cx": 320.0,
                 "cy": 240.0,
                 "device": "cuda",
+                "image_top_faces_forward": True,  # 真机: 画面顶朝机头
                 "coverage_zone_x_min": -4.0,
                 "coverage_zone_x_max": 4.0,
                 "coverage_zone_y_min": 55.0,
@@ -159,6 +160,7 @@ def generate_launch_description():
                 "drop_distance": LaunchConfiguration("drop_distance"),
                 "recon_distance": LaunchConfiguration("recon_distance"),
                 "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
+                "image_top_faces_forward": True,  # 真机: 画面顶朝机头
             },
         ],
         additional_env={"RCUTILS_COLORIZED_OUTPUT": "1"},
