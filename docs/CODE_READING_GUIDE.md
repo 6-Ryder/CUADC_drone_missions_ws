@@ -33,7 +33,7 @@ PX4 飞控                    drone_servo2 舵机投放
 
 ### 2.2 真机启动链
 
-1. `src/drone_bringup/launch/real_flight.launch.py`：启动 MicroXRCEAgent、V4L2 相机、PX4 bridge、视觉、舵机和完整任务 FSM。
+1. `scripts/start_full_real_mission.sh`：清理旧进程、启动唯一 MicroXRCEAgent（UDP `8888`）并等待 DDS 就绪，再调用 `src/drone_bringup/launch/real_flight.launch.py` 启动 V4L2 相机、PX4 bridge、视觉、舵机和完整任务 FSM。
 2. `src/drone_vision/drone_vision/camera.py`：读取 V4L2 设备并发布标准 ROS 图像话题。
 3. PX4 通过以太网 UDP 向 Jetson 的 `MicroXRCEAgent udp4 -p 8888` 建立 DDS；相机则独立通过 USB 接入 Jetson。
 4. 真机使用工作区默认 v1 `px4_msgs` 和 `/fmu/out/vehicle_status_v1`；任务逻辑仍与 SITL 共用。

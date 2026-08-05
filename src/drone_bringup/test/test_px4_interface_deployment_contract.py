@@ -101,7 +101,7 @@ def test_real_flight_stops_the_mission_when_its_udp_agent_dies():
 
     assert "WATCHDOG_PID" in startup
     assert "MicroXRCEAgent 已退出, 停止任务节点" in startup
-    assert "pkill -INT" in startup
+    assert 'kill -INT "$LAUNCH_PID"' in startup
 
 
 def test_real_hardware_scripts_require_ethernet_udp_and_v1_status_topic():

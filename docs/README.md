@@ -46,7 +46,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 
 | 项目 | SITL | 真机 |
 |---|---|---|
-| 启动 | `scripts/start_full_simulation.sh` | `real_flight.launch.py` |
+| 启动 | `scripts/start_full_simulation.sh` | `scripts/start_full_real_mission.sh` |
 | PX4 状态消息 | `/fmu/out/vehicle_status_v4` | `/fmu/out/vehicle_status_v1` |
 | 消息环境 | `scripts/sitl_env.sh` 提升隔离 v4 `px4_msgs` | 工作区默认 v1 `px4_msgs` |
 | 相机 | Gazebo 图像桥 | V4L2 相机节点 |

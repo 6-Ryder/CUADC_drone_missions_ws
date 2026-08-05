@@ -97,21 +97,23 @@ cd /home/ryder/drone_tasks_ws
 
 脚本不会自动 Arm、切换飞行模式、调用投放服务、执行降落或发送额外的飞行命令。
 
-### 4.1 开机自启（仅 Agent）
+### 4.1 开机自启
 
-Jetson 开机只应自动拉起 Agent，任务由现场终端启动。`--agent-only` 模式不检查
-相机、不等待 DDS，前台持有 Agent；PX4 侧 `uxrce_dds_client` 会自动重试连接，
-网络与飞控上电后即可建立会话。
+自启直接运行全流程脚本（与 test_mission 相同的启动逻辑：清理 → Agent → 等 DDS
+→ 任务节点），Jetson 与飞控同时上电时开机即可完成 DDS 连接。
 
 ```bash
 # systemd Type=simple:
-ExecStart=/home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh --agent-only
+ExecStart=/home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh
 # 或 cron @reboot:
-@reboot /home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh --agent-only
+@reboot /home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh
 ```
 
-现场全流程任务（不带 `--agent-only`）启动时会先清理该自启 Agent 再启动自己的
-Agent，UDP 端口唯一性由脚本 Step 0 保证。
+同端口 Agent 唯一性由脚本 Step 0 清理保证（自启与现场终端并发时，后启动者拥有
+端口）。
+
+若飞控晚于 Jetson 上电超过 60s（脚本的 DDS 等待上限），可改用 `--agent-only`
+模式：仅持有 Agent、无限重试连接、不启动任务，任务由飞控就绪后的现场终端启动。
 
 ## 5. 就绪检查与解锁
 

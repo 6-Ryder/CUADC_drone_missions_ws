@@ -39,10 +39,15 @@ def test_full_real_launcher_owns_one_udp_agent_and_runs_the_mission():
     # 环境自愈: SITL overlay 从环境剥离, 不再硬失败阻断 Agent
     assert "sitl_px4_msgs" in source
     assert "已从环境剥离" in source
-    # 相机检查限时等待 + 警告, 不得阻断 Agent 与 DDS
-    assert "CAMERA_WAIT_SECONDS" in source
+    # 相机检查与 test_mission 一致: 不设脚本级检查 (相机参数仍透传 launch)
+    assert "CAMERA_WAIT_SECONDS" not in source
+    assert "相机设备" not in source
     # 清理契约: EXIT trap 回收 Agent, 避免 Ctrl+C 残留
     assert "trap cleanup EXIT" in source
+    # 自启可观测性: 脚本全部输出镜像到 startup.log (消灭"日志空"盲区);
+    # DDS 等待时长可配置 (默认 60, 与 test_mission 一致)
+    assert 'tee -a "$LOG_DIR/startup.log"' in source
+    assert "DDS_WAIT_SECONDS" in source
 
 
 def test_full_real_launcher_never_issues_vehicle_or_servo_commands():

@@ -6,19 +6,22 @@
 # launch 文件只启动任务节点。与旧版 (a777457) 的区别:
 #   - Agent 在一切任务闸门之前无条件启动 → 自动启动环境下 PX4 DDS 必然先就绪
 #   - SITL v4 overlay 不再硬失败, 而是从环境中剥离 (自愈, 不依赖人类记忆)
-#   - 相机检查改为限时等待 + 警告, 不再阻断 Agent 与 DDS
+#   - 相机检查与 test_mission 一致: 不设脚本级检查, 由 launch 与 verify 脚本处理
 #   - UDP 端口唯一性由 Step 0 清理旧进程保证, 不再依赖 launch 内的 exit guard
 #   - Agent 意外退出 → 脚本自动停止任务节点 (与旧 guard 等价的安全契约)
 #   - EXIT trap 清理 Agent/日志尾随进程, 修复 Ctrl+C 时 Agent 残留
 #
 # 用法:
-#   # 全流程任务 (现场终端)
+#   # 开机自启与现场终端均直接运行全流程 (与 test_mission 相同逻辑)
 #   ./scripts/start_full_real_mission.sh
 #   ./scripts/start_full_real_mission.sh camera_device:=/dev/video0
 #
-#   # 仅启动 Agent (Jetson 开机自启, systemd Type=simple / cron nohup)
+#   # 仅启动 Agent (可选: 飞控晚于 Jetson 上电超过 60s 时用于自启)
 #   ./scripts/start_full_real_mission.sh --agent-only
 #   DDS_PORT=8888 ./scripts/start_full_real_mission.sh --agent-only
+#
+# 环境变量: DDS_PORT=8888 (Agent 端口), DDS_WAIT_SECONDS=60 (等 DDS 上限).
+# 每次运行的完整过程写入 <log 目录>/startup.log (自启下也可见).
 #
 # 本脚本不会 Arm、切模式、投放、降落或返航; 不会发送任何飞行命令。
 # ==============================================================================
@@ -28,9 +31,7 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="$WORKSPACE_DIR/log/real_mission_$RUN_ID"
 DDS_PORT="${DDS_PORT:-8888}"
-DEFAULT_CAMERA_DEVICE="/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0"
-CAMERA_DEVICE="${CAMERA_DEVICE:-$DEFAULT_CAMERA_DEVICE}"
-CAMERA_WAIT_SECONDS="${CAMERA_WAIT_SECONDS:-30}"
+DDS_WAIT_SECONDS="${DDS_WAIT_SECONDS:-60}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -49,7 +50,6 @@ LAUNCH_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --agent-only) MODE="agent" ;;
-    camera_device:=*) CAMERA_DEVICE="${arg#camera_device:=}"; LAUNCH_ARGS+=("$arg") ;;
     *) LAUNCH_ARGS+=("$arg") ;;
   esac
 done
@@ -58,6 +58,14 @@ mkdir -p "$LOG_DIR/ros"
 export ROS_LOG_DIR="$LOG_DIR/ros"
 printf '%q ' "${LAUNCH_ARGS[@]}" > "$LOG_DIR/launch_arguments.txt"
 printf '\n' >> "$LOG_DIR/launch_arguments.txt"
+
+# 自启环境下 stdout 不落盘 (cron→邮件 / systemd→journal), 这里把脚本全部
+# 输出镜像到 startup.log: 每次运行都在日志目录留下完整过程, 不再有"日志空"
+# 的盲区。终端行为不变 (tee 仍输出到原 stdout)。
+exec > >(tee -a "$LOG_DIR/startup.log") 2>&1
+# 等待 tee 就绪 (fork 竞态: 极早期输出可能先进管道缓冲); 上限 1s.
+i=0
+until [ -f "$LOG_DIR/startup.log" ] || [ $i -ge 20 ]; do sleep 0.05; i=$((i + 1)); done
 
 AGENT_PID=""
 LAUNCH_PID=""
@@ -121,7 +129,7 @@ export ROS_DOMAIN_ID=0
 # ---- Step 0: 清理旧进程 ----
 # 同一 UDP 端口只能由一个 Agent 监听; 先清旧进程保证端口唯一。
 # (自动启动与现场终端并发时, 后启动者拥有端口, 行为确定)
-step "Step 0/4 — 清理旧进程 (保证 UDP :$DDS_PORT 唯一)"
+step "Step 0/3 — 清理旧进程 (保证 UDP :$DDS_PORT 唯一)"
 pkill -9 -f "MicroXRCEAgent" 2>/dev/null || true
 pkill -9 -f "px4_bridge" 2>/dev/null || true
 pkill -9 -f "mission_fsm" 2>/dev/null || true
@@ -131,7 +139,7 @@ sleep 1
 info "旧进程已清理"
 
 # ---- Step 1: MicroXRCEAgent (先于一切任务闸门, 保证 DDS 必然就绪) ----
-step "Step 1/4 — 启动 MicroXRCEAgent (Ethernet UDP :$DDS_PORT)"
+step "Step 1/3 — 启动 MicroXRCEAgent (Ethernet UDP :$DDS_PORT)"
 command -v MicroXRCEAgent >/dev/null || fail "未找到 MicroXRCEAgent (安装 micro-ros-agent 或放入 PATH)"
 MicroXRCEAgent udp4 -p "$DDS_PORT" > "$LOG_DIR/agent.log" 2>&1 &
 AGENT_PID=$!
@@ -153,9 +161,9 @@ if [ "$MODE" = "agent" ]; then
 fi
 
 # ---- Step 2: 等待 PX4 DDS 通信就绪 ----
-step "Step 2/4 — 等待 PX4 DDS 通信就绪"
+step "Step 2/3 — 等待 PX4 DDS 通信就绪"
 DDS_READY=false
-for i in $(seq 1 60); do
+for i in $(seq 1 "$DDS_WAIT_SECONDS"); do
   if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
     info "PX4 DDS 通信就绪 (耗时 ${i}s)"
     DDS_READY=true
@@ -166,7 +174,7 @@ for i in $(seq 1 60); do
 done
 
 if [ "$DDS_READY" = false ]; then
-  error "PX4 DDS 通信超时 (60s)"
+  error "PX4 DDS 通信超时 (${DDS_WAIT_SECONDS}s, 可用 DDS_WAIT_SECONDS 调大)"
   error ""
   error "硬件检查:"
   error "  1. 飞控是否上电?"
@@ -176,28 +184,8 @@ if [ "$DDS_READY" = false ]; then
   fail "DDS 未就绪"
 fi
 
-# ---- Step 3: 相机设备检查 (限时等待 + 警告, 不阻断 DDS) ----
-step "Step 3/4 — 相机设备检查"
-if [ ! -e "$CAMERA_DEVICE" ]; then
-  warn "相机设备不存在: $CAMERA_DEVICE"
-  warn "  等待 ${CAMERA_WAIT_SECONDS}s (USB 枚举可能慢于系统启动)..."
-  waited=0
-  while [ $waited -lt "$CAMERA_WAIT_SECONDS" ] && [ ! -e "$CAMERA_DEVICE" ]; do
-    sleep 1
-    waited=$((waited + 1))
-  done
-fi
-if [ ! -e "$CAMERA_DEVICE" ]; then
-  warn "相机仍未出现: 继续启动任务节点, 但视觉/精准降落不可用"
-  warn "  可稍后插入相机并重跑本脚本, 或用 camera_device:=/dev/videoN 指定实际设备"
-elif [ ! -r "$CAMERA_DEVICE" ]; then
-  warn "相机不可读: $CAMERA_DEVICE (检查 udev 权限或当前用户是否在 video 组)"
-else
-  info "相机就绪: $CAMERA_DEVICE"
-fi
-
-# ---- Step 4: 启动任务节点 ----
-step "Step 4/4 — 启动任务节点 (real_flight.launch.py)"
+# ---- Step 3: 启动任务节点 ----
+step "Step 3/3 — 启动任务节点 (real_flight.launch.py)"
 
 # 部署一致性: 若 install/ 仍是旧版 launch (自带 Agent), 会与脚本的 Agent
 # 同端口冲突 → 旧 guard 关掉整套任务。必须重建后才能执行。
@@ -205,14 +193,6 @@ if grep -q '"MicroXRCEAgent", "udp4"' \
     "$WORKSPACE_DIR/install/drone_bringup/share/drone_bringup/launch/real_flight.launch.py" 2>/dev/null; then
   fail "install/ 中的 real_flight.launch.py 仍是旧版 (自带 Agent); 请先重建: colcon build --packages-select drone_bringup --symlink-install"
 fi
-
-# Agent 是任务唯一数据源: 意外退出时停止任务 (与旧 launch exit guard 等价).
-( while kill -0 "$AGENT_PID" 2>/dev/null; do sleep 2; done
-  if kill -0 "$$" 2>/dev/null; then
-    warn "MicroXRCEAgent 已退出, 停止任务节点 (避免 DDS 断开后继续飞行)"
-    pkill -INT -f "real_flight.launch.py" 2>/dev/null || true
-  fi ) &
-WATCHDOG_PID=$!
 
 echo ""
 echo "┌──────────────────────────────────────────────────────────┐"
@@ -233,6 +213,15 @@ ros2 launch drone_bringup real_flight.launch.py "${LAUNCH_ARGS[@]}" \
   > "$LOG_DIR/mission.log" 2>&1 &
 LAUNCH_PID=$!
 tail -f "$LOG_DIR/mission.log" & TAIL_PID=$!
+
+# Agent 是任务唯一数据源: 意外退出时停止任务 (与旧 launch exit guard 等价).
+# 使用精确 PID 而非 pkill 模式匹配, 避免误伤并发 launch 实例或其他进程.
+( while kill -0 "$AGENT_PID" 2>/dev/null; do sleep 2; done
+  if kill -0 "$$" 2>/dev/null && kill -0 "$LAUNCH_PID" 2>/dev/null; then
+    warn "MicroXRCEAgent 已退出, 停止任务节点 (避免 DDS 断开后继续飞行)"
+    kill -INT "$LAUNCH_PID" 2>/dev/null || true
+  fi ) &
+WATCHDOG_PID=$!
 
 set +e
 wait "$LAUNCH_PID"

@@ -124,11 +124,14 @@ cd /home/ryder/drone_tasks_ws
 DDS_PORT=8888 ./scripts/start_full_real_mission.sh camera_device:=/dev/video0
 ```
 
-仅开机自启 Agent（不跑任务）使用 `--agent-only`，前台运行适配 systemd Type=simple：
+开机自启直接运行全流程脚本（与 test_mission 相同的启动逻辑）：
 
 ```bash
-./scripts/start_full_real_mission.sh --agent-only
+@reboot /home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh
 ```
+
+仅当飞控晚于 Jetson 上电超过 60s（脚本 DDS 等待上限）时，改用 `--agent-only`
+模式（仅持有 Agent、无限重试连接、不启动任务）。
 
 脚本会自动补齐 PATH（/opt/ros/humble/bin、/usr/local/bin）并把环境中残留的
 SITL v4 overlay 剥离，因此自启环境下也能可靠拉起 Agent。
