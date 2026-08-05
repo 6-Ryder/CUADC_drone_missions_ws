@@ -13,18 +13,36 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_full_real_launcher_has_one_safe_launch_owner_and_run_log():
+def test_full_real_launcher_owns_one_udp_agent_and_runs_the_mission():
+    """The start script (not the launch) owns the only MicroXRCEAgent.
+
+    test_mission 模式: 脚本先清理旧进程、启动 Agent 并等待 DDS 就绪,
+    再由 launch 启动任务节点。Agent 意外退出时脚本停止任务 (等价旧 exit guard).
+    """
     source = _source(LAUNCHER_PATH)
 
     assert "set -euo pipefail" in source
     assert "real_mission_" in source
     assert 'export ROS_LOG_DIR="$LOG_DIR/ros"' in source
-    assert 'ros2 launch drone_bringup real_flight.launch.py "$@"' in source
-    assert "command -v MicroXRCEAgent" in source
-    assert "MicroXRCEAgent udp4" not in source
+    assert 'ros2 launch drone_bringup real_flight.launch.py "${LAUNCH_ARGS[@]}"' in source
+    # 脚本持有唯一 MicroXRCEAgent, 且先于任务节点启动
+    assert 'MicroXRCEAgent udp4 -p "$DDS_PORT"' in source
     assert "MicroXRCEAgent serial" not in source
-    assert "pkill" not in source
-    assert "sitl_env.sh" not in source
+    assert "command -v MicroXRCEAgent" in source
+    # Step 0 清理旧进程, 保证 UDP 端口唯一 (自动启动环境也安全)
+    assert "pkill -9 -f \"MicroXRCEAgent\"" in source
+    # Agent 意外退出 → 脚本停止任务节点 (watchdog)
+    assert "WATCHDOG_PID" in source
+    assert "已退出, 停止任务节点" in source
+    # 自动启动模式: 仅持有 Agent, 前台运行适配 systemd Type=simple
+    assert "--agent-only" in source
+    # 环境自愈: SITL overlay 从环境剥离, 不再硬失败阻断 Agent
+    assert "sitl_px4_msgs" in source
+    assert "已从环境剥离" in source
+    # 相机检查限时等待 + 警告, 不得阻断 Agent 与 DDS
+    assert "CAMERA_WAIT_SECONDS" in source
+    # 清理契约: EXIT trap 回收 Agent, 避免 Ctrl+C 残留
+    assert "trap cleanup EXIT" in source
 
 
 def test_full_real_launcher_never_issues_vehicle_or_servo_commands():

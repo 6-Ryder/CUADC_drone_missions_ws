@@ -109,23 +109,32 @@ SITL launch 默认 Home 为 World `(4,10,0)`、飞行轴为 north、投放距离
 - 相机分辨率：640×480，内参必须替换为实测标定值；
 - `rc_require_arm_signal=true`，必须由遥控器 Arm Switch 允许解锁。
 
-启动：
+推荐入口是启动脚本，脚本持有唯一 MicroXRCEAgent（test_mission 模式）：
 
 ```bash
-source /opt/ros/humble/setup.bash
-source /home/nvidia/CUADC_drone_missions_ws/install/setup.bash
-ros2 launch drone_bringup real_flight.launch.py
+cd /home/ryder/drone_tasks_ws
+./scripts/start_full_real_mission.sh
 ```
 
-如果使用 UDP Agent 或不同设备路径，可覆盖 launch 参数：
+脚本先清理旧进程、启动 `MicroXRCEAgent udp4 -p ${DDS_PORT:-8888}` 并等待
+`/fmu/out/vehicle_status_v1` 就绪，再由 launch 启动任务节点。
+如需覆盖 Agent 端口或相机设备：
 
 ```bash
-ros2 launch drone_bringup real_flight.launch.py \
-  camera_device:=/dev/video0 \
-  dds_port:=8888
+DDS_PORT=8888 ./scripts/start_full_real_mission.sh camera_device:=/dev/video0
 ```
 
-同一 UDP 端口只能运行一个 Agent；若 Agent 因端口占用或其他原因退出，完整真机 launch 会自动停止，不能忽略该报错继续飞行。启动后先观察 `/fmu/out/vehicle_status_v1`、`/drone/pose`、`/drone/vision/status` 和 `/drone/servo/status`，确认就绪再允许任务进入 ARM。现场检查顺序见 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)。
+仅开机自启 Agent（不跑任务）使用 `--agent-only`，前台运行适配 systemd Type=simple：
+
+```bash
+./scripts/start_full_real_mission.sh --agent-only
+```
+
+脚本会自动补齐 PATH（/opt/ros/humble/bin、/usr/local/bin）并把环境中残留的
+SITL v4 overlay 剥离，因此自启环境下也能可靠拉起 Agent。
+
+同一 UDP 端口只能运行一个 Agent；脚本 Step 0 会清理旧 Agent 保证端口唯一。
+Agent 意外退出时脚本检测并停止任务节点（等价旧的 launch exit guard），不能忽略该报错继续飞行。启动后先观察 `/fmu/out/vehicle_status_v1`、`/drone/pose`、`/drone/vision/status` 和 `/drone/servo/status`，确认就绪再允许任务进入 ARM。现场检查顺序见 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)。
 
 ## 6. 分阶段 smoke test
 

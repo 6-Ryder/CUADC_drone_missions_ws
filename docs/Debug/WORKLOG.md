@@ -2,6 +2,27 @@
 
 本文档记录已经影响当前实现的关键问题、修改和验证。历史方案只保留结论，不再作为运行手册。
 
+## 2026-08-05 — 启动架构改为 test_mission 模式（脚本持有 Agent）
+
+- 场景：`start_full_real_mission.sh` 用作 Jetson 开机自启后，地面站 `uxrce_dds_client status` 一致"无法连接"。根因：旧版脚本把 Agent 埋在 launch 里，前面压着 SITL overlay 硬失败、相机存在性、`command -v` 等 fail-fast 闸门；自动启动环境下（cron/systemd 的 PATH、开机早期 USB 相机未枚举、shell 继承 SITL overlay env）任一闸门挂掉 → launch 根本没跑 → 8888 上无 Agent → PX4 客户端永远连不上。
+- 修改（对齐 `test_forward_recon.sh` 结构）：
+  1. `scripts/start_full_real_mission.sh` 重写：Step 0 清理旧进程（保证 UDP 端口唯一）→ Step 1 **无条件先启动 MicroXRCEAgent**（先于一切任务闸门）→ Step 2 等 DDS 就绪 → Step 3 相机限时等待+警告（不再硬失败）→ Step 4 launch 任务节点；`--agent-only` 模式前台持有 Agent，适配 systemd Type=simple 自启；EXIT trap 回收 Agent（修复 Ctrl+C 残留）。
+  2. 环境自愈替代硬失败：自动补齐 PATH（/opt/ros/humble/bin、/usr/local/bin）；检测到 `sitl_px4_msgs` overlay 时从 AMENT_PREFIX_PATH/CMAKE_PREFIX_PATH/LD_LIBRARY_PATH/PYTHONPATH/COLCON_PREFIX_PATH 剥离而不是退出（保留 v1/v4 消息冲突防护，WORKLOG 08-02 "UnsupportedTypeSupport"）。
+  3. `real_flight.launch.py` 移除自持 Agent 与 `agent_exit_guard`（双 Agent 会同端口冲突互杀）；等价安全契约由脚本 watchdog 承担：Agent 意外退出 → 自动停止任务 launch。
+  4. 契约测试同步：`test_real_mission_scripts.py` 改断言"脚本持有唯一 UDP Agent + watchdog + 剥离逻辑"；`test_px4_interface_deployment_contract.py` 断言 launch 不再含 Agent/ExecuteProcess，真机脚本三件套统一 `udp4 -p "$DDS_PORT"`。
+- 验证：`bash -n`、两测试文件 13 passed。**待真机验证**：自启后 QGC `uxrce_dds_client status` 应显示连接；agent.log 应出现来自 `192.168.1.10` 的 UDP 会话。
+
+## 2026-08-05 — 真机链路代码审计：四个缺口
+
+- 场景：对真机飞行全套代码（launch / 启动脚本 / 预检脚本 / bridge / FSM / 视觉 / 舵机）的针对性审计，重点是真机独有的失效模式。
+- 发现（修复方向与待办已录入 [RISKS_AND_TODOS.md](RISKS_AND_TODOS.md) 风险 #2/#7-#11、待办 T5/T13-T16）：
+  1. **视觉"消息停更"不可检测**：`get_landing_target()`（`mission_state_machine.py:1264`）无新鲜度门，`_landing_target_cb`（:710）不记时间戳；`vision_pipeline.py:484` 的 `ready` 只需 `frame_count>0`，相机死后永久 `ready=1`；emergency 只在收到消息时更新，且视觉丢失的 `WARN` 不被主循环消费（:757-767）→ 相机/视觉进程死亡时，降落伺服拿冻结目标继续下降，视觉丢失保护失效。对照：cylinders/markers/hazards 均有 2s 新鲜度门，landing_target 属遗漏。
+  2. **相机内参占位且被固化**：`real_flight.launch.py` 硬编码 `fx=fy=400, cx=320, cy=240`（未标定）；`verify_real_flight_ready.sh:66-68` 断言这些值 → 完成标定后预检必失败，检查脚本与 T1 待办矛盾。
+  3. **落地确认链不一致**：静止兜底 `_fallback_touchdown_confirmed()`（`state_precision_land.py:329`）无 sim_mode 门控（代码开），yaml 注释允许，RISKS 文档写"真机没有"（已过时）；真机无距离传感器（`SYS_HAS_NUM_DIST=0`），0.10m 高度容差靠气压计不可靠；`landing_blind_timeout`（`mission_state_machine.py:344`）声明后从未接线，`_blind_start_time` 只写不读 → 盲降无硬性时间上限。
+  4. **`COM_OBL_RC_ACT=0` 未追踪**：Jetson/Agent 崩溃时 PX4 无固件级自动处置，仅依赖操作者接管；参数记录自注"建议改为 2=Land"但从未进入待办。
+  5. 次要：`state_max_duration=0.0` 魔法值禁用状态超时层（`emergency.py:199`）；PX4Bridge 缺 `stop_autonomous_output`/`hold_for_takeover`（`mission_state_machine.py:947,973`），接口漂移。
+- 状态：**尚未修改代码**；本次为审计与待办录入，修复留待真机复飞前逐项清零（T1-T5、T13-T16）。
+
 ## 2026-08-02 — 版本回退后构建产物残留导致启动崩溃
 
 - 现象：07:20 实飞成功（`real_flight_20260802_072045`）；git pull 新版本（Full `62a5cdf`，新增 `NedPositionSetpoint.msg` 并重构速度控制）亦成功；回退到初版本（jetson 分支，无该消息）后，09:15 / 09:25 两次任务**启动瞬间全部失败**。

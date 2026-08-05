@@ -6,24 +6,22 @@
   - 启动独立 V4L2 相机节点
   - PX4 通过以太网 UDP 连接 Jetson 上的 MicroXRCEAgent
 
+MicroXRCEAgent 由启动脚本 scripts/start_full_real_mission.sh 持有:
+脚本先清理旧进程、启动 Agent 并等待 DDS 就绪, 再调用本 launch;
+Agent 意外退出时由脚本检测并停止本 launch (等价于旧的进程内 exit guard)。
+本 launch 只启动任务节点, 不再自己拉起 Agent。
+
 使用方法:
-  ros2 launch drone_bringup real_flight.launch.py
+  ros2 launch drone_bringup real_flight.launch.py        # 需 Agent 已在运行
+  ./scripts/start_full_real_mission.sh                   # 推荐入口 (持有 Agent)
+  ./scripts/start_full_real_mission.sh --agent-only      # 开机自启仅起 Agent
 """
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    EmitEvent,
-    ExecuteProcess,
-    LogInfo,
-    RegisterEventHandler,
-    TimerAction,
-)
-from launch.event_handlers import OnProcessExit
-from launch.events import Shutdown
+from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -46,11 +44,6 @@ def generate_launch_description():
         default_value="/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0",
         description="任务相机的稳定 V4L2 设备路径",
     )
-    dds_port_arg = DeclareLaunchArgument(
-        "dds_port", default_value="8888",
-        description="Jetson 上 MicroXRCEAgent 的 UDP 监听端口",
-    )
-
     home_x_arg = DeclareLaunchArgument(
         "home_x", default_value="0.0",
         description="Home 点 World x (真机解锁点即原点)",
@@ -79,32 +72,6 @@ def generate_launch_description():
     rc_require_arg = DeclareLaunchArgument(
         "rc_require_arm_signal", default_value="true",
         description="true=等待人用遥控器Arm Switch解锁, false=代码arm直接起飞",
-    )
-
-    xrce_agent = ExecuteProcess(
-        cmd=[
-            "MicroXRCEAgent", "udp4", "-p",
-            LaunchConfiguration("dds_port"),
-        ],
-        output="screen",
-    )
-
-    # 同一 UDP 端口只能由一个 Agent 监听。若端口被其他 Agent 占用，
-    # MicroXRCEAgent 会立即退出；此时继续运行任务节点将导致“ROS 在跑、
-    # 但 PX4 DDS 已断开”的危险假象，因此直接结束整套 launch。
-    agent_exit_guard = RegisterEventHandler(
-        OnProcessExit(
-            target_action=xrce_agent,
-            on_exit=[
-                LogInfo(
-                    msg=(
-                        "MicroXRCEAgent 已退出，停止真机任务，"
-                        "避免在 PX4 DDS 未连接时继续执行。"
-                    )
-                ),
-                EmitEvent(event=Shutdown(reason="MicroXRCEAgent exited")),
-            ],
-        )
     )
 
     # PX4 桥接
@@ -205,7 +172,6 @@ def generate_launch_description():
     return LaunchDescription([
         LogInfo(msg="=== 无人机实飞全系统启动 (Jetson) ==="),
         camera_device_arg,
-        dds_port_arg,
         home_x_arg,
         home_y_arg,
         home_z_arg,
@@ -213,8 +179,6 @@ def generate_launch_description():
         drop_distance_arg,
         recon_distance_arg,
         rc_require_arg,
-        xrce_agent,
-        agent_exit_guard,
         camera_node,
         px4_bridge_node,
         vision_delayed,
