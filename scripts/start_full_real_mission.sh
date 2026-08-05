@@ -20,6 +20,9 @@
 #   ./scripts/start_full_real_mission.sh --agent-only
 #   DDS_PORT=8888 ./scripts/start_full_real_mission.sh --agent-only
 #
+# 环境变量: DDS_PORT=8888 (Agent 端口), DDS_WAIT_SECONDS=60 (等 DDS 上限).
+# 每次运行的完整过程写入 <log 目录>/startup.log (自启下也可见).
+#
 # 本脚本不会 Arm、切模式、投放、降落或返航; 不会发送任何飞行命令。
 # ==============================================================================
 set -euo pipefail
@@ -28,6 +31,7 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="$WORKSPACE_DIR/log/real_mission_$RUN_ID"
 DDS_PORT="${DDS_PORT:-8888}"
+DDS_WAIT_SECONDS="${DDS_WAIT_SECONDS:-60}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -54,6 +58,14 @@ mkdir -p "$LOG_DIR/ros"
 export ROS_LOG_DIR="$LOG_DIR/ros"
 printf '%q ' "${LAUNCH_ARGS[@]}" > "$LOG_DIR/launch_arguments.txt"
 printf '\n' >> "$LOG_DIR/launch_arguments.txt"
+
+# 自启环境下 stdout 不落盘 (cron→邮件 / systemd→journal), 这里把脚本全部
+# 输出镜像到 startup.log: 每次运行都在日志目录留下完整过程, 不再有"日志空"
+# 的盲区。终端行为不变 (tee 仍输出到原 stdout)。
+exec > >(tee -a "$LOG_DIR/startup.log") 2>&1
+# 等待 tee 就绪 (fork 竞态: 极早期输出可能先进管道缓冲); 上限 1s.
+i=0
+until [ -f "$LOG_DIR/startup.log" ] || [ $i -ge 20 ]; do sleep 0.05; i=$((i + 1)); done
 
 AGENT_PID=""
 LAUNCH_PID=""
@@ -151,7 +163,7 @@ fi
 # ---- Step 2: 等待 PX4 DDS 通信就绪 ----
 step "Step 2/3 — 等待 PX4 DDS 通信就绪"
 DDS_READY=false
-for i in $(seq 1 60); do
+for i in $(seq 1 "$DDS_WAIT_SECONDS"); do
   if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
     info "PX4 DDS 通信就绪 (耗时 ${i}s)"
     DDS_READY=true
@@ -162,7 +174,7 @@ for i in $(seq 1 60); do
 done
 
 if [ "$DDS_READY" = false ]; then
-  error "PX4 DDS 通信超时 (60s)"
+  error "PX4 DDS 通信超时 (${DDS_WAIT_SECONDS}s, 可用 DDS_WAIT_SECONDS 调大)"
   error ""
   error "硬件检查:"
   error "  1. 飞控是否上电?"

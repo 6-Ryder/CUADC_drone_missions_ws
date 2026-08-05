@@ -44,6 +44,10 @@ def test_full_real_launcher_owns_one_udp_agent_and_runs_the_mission():
     assert "相机设备" not in source
     # 清理契约: EXIT trap 回收 Agent, 避免 Ctrl+C 残留
     assert "trap cleanup EXIT" in source
+    # 自启可观测性: 脚本全部输出镜像到 startup.log (消灭"日志空"盲区);
+    # DDS 等待时长可配置 (默认 60, 与 test_mission 一致)
+    assert 'tee -a "$LOG_DIR/startup.log"' in source
+    assert "DDS_WAIT_SECONDS" in source
 
 
 def test_full_real_launcher_never_issues_vehicle_or_servo_commands():
