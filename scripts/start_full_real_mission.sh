@@ -25,7 +25,11 @@
 #
 # 本脚本不会 Arm、切模式、投放、降落或返航; 不会发送任何飞行命令。
 # ==============================================================================
-set -euo pipefail
+# 注意: 不能用 nounset 选项 (-u)! /opt/ros/humble/setup.bash 第 8 行读取
+# $AMENT_TRACE_SETUP_FILES (无 :- 保护), 变量未赋值时 -u 直接报错退出,
+# 这正是此前"开机自启空日志 + disconnected"的根因。与 test_mission 同为
+# set -eo pipefail (仓库测试 ..._sources_ros_before_enabling_nounset 已记录此约束).
+set -eo pipefail
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"

@@ -2,7 +2,9 @@
 # Read-only preflight verifier for a running real_flight.launch.py session.
 # It only queries ROS graph data and bounded topic samples.  It never publishes,
 # calls a service, starts an Agent, or changes vehicle/servo state.
-set -euo pipefail
+# 不能用 nounset 选项 (-u): /opt/ros/humble/setup.bash 读取 $AMENT_TRACE_SETUP_FILES
+# 无 :- 保护, 变量未赋值时 -u 直接报错退出 (与 start_full_real_mission.sh 同因).
+set -eo pipefail
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SAMPLE_TIMEOUT="${SAMPLE_TIMEOUT:-8s}"

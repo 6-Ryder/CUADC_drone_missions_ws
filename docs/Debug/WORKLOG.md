@@ -14,6 +14,15 @@
 - 后续收敛（2026-08-05 同日）：按现场反馈（test_mission 开机自启稳定，全流程自启失败），脚本与 test_mission 进一步对齐——**移除相机限时等待**（不设脚本级相机检查，由 launch 与 verify 脚本处理），步骤改为 Step 0-3/3；自启配置定为直接运行全流程脚本（`--agent-only` 降级为飞控晚于 Jetson 上电 >60s 时的替代）；文档 §4.1/DEPLOYMENT §5 同步。断点定位结论：两脚本逻辑同构、环境正常时，全流程自启失败仅剩 install/ 旧版 launch（自带 Agent → 双 Agent → guard 关整机）与 Jetson 未同步两种部署状态，均需 `git pull` + `colcon build --packages-select drone_bringup --symlink-install` 解决。
 - 可观测性完善（2026-08-05 同日）：脚本全部输出镜像到 `startup.log`（`exec > >(tee -a ...)` + 就绪屏障 1s，防 fork 竞态丢极早期输出）——自启下不再出现"日志空"盲区；`DDS_WAIT_SECONDS` 环境变量可配置 DDS 等待上限（默认 60，与 test_mission 一致）。隔离测试验证极早期错误可落盘。
 
+## 2026-08-05 — 根因定案：`set -u` 与 ROS setup.bash 的未保护变量
+
+- 现场直接复现：`./scripts/start_full_real_mission.sh` 终端报 `/opt/ros/humble/setup.bash: 行8: AMENT_TRACE_SETUP_FILES: 未绑定的变量`。
+- 根因：a777457 起启动脚本用 `set -euo pipefail`（含 `-u`）；`/opt/ros/humble/setup.bash` 第 8 行 `if [ -n "$AMENT_TRACE_SETUP_FILES" ]` **无 `:-` 保护**，变量未赋值时（全新环境 = cron/systemd 自启、干净终端）`-u` 直接报错退出。**脚本死在 source ROS 这一步——早于一切检查、早于 Agent**。旧脚本 mkdir（25 行）在 source（31 行）之前、launch_arguments.txt（59 行）之后 → 目录空；Agent 永不起 → disconnected；进不了任务。
+- 为何 test_mission 免疫：`set -eo pipefail`（无 `-u`），实测 `env -i PATH=/usr/bin:/bin bash -c 'source ...'` 可正常加载。
+- 为何此前分析错方向：仓库测试 `test_sitl_px4_msgs_builder_sources_ros_before_enabling_nounset` 早已记录"ROS Humble setup reads optional variables and cannot run under set -u"（为 build 脚本写的约束），a777457 在启动脚本里违反了同一约束；"六道闸门"分析未意识到脚本死在闸门之前。
+- 修复：`start_full_real_mission.sh` 与 `verify_real_flight_ready.sh` 改为 `set -eo pipefail`（与 test_mission 一致）；契约测试断言同步（`set -eo pipefail` + 不得含 `-u`），防止回归。验证：13 passed；fresh-env 实测 source 通过。
+- 教训：凡 source ROS/colcon 生成 setup 的脚本**一律不得启用 nounset**；已有契约测试防的是 build 脚本，启动类脚本需要同样覆盖（已补）。
+
 ## 2026-08-05 — 真机链路代码审计：四个缺口
 
 - 场景：对真机飞行全套代码（launch / 启动脚本 / 预检脚本 / bridge / FSM / 视觉 / 舵机）的针对性审计，重点是真机独有的失效模式。
