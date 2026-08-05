@@ -29,6 +29,7 @@
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <drone_interfaces/srv/trigger_drop.hpp>
 #include <px4_msgs/msg/vehicle_command.hpp>
@@ -436,9 +437,26 @@ public:
       "/drone/servo/status", 10);
     status_timer_ = create_wall_timer(1s, [this] {publish_status();});
 
+    // 任务租约: px4_bridge 在租约无效时静默丢弃 /drone/cmd/vehicle_command_relay,
+    // 提前发 init 命令只会得到 ACK 超时 (真机 2026-08-05 日志实测: 前两次 init
+    // 超时, 租约随 FSM 启动后才成功)。等 lease=true 再初始化, 消除启动竞态。
+    lease_sub_ = create_subscription<std_msgs::msg::Bool>(
+      "/drone/cmd/autonomy_lease", rclcpp::QoS(1).reliable().transient_local(),
+      [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        lease_valid_.store(msg->data);
+      });
+
     if (hardware_servo_) {
       init_timer_ = create_wall_timer(
         1s, [this] {
+          if (!lease_valid_.load()) {
+            if (++lease_wait_ticks_ % 10 == 1) {
+              RCLCPP_WARN(
+                get_logger(),
+                "等待任务租约 (autonomy_lease), 租约生效后才初始化 MAIN5");
+            }
+            return;
+          }
           if (hardware_servo_->initialize()) {
             RCLCPP_INFO(get_logger(), "MAIN5 已确认处于初始闭合位置");
             init_timer_->cancel();
@@ -535,6 +553,9 @@ private:
 
   rclcpp::Service<TriggerDrop>::SharedPtr drop_srv_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr lease_sub_;
+  std::atomic<bool> lease_valid_{false};
+  int lease_wait_ticks_{0};
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr init_timer_;
 };
