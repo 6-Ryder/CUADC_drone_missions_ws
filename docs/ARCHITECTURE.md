@@ -68,7 +68,7 @@ drone_mission     ← 核心任务调度
 
 drone_bringup     ← Launch 文件
     ├── sitl.launch.py       — SITL: px4_bridge + vision + servo + mission
-    └── real_flight.launch.py — 真机: +MicroXRCEAgent + V4L2 camera + Jetson 参数
+    └── real_flight.launch.py — 真机: +V4L2 camera + Jetson 参数 (Agent 由启动脚本持有)
 
 test_mission      ← 分阶段真机测试 (test_forward_recon: 直飞20m+侦察扫描)
 drone_utils       ← 共享工具 (TaskLogger, Watchdog, EmergencyHandler, ProgressMonitor)
@@ -166,7 +166,7 @@ Gazebo 相机 / V4L2 相机
              MAIN5/PWM                         PX4
 ```
 
-运行时由 launch 启动四类节点：PX4 bridge、视觉管线、舵机控制器、任务 FSM。真机额外启动 USB V4L2 相机和 Ethernet/UDP MicroXRCEAgent；SITL 额外启动 Gazebo 图像桥。
+运行时由 launch 启动四类节点：PX4 bridge、视觉管线、舵机控制器、任务 FSM。真机由启动脚本 `scripts/start_full_real_mission.sh` 先启动唯一 Ethernet/UDP MicroXRCEAgent 并等待 DDS 就绪，launch 再启动 USB V4L2 相机等节点；SITL 额外启动 Gazebo 图像桥。
 
 ## 4. 坐标与场地
 

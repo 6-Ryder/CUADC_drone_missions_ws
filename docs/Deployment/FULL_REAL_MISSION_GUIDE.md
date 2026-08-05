@@ -66,7 +66,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 
 ## 4. 构建与启动
 
-使用干净的真机终端，不要预先加载 SITL 环境：
+使用干净的真机终端，不要预先加载 SITL 环境（若已加载，脚本会自动剥离 v4 overlay）：
 
 ```bash
 cd /home/ryder/drone_tasks_ws
@@ -84,8 +84,9 @@ cd /home/ryder/drone_tasks_ws
 ./scripts/start_full_real_mission.sh
 ```
 
-脚本会创建 `log/real_mission_YYYYMMDD_HHMMSS/`，并由 launch 文件启动一个 `MicroXRCEAgent`。
-不要在另一终端再启动同端口 Agent。
+脚本会创建 `log/real_mission_YYYYMMDD_HHMMSS/`，先清理旧进程并启动唯一
+`MicroXRCEAgent`（UDP `8888`），等待 PX4 DDS 就绪后再由 launch 启动任务节点。
+不要在另一终端再启动同端口 Agent；Agent 意外退出时脚本会自动停止任务。
 
 如需覆盖相机设备，只覆盖已确认存在的设备路径：
 
@@ -95,6 +96,22 @@ cd /home/ryder/drone_tasks_ws
 ```
 
 脚本不会自动 Arm、切换飞行模式、调用投放服务、执行降落或发送额外的飞行命令。
+
+### 4.1 开机自启（仅 Agent）
+
+Jetson 开机只应自动拉起 Agent，任务由现场终端启动。`--agent-only` 模式不检查
+相机、不等待 DDS，前台持有 Agent；PX4 侧 `uxrce_dds_client` 会自动重试连接，
+网络与飞控上电后即可建立会话。
+
+```bash
+# systemd Type=simple:
+ExecStart=/home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh --agent-only
+# 或 cron @reboot:
+@reboot /home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh --agent-only
+```
+
+现场全流程任务（不带 `--agent-only`）启动时会先清理该自启 Agent 再启动自己的
+Agent，UDP 端口唯一性由脚本 Step 0 保证。
 
 ## 5. 就绪检查与解锁
 

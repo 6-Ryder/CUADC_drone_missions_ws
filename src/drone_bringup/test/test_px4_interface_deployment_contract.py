@@ -76,29 +76,41 @@ def test_real_flight_default_remains_the_verified_v1_status_topic():
     assert 'vehicle_status_topic: "/fmu/out/vehicle_status_v1"' in source
 
 
-def test_real_flight_launch_uses_udp_agent_for_the_ethernet_px4_client():
-    """The deployed PX4 uses Ethernet uXRCE-DDS, not a Jetson UART."""
-    source = (LAUNCH / "real_flight.launch.py").read_text(encoding="utf-8")
+def test_real_flight_entry_owns_a_udp_agent_while_launch_owns_only_nodes():
+    """The start script owns the only Ethernet UDP Agent; the launch spawns none.
 
-    assert '"dds_port", default_value="8888"' in source
-    assert '"MicroXRCEAgent", "udp4", "-p",' in source
-    assert 'LaunchConfiguration("dds_port")' in source
-    assert '"MicroXRCEAgent", "serial"' not in source
-    assert '"serial_device"' not in source
+    test_mission 模式: scripts/start_full_real_mission.sh 先启动 Agent 并等待
+    DDS 就绪, 再调用 real_flight.launch.py 启动任务节点。
+    """
+    startup = (SCRIPTS / "start_full_real_mission.sh").read_text(encoding="utf-8")
+    launch_source = (LAUNCH / "real_flight.launch.py").read_text(encoding="utf-8")
+
+    assert 'MicroXRCEAgent udp4 -p "$DDS_PORT"' in startup
+    assert "MicroXRCEAgent serial" not in startup
+    assert "DDS_TRANSPORT" not in startup
+    assert '"/fmu/out/vehicle_status_v1"' in startup
+    # launch 不再自己拉起 Agent (无 ExecuteProcess / dds_port 参数)
+    assert '"MicroXRCEAgent", "udp4"' not in launch_source
+    assert "ExecuteProcess" not in launch_source
+    assert '"serial_device"' not in launch_source
 
 
-def test_real_flight_stops_when_its_udp_agent_cannot_own_the_port():
-    """A duplicate Agent must not leave flight nodes running without PX4 DDS."""
-    source = (LAUNCH / "real_flight.launch.py").read_text(encoding="utf-8")
+def test_real_flight_stops_the_mission_when_its_udp_agent_dies():
+    """An Agent death must stop the mission, never leave nodes flying without DDS."""
+    startup = (SCRIPTS / "start_full_real_mission.sh").read_text(encoding="utf-8")
 
-    assert "OnProcessExit" in source
-    assert "target_action=xrce_agent" in source
-    assert "Shutdown(" in source
+    assert "WATCHDOG_PID" in startup
+    assert "MicroXRCEAgent 已退出, 停止任务节点" in startup
+    assert "pkill -INT" in startup
 
 
 def test_real_hardware_scripts_require_ethernet_udp_and_v1_status_topic():
     """No real-flight entry point may silently select the obsolete serial path."""
-    for name in ("simple_mission_real.sh", "test_forward_recon.sh"):
+    for name in (
+        "simple_mission_real.sh",
+        "test_forward_recon.sh",
+        "start_full_real_mission.sh",
+    ):
         source = (SCRIPTS / name).read_text(encoding="utf-8")
 
         assert 'MicroXRCEAgent udp4 -p "$DDS_PORT"' in source

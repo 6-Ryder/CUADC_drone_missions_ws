@@ -1,72 +1,237 @@
 #!/usr/bin/env bash
-# Single safe entry point for the complete real-hardware mission.
-# This script does not arm, change PX4 mode, publish setpoints, call services,
-# control the servo, kill processes, or start a second DDS Agent.  The launch
-# file owns the Agent and all flight nodes.
+# ==============================================================================
+# 全流程真机任务 — Jetson 启动入口 (test_mission 模式)
+#
+# 与 test_forward_recon.sh 相同的结构: 脚本持有唯一 MicroXRCEAgent,
+# launch 文件只启动任务节点。与旧版 (a777457) 的区别:
+#   - Agent 在一切任务闸门之前无条件启动 → 自动启动环境下 PX4 DDS 必然先就绪
+#   - SITL v4 overlay 不再硬失败, 而是从环境中剥离 (自愈, 不依赖人类记忆)
+#   - 相机检查改为限时等待 + 警告, 不再阻断 Agent 与 DDS
+#   - UDP 端口唯一性由 Step 0 清理旧进程保证, 不再依赖 launch 内的 exit guard
+#   - Agent 意外退出 → 脚本自动停止任务节点 (与旧 guard 等价的安全契约)
+#   - EXIT trap 清理 Agent/日志尾随进程, 修复 Ctrl+C 时 Agent 残留
+#
+# 用法:
+#   # 全流程任务 (现场终端)
+#   ./scripts/start_full_real_mission.sh
+#   ./scripts/start_full_real_mission.sh camera_device:=/dev/video0
+#
+#   # 仅启动 Agent (Jetson 开机自启, systemd Type=simple / cron nohup)
+#   ./scripts/start_full_real_mission.sh --agent-only
+#   DDS_PORT=8888 ./scripts/start_full_real_mission.sh --agent-only
+#
+# 本脚本不会 Arm、切模式、投放、降落或返航; 不会发送任何飞行命令。
+# ==============================================================================
 set -euo pipefail
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="$WORKSPACE_DIR/log/real_mission_$RUN_ID"
+DDS_PORT="${DDS_PORT:-8888}"
 DEFAULT_CAMERA_DEVICE="/dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0"
 CAMERA_DEVICE="${CAMERA_DEVICE:-$DEFAULT_CAMERA_DEVICE}"
+CAMERA_WAIT_SECONDS="${CAMERA_WAIT_SECONDS:-30}"
 
-for launch_arg in "$@"; do
-  case "$launch_arg" in
-    camera_device:=*) CAMERA_DEVICE="${launch_arg#camera_device:=}" ;;
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+info() { echo -e "${GREEN}[INFO]${NC}  $(date '+%H:%M:%S') $*"; }
+warn() { echo -e "${YELLOW}[WARN]${NC}  $(date '+%H:%M:%S') $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $*"; }
+step()  { echo -e "\n${BLUE}==== $(date '+%H:%M:%S') $* ====${NC}"; }
+fail()  { error "$*"; exit 1; }
+
+MODE="mission"
+LAUNCH_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --agent-only) MODE="agent" ;;
+    camera_device:=*) CAMERA_DEVICE="${arg#camera_device:=}"; LAUNCH_ARGS+=("$arg") ;;
+    *) LAUNCH_ARGS+=("$arg") ;;
   esac
 done
 
-fail() {
-  printf 'ERROR: %s\n' "$*" >&2
-  exit 1
-}
-
 mkdir -p "$LOG_DIR/ros"
 export ROS_LOG_DIR="$LOG_DIR/ros"
+printf '%q ' "${LAUNCH_ARGS[@]}" > "$LOG_DIR/launch_arguments.txt"
+printf '\n' >> "$LOG_DIR/launch_arguments.txt"
 
-if [[ ! -f /opt/ros/humble/setup.bash ]]; then
-  fail "ROS 2 Humble 未安装：缺少 /opt/ros/humble/setup.bash"
+AGENT_PID=""
+LAUNCH_PID=""
+TAIL_PID=""
+WATCHDOG_PID=""
+
+cleanup() {
+  [ -n "$WATCHDOG_PID" ] && kill "$WATCHDOG_PID" 2>/dev/null || true
+  [ -n "$TAIL_PID" ] && kill "$TAIL_PID" 2>/dev/null || true
+  if [ -n "$AGENT_PID" ] && kill -0 "$AGENT_PID" 2>/dev/null; then
+    kill "$AGENT_PID" 2>/dev/null || true
+    info "MicroXRCEAgent 已清理 (PID $AGENT_PID)"
+  fi
+}
+trap cleanup EXIT
+
+# ---- 环境自愈 (自动启动环境适配) ----
+# systemd 默认 PATH 不含 /opt/ros, cron @reboot 默认 PATH=/usr/bin:/bin。
+for _p in /opt/ros/humble/bin /usr/local/bin; do
+  case ":$PATH:" in
+    *":$_p:"*) ;;
+    *) PATH="$_p:$PATH" ;;
+  esac
+done
+
+# SITL v4 overlay 与真机 v1 消息运行时冲突 (WORKLOG "UnsupportedTypeSupport").
+# 不硬失败退出 (会阻断自动启动), 而是把相关环境变量中的条目剥离掉。
+overlay_stripped=false
+for v in AMENT_PREFIX_PATH CMAKE_PREFIX_PATH LD_LIBRARY_PATH PYTHONPATH COLCON_PREFIX_PATH; do
+  case "${!v:-}" in
+    *sitl_px4_msgs*)
+      filtered=""
+      old_ifs="$IFS"; IFS=':'
+      for entry in ${!v:-}; do
+        case "$entry" in
+          *sitl_px4_msgs*) ;;
+          *) filtered="${filtered:+$filtered:}$entry" ;;
+        esac
+      done
+      IFS="$old_ifs"
+      export "$v=$filtered"
+      overlay_stripped=true
+      ;;
+  esac
+done
+if [ "$overlay_stripped" = true ]; then
+  warn "检测到 SITL px4_msgs overlay, 已从环境剥离 (防止真机 v1/v4 消息冲突)"
+fi
+
+if [ ! -f /opt/ros/humble/setup.bash ]; then
+  fail "ROS 2 Humble 未安装: 缺少 /opt/ros/humble/setup.bash"
 fi
 source /opt/ros/humble/setup.bash
 
-if [[ ! -f "$WORKSPACE_DIR/install/setup.bash" ]]; then
-  fail "工作空间未构建：请先在 $WORKSPACE_DIR 运行 colcon build"
+if [ ! -f "$WORKSPACE_DIR/install/setup.bash" ]; then
+  fail "工作空间未构建: 请先在 $WORKSPACE_DIR 运行 colcon build --symlink-install"
 fi
 source "$WORKSPACE_DIR/install/setup.bash"
+export ROS_DOMAIN_ID=0
 
-if [[ "${AMENT_PREFIX_PATH:-}" == *"/sitl_px4_msgs"* ]] || \
-   [[ "${CMAKE_PREFIX_PATH:-}" == *"/sitl_px4_msgs"* ]] || \
-   [[ "${PYTHONPATH:-}" == *"/sitl_px4_msgs"* ]]; then
-  fail "检测到 SITL px4_msgs overlay；请使用干净终端启动真机任务"
+# ---- Step 0: 清理旧进程 ----
+# 同一 UDP 端口只能由一个 Agent 监听; 先清旧进程保证端口唯一。
+# (自动启动与现场终端并发时, 后启动者拥有端口, 行为确定)
+step "Step 0/4 — 清理旧进程 (保证 UDP :$DDS_PORT 唯一)"
+pkill -9 -f "MicroXRCEAgent" 2>/dev/null || true
+pkill -9 -f "px4_bridge" 2>/dev/null || true
+pkill -9 -f "mission_fsm" 2>/dev/null || true
+pkill -9 -f "vision_pipeline" 2>/dev/null || true
+pkill -9 -f "camera_node" 2>/dev/null || true
+sleep 1
+info "旧进程已清理"
+
+# ---- Step 1: MicroXRCEAgent (先于一切任务闸门, 保证 DDS 必然就绪) ----
+step "Step 1/4 — 启动 MicroXRCEAgent (Ethernet UDP :$DDS_PORT)"
+command -v MicroXRCEAgent >/dev/null || fail "未找到 MicroXRCEAgent (安装 micro-ros-agent 或放入 PATH)"
+MicroXRCEAgent udp4 -p "$DDS_PORT" > "$LOG_DIR/agent.log" 2>&1 &
+AGENT_PID=$!
+echo "$AGENT_PID" > "$LOG_DIR/agent.pid"
+sleep 2
+
+if kill -0 "$AGENT_PID" 2>/dev/null; then
+  info "MicroXRCEAgent 已启动 (PID $AGENT_PID)"
+else
+  error "MicroXRCEAgent 启动失败, 日志尾部:"
+  tail -5 "$LOG_DIR/agent.log" 2>/dev/null || true
+  fail "见 $LOG_DIR/agent.log"
 fi
 
-command -v ros2 >/dev/null || fail "未找到 ros2"
-command -v MicroXRCEAgent >/dev/null || fail "未找到 MicroXRCEAgent"
-ros2 pkg prefix drone_bringup >/dev/null || fail "drone_bringup 未安装到工作空间"
-
-if [[ ! -f "$WORKSPACE_DIR/install/drone_bringup/share/drone_bringup/launch/real_flight.launch.py" ]]; then
-  fail "未找到已安装的 real_flight.launch.py；请重新构建 drone_bringup"
+if [ "$MODE" = "agent" ]; then
+  info "agent-only 模式: 前台持有 Agent, PX4 会自动重试连接 :$DDS_PORT"
+  info "日志: $LOG_DIR/agent.log ; 退出后 Agent 随之停止"
+  wait "$AGENT_PID"
 fi
 
-if [[ ! -e "$CAMERA_DEVICE" ]]; then
-  fail "相机设备不存在：$CAMERA_DEVICE（可通过 camera_device:=... 指定）"
+# ---- Step 2: 等待 PX4 DDS 通信就绪 ----
+step "Step 2/4 — 等待 PX4 DDS 通信就绪"
+DDS_READY=false
+for i in $(seq 1 60); do
+  if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
+    info "PX4 DDS 通信就绪 (耗时 ${i}s)"
+    DDS_READY=true
+    break
+  fi
+  [ $((i % 10)) -eq 0 ] && info "  等待 PX4 连接... (${i}s)"
+  sleep 1
+done
+
+if [ "$DDS_READY" = false ]; then
+  error "PX4 DDS 通信超时 (60s)"
+  error ""
+  error "硬件检查:"
+  error "  1. 飞控是否上电?"
+  error "  2. 网线: Jetson <-> CUAV 7 Nano?"
+  error "  3. PX4 Ethernet IP 是否可达? (Agent 日志: $LOG_DIR/agent.log)"
+  error "  4. PX4 参数: UXRCE_DDS_CFG=1000, UXRCE_DDS_AG_IP=<Jetson IP>, UXRCE_DDS_PRT=$DDS_PORT"
+  fail "DDS 未就绪"
 fi
-if [[ ! -r "$CAMERA_DEVICE" ]]; then
-  fail "当前用户无权读取相机：$CAMERA_DEVICE"
+
+# ---- Step 3: 相机设备检查 (限时等待 + 警告, 不阻断 DDS) ----
+step "Step 3/4 — 相机设备检查"
+if [ ! -e "$CAMERA_DEVICE" ]; then
+  warn "相机设备不存在: $CAMERA_DEVICE"
+  warn "  等待 ${CAMERA_WAIT_SECONDS}s (USB 枚举可能慢于系统启动)..."
+  waited=0
+  while [ $waited -lt "$CAMERA_WAIT_SECONDS" ] && [ ! -e "$CAMERA_DEVICE" ]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+fi
+if [ ! -e "$CAMERA_DEVICE" ]; then
+  warn "相机仍未出现: 继续启动任务节点, 但视觉/精准降落不可用"
+  warn "  可稍后插入相机并重跑本脚本, 或用 camera_device:=/dev/videoN 指定实际设备"
+elif [ ! -r "$CAMERA_DEVICE" ]; then
+  warn "相机不可读: $CAMERA_DEVICE (检查 udev 权限或当前用户是否在 video 组)"
+else
+  info "相机就绪: $CAMERA_DEVICE"
 fi
 
-printf '%q ' "$@" > "$LOG_DIR/launch_arguments.txt"
-printf '\n' >> "$LOG_DIR/launch_arguments.txt"
+# ---- Step 4: 启动任务节点 ----
+step "Step 4/4 — 启动任务节点 (real_flight.launch.py)"
 
-cat <<EOF
-=== 全流程真机任务 ===
-日志目录: $LOG_DIR
-PX4 接口: /fmu/out/vehicle_status_v1（真机 v1）
-相机设备: $CAMERA_DEVICE
-Home: 解锁点；投放区 32.5m、侦察区 57.5m（可通过 launch 参数修改）
-操作要求: 保持桨叶与场地安全；由操作者在遥控器上 Arm；随时可切出 Offboard 接管。
-脚本不会自动 Arm、切模式、投放、降落或返航；MicroXRCEAgent 仅由 launch 管理。
-EOF
+# Agent 是任务唯一数据源: 意外退出时停止任务 (与旧 launch exit guard 等价).
+( while kill -0 "$AGENT_PID" 2>/dev/null; do sleep 2; done
+  if kill -0 "$$" 2>/dev/null; then
+    warn "MicroXRCEAgent 已退出, 停止任务节点 (避免 DDS 断开后继续飞行)"
+    pkill -INT -f "real_flight.launch.py" 2>/dev/null || true
+  fi ) &
+WATCHDOG_PID=$!
 
-ros2 launch drone_bringup real_flight.launch.py "$@" 2>&1 | tee "$LOG_DIR/mission.log"
+echo ""
+echo "┌──────────────────────────────────────────────────────────┐"
+echo "│           全流程真机任务 (Jetson)                          │"
+echo "├──────────────────────────────────────────────────────────┤"
+echo "│  通信:     PX4 Ethernet → Agent UDP:$DDS_PORT (脚本持有)   │"
+echo "│  解锁:     遥控器 Arm Switch → is_armed() → 起飞           │"
+echo "│  Home:     解锁点 (0, 0)                                 │"
+echo "│  投放区:   32.5m / 侦察区: 57.5m (launch 参数可改)          │"
+echo "│  安全:     Agent 退出自动停止任务; 随时遥控器切 Offboard    │"
+echo "├──────────────────────────────────────────────────────────┤"
+echo "│  日志:     $LOG_DIR                                      │"
+echo "│  就绪检查: ./scripts/verify_real_flight_ready.sh          │"
+echo "└──────────────────────────────────────────────────────────┘"
+echo ""
+
+ros2 launch drone_bringup real_flight.launch.py "${LAUNCH_ARGS[@]}" \
+  > "$LOG_DIR/mission.log" 2>&1 &
+LAUNCH_PID=$!
+tail -f "$LOG_DIR/mission.log" & TAIL_PID=$!
+
+set +e
+wait "$LAUNCH_PID"
+LAUNCH_RC=$?
+set -e
+kill "$TAIL_PID" 2>/dev/null || true
+
+info "任务结束 (launch 退出码 $LAUNCH_RC)"
+exit "$LAUNCH_RC"
