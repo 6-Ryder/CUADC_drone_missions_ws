@@ -21,7 +21,9 @@ def test_full_real_launcher_owns_one_udp_agent_and_runs_the_mission():
     """
     source = _source(LAUNCHER_PATH)
 
-    assert "set -euo pipefail" in source
+    # set -u 会与 /opt/ros/humble/setup.bash 的未保护变量冲突 (与 test_mission 同为 -eo)
+    assert "set -eo pipefail" in source
+    assert "set -u" not in source
     assert "real_mission_" in source
     assert 'export ROS_LOG_DIR="$LOG_DIR/ros"' in source
     assert 'ros2 launch drone_bringup real_flight.launch.py "${LAUNCH_ARGS[@]}"' in source
@@ -68,7 +70,8 @@ def test_full_real_launcher_never_issues_vehicle_or_servo_commands():
 def test_readiness_verifier_is_bounded_read_only_and_checks_real_interfaces():
     source = _source(VERIFIER_PATH)
 
-    assert "set -euo pipefail" in source
+    assert "set -eo pipefail" in source
+    assert "set -u" not in source
     assert "timeout" in source
     assert "ros2 topic echo" in source
     assert "ros2 topic info" in source
