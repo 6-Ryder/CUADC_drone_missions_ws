@@ -11,6 +11,7 @@
   3. `real_flight.launch.py` 移除自持 Agent 与 `agent_exit_guard`（双 Agent 会同端口冲突互杀）；等价安全契约由脚本 watchdog 承担：Agent 意外退出 → 自动停止任务 launch。
   4. 契约测试同步：`test_real_mission_scripts.py` 改断言"脚本持有唯一 UDP Agent + watchdog + 剥离逻辑"；`test_px4_interface_deployment_contract.py` 断言 launch 不再含 Agent/ExecuteProcess，真机脚本三件套统一 `udp4 -p "$DDS_PORT"`。
 - 验证：`bash -n`、两测试文件 13 passed。**待真机验证**：自启后 QGC `uxrce_dds_client status` 应显示连接；agent.log 应出现来自 `192.168.1.10` 的 UDP 会话。
+- 后续收敛（2026-08-05 同日）：按现场反馈（test_mission 开机自启稳定，全流程自启失败），脚本与 test_mission 进一步对齐——**移除相机限时等待**（不设脚本级相机检查，由 launch 与 verify 脚本处理），步骤改为 Step 0-3/3；自启配置定为直接运行全流程脚本（`--agent-only` 降级为飞控晚于 Jetson 上电 >60s 时的替代）；文档 §4.1/DEPLOYMENT §5 同步。断点定位结论：两脚本逻辑同构、环境正常时，全流程自启失败仅剩 install/ 旧版 launch（自带 Agent → 双 Agent → guard 关整机）与 Jetson 未同步两种部署状态，均需 `git pull` + `colcon build --packages-select drone_bringup --symlink-install` 解决。
 
 ## 2026-08-05 — 真机链路代码审计：四个缺口
 
