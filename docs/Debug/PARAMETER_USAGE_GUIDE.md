@@ -161,7 +161,7 @@ PX4 的 `MPC_XY_VEL_MAX` 等飞控参数仍可能进一步降低实际速度。
 | `area1_north_min/max` | `30.0/35.0` m | 投放区 NED North 边界 |
 | `area1_east_min/max` | `-4.0/4.0` m | 投放区 NED East 边界 |
 | `area1_altitude` | `2.0` m | 低空投放高度 |
-| `area1_search_altitude` | `5.0` m | 搜索和建图高度 |
+| `area1_search_altitude` | `5.6` m | 搜索和建图高度 |
 
 修改边界时要保证 `min < max`，并同步检查相机覆盖范围和目标记忆坐标。
 
