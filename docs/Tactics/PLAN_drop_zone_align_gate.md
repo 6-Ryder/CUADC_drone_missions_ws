@@ -1,156 +1,180 @@
-# 方案规划:投放区视觉对心判定重构 + 伺服收敛改进
+# 方案规划:投放区视觉对心判定重构(用户终版决策)
 
-> 状态:**方案已完成回放验证,参数待取舍,未实施**(2026-08-06)
+> 状态:**已实施完成**(2026-08-06);剩真机复飞验证 1.5m 投放段窗口
 > 基线:HEAD `57ea255`(投放区两级降高调整后)
 > 数据源:`real_flight_logs/2026_8_05/ros2_log/real_mission_20260805_195356`(19:53, 效果最好)、`real_flight_logs/2026_8_06/ros2_log/real_mission_20260806_*`(09:30 / 10:01)
+> 姊妹分析:`docs/Tactics/DROP_STALL_ANALYSIS.md`(10:01 深入分析,含 FPS 3-5、stall 对齐等被本方案吸收的发现)
+> 决策人:用户(2026-08-06 权衡会)
 
 ---
 
-## 1. 背景与根因
+## 1. 背景与根因(两文档合并)
 
 ### 1.1 现象
-
-真机投放区任务三次全流程均失败,投放 0/0:
 
 | 架次 | 配置 | 实际表现 | 失败根因 |
 |---|---|---|---|
 | **8.05 19:53**(效果最好) | 2.0m 降高,窗口 9px | 伺服真收敛到 2.5px、稳定 5/5、进入刹车——刹车 0.5s 后漂到 9.3px(**越界 0.3px**),稳定清零;此后 ±120px 极限环不再收敛,74s 超时 → 接管 | 窗口太窄 + 刹车复查不容忍漂移 |
 | 8.06 09:30 | 2.0m 降高 | 目标检测频繁丢失(no_candidates),像素 150-270px 徘徊,48 帧丢失超限 | 检测侧问题,与判定无关 |
-| 8.06 10:01 | 2.8m 降高,现场放宽窗口 35px | 多次稳定 5-21/5、9 次进刹车,但 **53 次"等待水平速度归零"**——speed_xy 实测 0.078~0.302 m/s(集中 0.10~0.12),门槛 0.04 是实测最低值的 2 倍 | **速度门槛 0.04 真机低空不可达** |
+| 8.06 10:01 | 2.8m 降高,窗口 35px | **9 次对心成功全部进入刹车,刹车后复查帧像素全部 ≤35px 通过像素链**——卡在刹车后速度等待(53 次),speed_xy 实测 0.078~0.302 m/s(集中 0.10~0.12),门槛 0.04 是实测最低值的 2 倍 | **速度门槛 0.04 真机低空不可达(唯一阻塞)** |
 
-### 1.2 根因(判定链五处失效)
+### 1.2 根因(合并后,按伤害排序)
 
-按伤害排序:
-
-1. **速度门槛 `precision_align_release_max_horizontal_speed: 0.04 m/s`(主凶)** —— 真机低空悬停水平速度常态 0.10-0.12 m/s(风 + PX4 速度估计噪声 + 位置环残差),0.04 是"期望飞机绝对静止"的不可达条件。10:01 卡死于 `waiting_velocity_settle` 死循环(53 次日志),25s 超时 × 2 次重试耗尽 → 接管。
-2. **`precision_align_raw_pixel_tolerance: 9.0px` 窗口** —— 19:53 证明飞机能到 2.5px,但 0.1 m/s 漂移下 9px 窗口撑不过一个刹车周期;该架次在 ≤15px 有连续 5 帧,≤9px 从不连续。
-3. **刹车 0.5s + 复查帧再判一次(`final_brake_s`)** —— 19:53 复查帧 9.3px 差 0.3px 即清零重来;刹车期间不消费新观测,浪费稳定窗口。
-4. **`smooth_pixel_tolerance: 7.0px` 与 `threshold_norm_x/y: 0.008`(实际 5.1/3.8px)** —— 7FPS + 快速漂移下 EMA 滞后,10:01 片段 smooth 值 20-29px 高于 raw;两个条件都是纯伤害,仅 19:53 稳定在 2.5px 时恰好能过。
-5. **锁存后复查(`state_drop.py:469-470`)** —— 与控制器内判定重复,同样的不可达阈值再卡一遍。
+1. **速度门槛 `precision_align_release_max_horizontal_speed: 0.04`(主凶)** —— 真机低空悬停水平速度常态 0.10-0.12 m/s(风 + PX4 位置环残差 + 速度估计噪声),0.04 不可达。10:01 的 9 次对心全部死在速度等待,25s 超时 × 2 次重试耗尽 → 接管。
+2. **`threshold_norm_x/y: 0.008`(隐藏杀手,回放新发现)** —— 0.008×640 = 5.1px,比 9px 原窗口还紧,两架次在 0.008 下全部锁死。现场若未放宽,9 次刹车根本不会发生;**放宽临界为 0.06**:10:01 第 1 次刹车复查帧 |dy|=0.0515,0.05 会卡(t+20.8s),0.06 放行(t+3.7s)。
+3. **`raw_pixel_tolerance: 9.0px`(19:53 根因)** —— 0.1 m/s 漂移下 9px 撑不过一个刹车周期;现场放宽到 35px 后对心能力被证明正常(10:01)。
+4. **刹车 0.5s + 速度等待无超时(10:01 死循环)** —— 速度不达标时无限等待,像素漂移后清零重来。
+5. **`smooth_pixel_tolerance: 7.0px`(19:53 附加伤害)** —— EMA 滞后使 smooth 高于 raw。
+6. **伺服观测滞后(FPS 3-5,DROP_STALL 发现 4)** —— 精校期 FPS 8-12 → 3-5(333ms/帧),`hover_s=0.04` + `fine_step_s=0.12`,每发 3 个脉冲才见一次结果。
 
 ### 1.3 伺服"不收敛"的定性
 
-- 19:53:伺服收敛能力**好**(135px→4px 仅 19s),失败全在判定。
-- 10:01:收敛差(最低 19.8px)主因是速度门槛卡死导致的假象——飞机在窗口边缘反复进出(日志可见 19.2→21.5s 连续 5 帧 28→20px 片段,片段间漂出再回来)。
-- 两架次共同物理事实:低空水平漂移 ~0.1 m/s 不可消除,判定必须容忍它。
+- 19:53:收敛能力**好**(135px→4px 仅 19s),失败全在判定。
+- 10:01:对心能力**正常**(9 次进刹车,像素稳定 5-21 帧);"收敛差"观感是速度卡死的假象。
+- 共同物理事实:低空水平漂移 ~0.1 m/s 不可消除,判定必须容忍。
 
 ---
 
-## 2. 核心设计
+## 2. 用户终版决策(2026-08-06 权衡会)
 
-**释放判定 = "像素大致稳定在窗口内"**,以像素稳定帧作为"大致静止"的代理指标,删除不可达的绝对速度条件。
+| 项 | 决策 | 理由 |
+|---|---|---|
+| **速度门槛** | `0.04 → 0.22`,**保留阻塞检查**(不删除、不加超时) | 实测速度 0.078~0.302(53 样本,中位 0.127);**0.22 覆盖 81.1% 帧**,>0.22 的 10 帧是单次等待期的事件性爬升序列(0.223→0.302,非随机帧);10:01 第 1 次刹车速度 0.098 直接通过;释放瞬间带速受控;对心误差仍是核心机制,速度是辅助约束 |
+| **norm** | `0.008 → 0.06`,**放宽不删除** | 保留防跳变能力(拦 0.0772+ 的单帧跳变);回放证明 ≥0.06 是 10:01 第 1 次刹车放行的临界(0.05 卡 |dy|=0.0515) |
+| **稳定帧** | `5 → 4` | 回放敏感性:3/4/5 双架次均放行,4 无副作用且比 5 早 1s |
+| **像素对心误差(两级窗口)** | 精校段(2.8m)`raw=35`;投放段(1.5m)`raw=30` | 像素对心是核心机制;低空目标更大、检测更清楚,收紧到 30px 保证投放精度(1.5m 时 30px ≈ 4.3cm,2.8m 时 35px ≈ 9.4cm) |
+| **smooth** | `30`(两级统一) | 10:01 复查帧 smooth 24.8-29.4 全部通过;30 比现场 35 紧一点防噪声 |
+| **stall_threshold** | `25 → 40`(采纳 DROP_STALL 4.3) | 对齐窗口:35px 下 stall=25 使 25-35px 徘徊不触发停滞;40 ≥ tol+5 兜底不收敛 |
+| **hover_s** | `0.04 → 0.15`(采纳 DROP_STALL 4.4,升级必改) | FPS 3-5 下 0.04s 悬停等不到新观测 |
+| **vision_loss_timeout** | `3 → 5`(采纳 DROP_STALL 4.7,一并改) | 真机光照/遮挡易超 3s |
+| **landing 死区/置信度** | 暂缓(DROP_STALL 4.5/4.6) | 涉及降落质量,真机近地数据不足,减少本次变量 |
 
-### 2.1 判定链(改后)
+---
+
+## 3. 核心设计(改后判定链,两级窗口)
+
+**释放判定 = 像素大致稳定在窗口内 + 0.5s 刹车 + 速度 ≤ 0.22**,窗口随高度两级收紧:
 
 ```
 目标存在(置信度/世界门/跳变拒绝, 不变)
-→ raw_pixel_error ≤ 30px                 (9 → 30, 容忍漂移)
-→ smooth_pixel_error ≤ 25px              (7 → 25, 降为安全网)
-→ |dx|,|dy| ≤ 0.05                       (0.008 → 0.05, 防跳变, 不再做紧约束)
-→ 连续 3 帧 (stable_frames 5 → 3)
-→ 刹车 0.5s 复查(同阈值, 不变)
-→ 放行 (删除 _horizontal_speed_ok 速度门槛)
+→ raw_pixel_error ≤ 窗口(raw: 2.8m 段 35px / 1.5m 段 30px)
+→ smooth_pixel_error ≤ 30px(EMA 安全网)
+→ |dx|,|dy| ≤ 0.06(norm 防跳变, 不再做紧约束)
+→ 连续 4 帧稳定 (stable_frames=4)
+→ 刹车 0.5s (stop_velocity, 不变)
+→ 复查:像素同阈值 + speed_xy ≤ 0.22 → 放行
 ```
 
-### 2.2 物理意义
+两级窗口语义:
+- **精校段(2.8m)**:窗口 35px —— 现场已验证对心能力(9 次刹车),容忍 2.8m 高度下 ~0.1 m/s 漂移(35px ≈ 9.4cm)。
+- **投放段(1.5m)**:窗口收紧 30px —— 降高后目标更大、检测更稳,1.5m 时 30px ≈ 4.3cm,保证最终投放精度。
+- 切换:按当前高度(切换阈值 2.0m,介于两级降高之间),参数化可调。
 
-- 1.7m 投放高度,640×480 相机(真机实测,`_camera_geometry` 用 `camera_cx/cy=320/240` + `image_width/height=640/480`),30px ≈ 15cm 偏移——投放物下落漂移本身远大于此,对心精度足够。
-- 0.1 m/s 漂移 × 0.5s 刹车 = 5-6px 位移,30px 窗口内复查帧几乎必然通过(19:53 复查帧 15.8px、10:01 复查帧 20-24px 均验证)。
+物理意义:
+- 0.1-0.15 m/s 漂移 × 0.5s 刹车 = 5-8px,35px 窗口容余 4-6 倍(10:01 复查帧 19.8-33.2px 全部通过)。
+- 0.22 m/s × 0.5s ≈ 20px,刹车帧 ≤15px 时复查仍稳过;风况恶化可加长 `final_brake_s`。
 
 ---
 
-## 3. 参数一览(取舍项标注)
+## 4. 参数一览(终版)
 
-| 参数名 | 现值 | 建议值 | 取舍说明 |
+| 参数名 | 现值 | 目标值 | 依据 |
 |---|---|---|---|
-| `precision_align_raw_pixel_tolerance` | 9.0(真机现场一度 35) | **30.0**(推荐)/ 25.0(保守) | 25px 下 10:01 从未连续 3 帧(片段 20-28px),30px 双架次回放全过;1.7m 下 30px≈15cm |
-| `precision_align_smooth_pixel_tolerance` | 7.0(真机现场 35) | **25.0** | 降为安全网;10:01 的 EMA 滞后值 20-29px |
-| `precision_align_threshold_norm_x/y` | 0.008 | **0.05** | 被 raw 蕴含;0.05≈32/24px 仅防检测跳变 |
-| `precision_align_stable_frames` | 5 | **3** | 19:53 的 5 帧 run 只差第 6 帧复查;3 帧给足余量 |
+| `precision_align_release_max_horizontal_speed` | 0.04 | **0.22** | 覆盖实测 81.1%(中位 0.127);保留阻塞 |
+| `precision_align_raw_pixel_tolerance` | 9.0(SITL)/35.0(真机) | **35.0**(2.8m 精校段) | 现场已验证 |
+| `precision_align_final_raw_pixel_tolerance` | —(新增) | **30.0**(1.5m 投放段) | 低空收紧保证投放精度 |
+| `precision_align_tight_window_height` | —(新增) | **2.0 m**(切换高度) | 介于两级降高 |
+| `precision_align_smooth_pixel_tolerance` | 7.0 / 35.0 | **30.0** | 复查帧实测 24.8-29.4 全过 |
+| `precision_align_threshold_norm_x/y` | 0.008 | **0.06** | ≥0.06 是 10:01 第 1 次刹车放行临界 |
+| `precision_align_stable_frames` | 5 | **4** | 敏感性无副作用 |
 | `precision_align_final_brake_s` | 0.5 | 0.5(不变) | 复查帧用新阈值即通过 |
-| `precision_align_release_max_horizontal_speed` | 0.04 | **删除检查**(推荐)/ 0.25 安全网 | 实测常态 0.10-0.12、峰值 0.30;0.04 不可达,0.25 会偶发拦截峰值 |
-| `precision_align_alpha` (伺服, 可选) | 0.55 | 0.6-0.7 | 减少 EMA 滞后;真机检测噪声是否允许待复飞确认 |
-| `precision_align_hover_s` (伺服, 可选) | 0.04 | 0.15 | 每步后更长的稳定观察时间 |
+| `precision_align_hover_s` | 0.04 | **0.15** | FPS 3-5 伺服滞后 |
+| `stall_threshold`(state_drop.py L181,硬编码) | 25.0 | **40.0** | ≥ tol+5,兜底不收敛 |
+| `vision_loss_timeout` | 3.0 | **5.0** | 一并改(低风险) |
+| `landing_servo_deadzone_px` / `landing_target_min_confidence` | 12 / 0.60 | 暂缓 | 单独评估 |
+| `precision_align_alpha` | 0.55 | 0.55(不变) | 不引入变量 |
 
 ---
 
-## 4. 回放验证(已完成)
+## 5. 回放验证(已完成,终版)
 
-### 4.1 方法
+### 5.1 方法
 
-`/tmp/replay_align.py`(临时脚本):解析 mission.log 中 PREC_ALIGN tracking 行 / DESCEND 失败行 / 进入最终刹车复查行,合并为观测序列(节流 0.75s 导致的缺帧按"间隔 <2s 视为连续"近似),按控制流逻辑(单帧判定 → 稳定帧累积 → 刹车 → 复查)逐帧重放,参数化全部阈值。
+`/tmp/replay_align_v5.py`:解析 mission.log 的 PREC_ALIGN tracking / DESCEND 失败 / "进入最终刹车复查" / "等待水平速度归零"行,合并为观测序列(节流缺帧按 gap<2.5s 视为连续)。**模型**:刹车行(`stable=5/5`)是稳定达成证据,刹车 0.5s 后复查 = 下一个新观测帧**像素 aligned 且速度 ≤ 门槛**(无 speed 日志的架次视为速度通过,19:53 现场证据从未因速度失败)。
 
-### 4.2 结果
+### 5.2 结果(终版组合:35/30/0.06/4帧/0.5s/0.22)
 
 | 参数组合 | 19:53 | 10:01 |
 |---|---|---|
-| 现场(9/7/0.008/5帧) | 不放行 ✓(与事实一致) | — |
-| 现场(35/35/0.05/5帧 + 速度 0.04) | — | 不放行 ✓(与事实一致) |
-| **推荐(30/25/0.05/3帧)** | **放行 @t+17s (raw=15.1px)** | **放行 @t+66s (raw=20.3px)** |
-| 无刹车变体(30/25/0.05/3帧) | 放行 @t+8s | 放行 @t+22s |
+| 现场全参数(35/35/0.05/5帧 + speed 0.04) | — | **不放行** ✓(保真,53 次速度等待) |
+| **用户终版(35/30/0.06/4帧 + speed 0.22)** | **RELEASE@t+26.3s**(复查 8.4px) | **RELEASE@t+3.7s**(复查 33.2px, speed 0.098) |
+| norm=0.05(低于临界) | RELEASE@t+26.3s | RELEASE@t+20.8s(被 \|dy\|=0.0515 卡 2 次刹车) |
+| norm=0.08 | RELEASE@t+19.1s | RELEASE@t+3.7s |
+| stable=3 / 4 / 5 | t+18.3 / **26.3** / 27.1s | 均 t+3.7s |
+| speed=0.15 / 0.22 / 0.30 | — | 均 t+3.7s(第 1 次刹车 speed=0.098 全过) |
 
-- 10:01 的 66s 是保守估计(日志缺帧);现场证据(9 次刹车后复查帧全部 aligned)表明删除速度门槛后首次刹车(~19s)即放行。
-- 回放器已证明与现场行为一致(现场参数 → 不放行),可作为复飞回归工具。建议落地到 `scripts/replay_align.py`。
+- 10:01 的 9 次刹车复查帧像素:33.2/39.2/26.4/30.2/63.1/24.5/74.2/20.3/19.8px,6 次直接通过像素链(63.1/74.2 为检测跳变)——与 DROP_STALL"8 次对心全部可投放"叙事一致,**对心能力完全正常,唯一苛刻条件是速度 0.04**。
+- **复审:判定链与现场代码逐行核对一致**(precision_align_controller.py L198-203 刹车后新观测像素复查隐含在 stable 累积、L235 `_horizontal_speed_ok` 速度检查)——回放模型非自证。速度分布 53 样本:≤0.15 占 62.3%、≤0.22 占 81.1%、≤0.30 占 98.1%;>0.22 的 10 帧为递增序列(0.223→0.302),是单次等待期的事件性爬升而非随机帧。
+- 两级窗口第二段(1.5m/30px)无历史日志数据,判定链回放只验证了精校段(35px);1.5m 段由真机复飞验证。
+- 回放器已落地 `tools/replay_align.py` 作复飞回归工具。
 
 ---
 
-## 5. 代码改动点
-
-### 5.1 判定(必改)
+## 6. 代码改动点
 
 | 文件 | 改动 |
 |---|---|
-| `src/drone_mission/config/mission_params_real.yaml` | 第 107-113 行参数值更新(§3 表);同步 `mission_params.yaml` |
-| `src/drone_mission/drone_mission/precision_align_controller.py` | `_horizontal_speed_ok()` 调用移除(改为日志记录待命,不阻塞 release);`_is_precise()` 阈值走参数(自动跟随);刹车逻辑保留 |
-| `src/drone_mission/drone_mission/states/state_drop.py` | 456-496 行锁存复查保留(读同一参数自动跟随);无需删状态机逻辑 |
-
-### 5.2 伺服(可选,二阶段)
-
-- 误差 < 40px 时停止发速度脉冲、纯 `stop_velocity()` 观察(PX4 位置环自然稳);
-- `hover_s` 0.04 → 0.15s;
-- 该项回放无法验证闭环,需 SITL 或真机复飞确认。
+| `src/drone_mission/config/mission_params_real.yaml` | §4 参数更新 + 新参数声明(final_raw_pixel_tolerance / tight_window_height) |
+| `src/drone_mission/config/mission_params.yaml` | **不改**(用户决策:仿真保持原参数;SITL 不配新参数 → 两级窗口永不切换,行为不变) |
+| `src/drone_mission/drone_mission/precision_align_controller.py` | **两级窗口接入(已核对代码)**:`_nudge_to_visible_drop_target`(L441)已传 `drop_height=drop_h`(当前阶段目标高度:2.8m 精校段 / 1.5m 投放段)→ `_is_precise()`(L276)加 drop_height 参数选 raw_tol:≥2.0 → 35,<2.0 → 30(参数化 `tight_window_height`);norm L285-286 0.008→0.06;`_horizontal_speed_ok()`(L315)门槛 0.04→0.22(阈值走参数,逻辑不变) |
+| `src/drone_mission/drone_mission/states/state_drop.py` | L181 `stall_threshold` 25→40;L465-468 锁存复查按当前阶段高度选 raw_tol(与控制器同一参数);L460 stable_frames 默认值 4 |
+| `src/drone_mission/drone_mission/mission_state_machine.py` | 新增 2 参数声明(final_raw_pixel_tolerance / tight_window_height);**默认值全部保持原样** |
+| `tools/replay_align.py` | **新增**:日志回放回归工具(v5 模型) |
+| `src/drone_mission/test/test_precision_align_controller.py` | 阈值断言更新(0.22/0.06/两级窗口);新增两级窗口用例(高度切换) |
 
 ---
 
-## 6. 测试计划
+## 7. 测试计划
 
-1. **回放回归**(新增 `scripts/replay_align.py`):两架次日志 + 现场参数 → 不放行;推荐参数 → 放行。作为判定链回归工具。
-2. **单测**:`precision_align_controller` 现有测试更新阈值断言(`test_precision_align_controller.py`);删除 `_horizontal_speed_ok` 相关断言。
-3. **SITL 端到端**:完整任务投放成功(现有 7-30 SITL 已验证基线,改后复跑)。
-4. **真机复飞**:投放区对心 → 投放成功;验证 25s 超时不再触发。
+1. **回放回归**(`tools/replay_align.py`):两架次 + 现场参数 → 不放行;终版参数 → 放行(t+26.3s / t+3.7s)。
+2. **单测**:阈值断言更新;两级窗口切换用例(2.8m → 35px、1.5m → 30px);`_horizontal_speed_ok` 0.22。
+3. **SITL 端到端**:完整任务投放成功(现有基线复跑)。
+4. **真机复飞**:投放区对心 → 降高 → 投放成功;验证 25s 超时不再触发;重点观察 1.5m 投放段 30px 窗口表现与释放瞬间带速对落点的影响。
 
 ---
 
-## 7. 实施顺序
+## 8. 实施顺序
 
 | 步 | 内容 | 验证 |
 |---|---|---|
-| 1 | `scripts/replay_align.py` 落地 + 双架次回归 | 现场参数 X / 推荐参数 OK |
-| 2 | 参数更新(两 yaml)+ 单测同步 | pytest 全绿 |
-| 3 | `_horizontal_speed_ok` 移除 | 单测全绿 |
+| 1 | `tools/replay_align.py` 落地 + 双架次回归 | 现场参数 X / 终版参数 OK |
+| 2 | 参数更新(仅 mission_params_real.yaml + mission_state_machine 声明)+ 单测同步 | pytest 全绿 |
+| 3 | 两级窗口接入(controller `_is_precise` + state_drop 复查) | 单测全绿 |
 | 4 | SITL 全链复跑 | 投放成功 |
-| 5 | 真机复飞 | 投放区成功;评估伺服改进是否必要 |
+| 5 | 真机复飞 | 投放区成功;评估 FPS 问题与 1.5m 段窗口 |
 
 ---
 
-## 8. 风险
+## 9. 风险
 
-1. **30px 窗口对心精度**:1.7m 高度 30px ≈ 15cm 水平偏移;投放物下落漂移(2.5L 瓶/圆柱)通常 ±20-40cm,15cm 远优于所需。若后续需要更精准投放,再收窗口。
-2. **删除速度门槛**:释放瞬间飞机可能仍有 0.1 m/s 水平速度 → 投放物获得初始水平速度,叠加漂移。可接受(总漂移仍在投放容忍内);若实测超容忍,用 `0.25` 安全网替代删除。
-3. **复查帧仍可能越界**:刹车 0.5s 漂移 5-6px,30px 窗口容余 3-4 倍;若风况恶化可加长 `final_brake_s` 或复查窗口系数。
-4. **回放缺帧近似**:节流吞帧按"2s 内视为连续"近似,真实中间帧若有不 aligned 会低估放行率;现场 stable 5-21 帧证据表明近似保守安全。
-5. **伺服极限环未根治**:19:53 的 ±120px 极限环在判定修复后不再致命(30px 窗口内抓稳定机会),但收敛质量仍是后续优化方向(§5.2)。
+1. **speed=0.22 无超时**:实测峰值 0.223-0.302 帧会等待(概率 ~4%),像素漂移出窗后清零重来,下次对心大概率通过(常态 0.10-0.12)。预案:若复飞仍见速度卡死,加 3s 超时放行(DROP_STALL 4.2)或降级为日志。
+2. **复查帧越界**:0.22 m/s × 0.5s ≈ 20px,刹车帧 ≤15px 时复查稳过;风况恶化可加长 `final_brake_s`。
+3. **两级窗口第二段无日志验证**:1.5m/30px 是首次实装,真机复飞为第一验证点;若 1.5m 段检测/对心表现不如预期,可回调 30→35。
+4. **回放缺帧近似**:节流吞帧按 gap<2.5s 视为连续;现场 stable 5-21 帧证据表明近似保守安全。
+5. **伺服极限环未根治**:19:53 的 ±120px 极限环在判定修复后不再致命(35px 窗口抓稳定机会);`hover_s=0.15` 是第一步,视觉 FPS 暴跌根因待查(见 DROP_STALL 发现 4)。
+6. **stall_threshold 40**:像素 35-40px 徘徊 2s 即触发最终下降——对心质量略降换来兜底,可接受。
 
 ---
 
-## 9. 关键文件
+## 10. 关键文件
 
 | 文件 | 改动 |
 |---|---|
-| `scripts/replay_align.py` | **新增**:日志回放回归工具 |
-| `src/drone_mission/config/mission_params_real.yaml` | 参数更新(§3) |
-| `src/drone_mission/config/mission_params.yaml` | 参数更新(§3, SITL 同步) |
-| `src/drone_mission/drone_mission/precision_align_controller.py` | 移除速度门槛调用 |
-| `src/drone_mission/drone_mission/states/state_drop.py` | 不改逻辑(参数自动跟随),复核 |
-| `src/drone_mission/test/test_precision_align_controller.py` | 阈值断言同步 |
+| `tools/replay_align.py` | **新增**:日志回放回归工具 |
+| `src/drone_mission/config/mission_params_real.yaml` | 参数更新(§4) |
+| `src/drone_mission/config/mission_params.yaml` | **不改**(仿真保持原参数,见 §6) |
+| `src/drone_mission/drone_mission/precision_align_controller.py` | 两级窗口 + norm 0.06 + speed 0.22 |
+| `src/drone_mission/drone_mission/states/state_drop.py` | stall 40 + 复查两级窗口 + stable 4 |
+| `src/drone_mission/drone_mission/mission_state_machine.py` | 参数默认值声明同步 |
+| `src/drone_mission/test/test_precision_align_controller.py` | 断言同步 + 两级窗口用例 |
 | 文档 ×2 | PARAMETER_USAGE_GUIDE、本方案 |

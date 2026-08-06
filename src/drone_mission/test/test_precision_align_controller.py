@@ -325,3 +325,63 @@ def test_fine_alignment_uses_low_speed_cap():
 
     forward, right, _down = fsm.fc.body_commands[-1]
     assert (forward ** 2 + right ** 2) ** 0.5 <= 0.0200001
+
+
+def _window_target(center_u=640.0, center_v=480.0):
+    return [{
+        "confidence": 0.9,
+        "center_u": center_u,
+        "center_v": center_v,
+        "center_x": 42.3,
+        "center_y": 5.5,
+    }]
+
+
+def test_two_stage_window_switches_by_drop_height():
+    """两级窗口: 2.8m 精校段 35px 通过, 降到 1.5m 投放段同 33px 收紧被拒."""
+    fsm = _Fsm({
+        "precision_align_alpha": 1.0,
+        "precision_align_raw_pixel_tolerance": 35.0,      # 精校段窗口
+        "precision_align_final_raw_pixel_tolerance": 30.0,  # 投放段窗口
+        "precision_align_tight_window_height": 2.0,       # 切换高度
+        "precision_align_smooth_pixel_tolerance": 100.0,  # 只测 raw 窗口
+        "precision_align_threshold_norm_x": 0.1,
+        "precision_align_threshold_norm_y": 0.1,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset(target_hint_xy=(42.3, 5.5))
+
+    # 精校段 (2.8m): 33px ≤ 35 → aligned, 进入稳定计数
+    controller.step([], _window_target(center_u=640.0 + 33.0), drop_height=2.8)
+    assert controller.last_status.stable_count == 1
+
+    # 投放段 (1.5m): 同 33px > 30 → 不 aligned, 稳定清零并走修正分支
+    controller.step([], _window_target(center_u=640.0 + 33.0), drop_height=1.5)
+    assert controller.last_status.stable_count == 0
+    assert len(fsm.fc.body_commands) > 0
+
+    # 投放段: 28px ≤ 30 → 重新 aligned (先跨过修正脉冲 + hover 两段等待)
+    fsm.clock.advance(0.2)
+    controller.step([], _window_target(center_u=640.0 + 28.0), drop_height=1.5)
+    fsm.clock.advance(0.1)
+    controller.step([], _window_target(center_u=640.0 + 28.0), drop_height=1.5)
+    assert controller.last_status.stable_count == 1
+
+
+def test_unconfigured_tight_window_height_keeps_single_window():
+    """SITL 不配 tight_window_height (默认 0.0) → 永不切换, 行为不变."""
+    fsm = _Fsm({
+        "precision_align_alpha": 1.0,
+        "precision_align_raw_pixel_tolerance": 35.0,
+        "precision_align_final_raw_pixel_tolerance": 30.0,
+        # 未配置 precision_align_tight_window_height
+        "precision_align_smooth_pixel_tolerance": 100.0,
+        "precision_align_threshold_norm_x": 0.1,
+        "precision_align_threshold_norm_y": 0.1,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset(target_hint_xy=(42.3, 5.5))
+
+    # 即便 1.5m 低于任何切换高度, 仍用精校段窗口 35 → aligned
+    controller.step([], _window_target(center_u=640.0 + 33.0), drop_height=1.5)
+    assert controller.last_status.stable_count == 1
