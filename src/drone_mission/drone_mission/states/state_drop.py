@@ -332,7 +332,7 @@ class DropState:
             return False
 
         # 必须有明显的下降运动证据: 初始误差的 25% 或至少 0.3m
-        # (适配主下降 5m→2.8m 和最终下降 2.8m→1.5m 两种场景)
+        # (适配主下降 5.6m→2.8m 和最终下降 2.8m→1.5m 两种场景)
         min_height_progress = max(0.3, self._descent_initial_error * 0.25)
         if self._descent_initial_error - height_error < min_height_progress:
             self._descend_stall_count = 0

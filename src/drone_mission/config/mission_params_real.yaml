@@ -47,7 +47,7 @@
     area1_east_min: -4.0
     area1_east_max: 4.0
     area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
-    area1_search_altitude: 5.0    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
+    area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
     # NED: north=[55,60], east=[-4,4] (Home 北 57.5m, 横跨 X:0~8m)
