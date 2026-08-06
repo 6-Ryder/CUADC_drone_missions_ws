@@ -127,6 +127,17 @@ class PrecisionAlignController:
         height = float(self._param("precision_align_image_height", max(cy * 2.0, 1.0)))
         return cx, cy, max(width, 1.0), max(height, 1.0)
 
+    def _raw_tolerance(self, drop_height: float) -> float:
+        """两级对心窗口: 低于 tight_window_height 用投放段收紧窗口, 否则用精校段窗口.
+
+        SITL 未配置 tight_window_height (默认 0.0) → 切换高度不可达,
+        永远用精校段窗口 (raw_pixel_tolerance), 行为不变.
+        """
+        tight_h = float(self._param("precision_align_tight_window_height", 0.0))
+        if drop_height < tight_h:
+            return float(self._param("precision_align_final_raw_pixel_tolerance", 30.0))
+        return float(self._param("precision_align_raw_pixel_tolerance", 9.0))
+
     def step(self, markers: list, cylinders: list, drop_height: float) -> PrecisionAlignResult:
         """Run one alignment tick."""
         now = self._now()
@@ -195,7 +206,8 @@ class PrecisionAlignController:
             self._smooth_dy = alpha * raw_dy + (1.0 - alpha) * self._smooth_dy
 
         smooth_pixel_error = math.hypot(self._smooth_dx * width, self._smooth_dy * height)
-        aligned = self._is_precise(pixel_error, smooth_pixel_error, raw_dx, raw_dy)
+        raw_tol = self._raw_tolerance(drop_height)
+        aligned = self._is_precise(pixel_error, smooth_pixel_error, raw_dx, raw_dy, raw_tol)
         self._stable_count = self._stable_count + 1 if aligned else 0
         if not aligned:
             self._brake_until = 0.0
@@ -257,7 +269,7 @@ class PrecisionAlignController:
         y_to_forward_sign = float(self._param("precision_align_image_y_to_forward_sign", -1.0))
         forward = y_to_forward_sign * gain * float(self._smooth_dy)
         right = x_to_right_sign * gain * float(self._smooth_dx)
-        forward, right = self._limit_vector(forward, right, pixel_error)
+        forward, right = self._limit_vector(forward, right, pixel_error, raw_tol)
 
         self._last_forward = forward
         self._last_right = right
@@ -279,8 +291,8 @@ class PrecisionAlignController:
         smooth_pixel_error: float,
         raw_dx: float,
         raw_dy: float,
+        raw_tol: float,
     ) -> bool:
-        raw_tol = float(self._param("precision_align_raw_pixel_tolerance", 9.0))
         smooth_tol = float(self._param("precision_align_smooth_pixel_tolerance", 7.0))
         threshold_x = float(self._param("precision_align_threshold_norm_x", 0.008))
         threshold_y = float(self._param("precision_align_threshold_norm_y", 0.008))
@@ -296,6 +308,7 @@ class PrecisionAlignController:
         forward: float,
         right: float,
         pixel_error: float,
+        raw_tol: float,
     ) -> Tuple[float, float]:
         if pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
             max_speed = float(self._param("precision_align_fine_max_speed", 0.065))
@@ -306,7 +319,6 @@ class PrecisionAlignController:
             scale = max_speed / norm
             return forward * scale, right * scale
         min_speed = float(self._param("precision_align_min_correction_speed", 0.012))
-        raw_tol = float(self._param("precision_align_raw_pixel_tolerance", 9.0))
         if 0.0 < norm < min_speed and pixel_error > raw_tol:
             scale = min_speed / norm
             return forward * scale, right * scale

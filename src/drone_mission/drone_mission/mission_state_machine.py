@@ -301,6 +301,10 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_stable_frames", 5)
         self.declare_parameter("precision_align_final_brake_s", 0.5)
         self.declare_parameter("precision_align_release_max_horizontal_speed", 0.04)
+        # 两级对心窗口: 仅真机显式配置 tight_window_height>0 时启用.
+        # SITL 不配置 → 切换高度 0.0 → 始终用 raw_pixel_tolerance, 行为不变.
+        self.declare_parameter("precision_align_final_raw_pixel_tolerance", 30.0)
+        self.declare_parameter("precision_align_tight_window_height", 0.0)
         self.declare_parameter("precision_align_min_confidence", 0.25)
         self.declare_parameter("precision_align_target_world_gate", 1.5)
         self.declare_parameter("precision_align_max_jump_diag_ratio", 0.55)

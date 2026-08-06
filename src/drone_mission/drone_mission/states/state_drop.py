@@ -178,9 +178,10 @@ class DropState:
                 return "EXECUTE_DROP"
 
             # ── 停滞检测: pixel_error 在低值振荡但无法收敛 → 提前触发最终下降 ──
-            stall_threshold = 45.0
-            stall_stable_band = 10.0
-            stall_duration = 5.0
+            # 40 = 精校段窗口 35 + 5 兜底: 25-35px 的合法徘徊不再误触发停滞.
+            stall_threshold = 40.0
+            stall_stable_band = 5.0
+            stall_duration = 2.0
             if (math.isfinite(status.pixel_error)
                     and status.pixel_error < stall_threshold
                     and not self._final_descent_started):
@@ -332,7 +333,7 @@ class DropState:
             return False
 
         # 必须有明显的下降运动证据: 初始误差的 25% 或至少 0.3m
-        # (适配主下降 5m→2.8m 和最终下降 2.8m→1.7m 两种场景)
+        # (适配主下降 5.6m→2.8m 和最终下降 2.8m→1.5m 两种场景)
         min_height_progress = max(0.3, self._descent_initial_error * 0.25)
         if self._descent_initial_error - height_error < min_height_progress:
             self._descend_stall_count = 0
@@ -462,8 +463,15 @@ class DropState:
             if centered:
                 # release_ready 锁存后到投放执行有 ~1s 窗口,
                 # 必须复查当前帧像素误差仍在阈值内, 防止锁存后漂移
-                raw_tol = float(
-                    self._fsm.get_param("precision_align_raw_pixel_tolerance", 9.0))
+                # 窗口与控制器同源: 低于 tight_window_height 用投放段收紧窗口
+                align_h = self._active_drop_height()
+                tight_h = float(self._fsm.get_param("precision_align_tight_window_height", 0.0))
+                if align_h < tight_h:
+                    raw_tol = float(self._fsm.get_param(
+                        "precision_align_final_raw_pixel_tolerance", 30.0))
+                else:
+                    raw_tol = float(self._fsm.get_param(
+                        "precision_align_raw_pixel_tolerance", 9.0))
                 smooth_tol = float(
                     self._fsm.get_param("precision_align_smooth_pixel_tolerance", 7.0))
                 if (status.pixel_error > raw_tol

@@ -2,6 +2,16 @@
 
 本文档记录已经影响当前实现的关键问题、修改和验证。历史方案只保留结论，不再作为运行手册。
 
+## 2026-08-06 — 像素误差参数去掉小数点 → mission_fsm 启动崩溃，真机无法起飞
+
+- 场景：真机全流程启动后无人机不动作，舵机日志反复"等待任务租约 (autonomy_lease)"，FSM 从未进入任何飞行状态。
+- 证据：`mission.log` —— `mission_fsm` 在 `_declare_params` 崩溃（exit 1）：
+  `rclpy.exceptions.InvalidParameterTypeException: Trying to set parameter 'precision_align_raw_pixel_tolerance' to '35' of type 'INTEGER', expecting type 'DOUBLE'`。舵机等租约是下游症状（FSM 死亡 → 租约永不发布）。
+- 根因：提交 `4f0d8a0` 把三处 double 参数去掉小数点（`9.0→35`、`7.0→35`、`12.0→40`），YAML 解析为 int；`declare_parameter(name, 9.0)` 声明为 double，rclpy 对覆盖值类型严格校验，启动即抛异常。共三处，修掉一个还会接着崩下一个（`precision_align_smooth_pixel_tolerance`、`landing_servo_deadzone_px`）。
+- 修改：`mission_params_real.yaml` 三处补小数点（`35.0`/`35.0`/`40.0`）。真机 `--symlink-install` 下改 YAML 无需重新编译，重启 launch 即可。
+- 验证：`python3 -c "import yaml; ..."` 确认三值类型为 float；全量交叉核对 114 个 float 声明参数与 yaml 值，无其余不匹配。**待真机复飞确认**。
+- 教训：改 YAML 数值时 float 参数必须保留小数点；改完先验类型再上机。完整规范见 [PARAMETER_USAGE_GUIDE.md §1.4](PARAMETER_USAGE_GUIDE.md)。
+
 ## 2026-08-05 — 启动架构改为 test_mission 模式（脚本持有 Agent）
 
 - 场景：`start_full_real_mission.sh` 用作 Jetson 开机自启后，地面站 `uxrce_dds_client status` 一致"无法连接"。根因：旧版脚本把 Agent 埋在 launch 里，前面压着 SITL overlay 硬失败、相机存在性、`command -v` 等 fail-fast 闸门；自动启动环境下（cron/systemd 的 PATH、开机早期 USB 相机未枚举、shell 继承 SITL overlay env）任一闸门挂掉 → launch 根本没跑 → 8888 上无 Agent → PX4 客户端永远连不上。

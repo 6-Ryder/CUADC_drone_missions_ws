@@ -47,7 +47,7 @@
     area1_east_min: -4.0
     area1_east_max: 4.0
     area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
-    area1_search_altitude: 5.0    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
+    area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
     # NED: north=[55,60], east=[-4,4] (Home 北 57.5m, 横跨 X:0~8m)
@@ -99,18 +99,20 @@
     precision_align_min_correction_speed: 0.012 # 保证小误差修正高于飞控响应死区
     precision_align_step_s: 0.18          # 粗调速度脉冲持续时间 (s)
     precision_align_fine_step_s: 0.12     # 精调短脉冲, 避免越过中心
-    precision_align_hover_s: 0.04         # 每步后短暂停稳并获取新观测 (s)
+    precision_align_hover_s: 0.15         # 每步后短暂停稳并获取新观测 (s); 真机精校 FPS 3-5 (333ms/帧), 0.04 等不到新观测
     precision_align_timeout: 25.0         # 单阶段低空精校最长等待时间 (s)
     precision_align_max_retries: 1        # 精校超时/丢失后仅允许一次低空原地重置
     precision_align_image_x_to_right_sign: 1.0   # +1: 图像右侧目标 → 机体右移
     precision_align_image_y_to_forward_sign: -1.0 # CUADC 标定: 图像下侧目标 → 机体后退
-    precision_align_threshold_norm_x: 0.055 # 归一化水平误差阈值 (约 35px)
-    precision_align_threshold_norm_y: 0.073 # 归一化垂直误差阈值 (约 35px)
-    precision_align_raw_pixel_tolerance: 35.0 # 当前帧必须保持厘米级像素误差
-    precision_align_smooth_pixel_tolerance: 35.0 # 平滑误差必须保持在中心附近
-    precision_align_stable_frames: 5      # 连续稳定帧后进入最终刹车复查
+    precision_align_threshold_norm_x: 0.06 # 归一化水平误差阈值 (防单帧跳变, 不再做紧约束; 0.008 实测锁死判定)
+    precision_align_threshold_norm_y: 0.06 # 归一化垂直误差阈值 (0.05 会卡实测复查帧 |dy|=0.0515, 须 ≥0.06)
+    precision_align_raw_pixel_tolerance: 35.0 # 2.8m 精校段对心窗口 (现场已验证: 9 次对心成功)
+    precision_align_final_raw_pixel_tolerance: 30.0 # 1.5m 投放段收紧窗口, 保证投放精度 (约 4.3cm)
+    precision_align_tight_window_height: 2.0  # 两级窗口切换高度 (m), 低于此值用 final 窗口
+    precision_align_smooth_pixel_tolerance: 30.0 # EMA 平滑安全网 (10:01 复查帧实测 24.8-29.4 全过)
+    precision_align_stable_frames: 4      # 连续稳定帧后进入最终刹车复查
     precision_align_final_brake_s: 0.5    # 投放前零速度悬停复查时间 (s)
-    precision_align_release_max_horizontal_speed: 0.04 # 释放时最大水平速度 (m/s)
+    precision_align_release_max_horizontal_speed: 0.22 # 释放时最大水平速度 (m/s); 实测 0.078-0.302, 常态 0.10-0.12, 0.22 覆盖 81%
     precision_align_min_confidence: 0.25
     precision_align_target_world_gate: 1.5  # 初次锁定与粗定位记忆目标匹配的世界坐标门限 (m)
     precision_align_max_jump_diag_ratio: 0.55 # CUADC 像素跳变拒绝阈值 (占图像对角线)
@@ -119,7 +121,7 @@
     precision_align_max_lost_frames: 48       # 丢失超限后放弃当前目标
     precision_align_drop_height_tolerance: 0.50 # 进入精校/投放的高度误差 (m), SITL 稳态~0.42m, 需留余量
     precision_align_final_descent_enable: true  # 先在2.8m捕获, 再降至最终高度重精校
-    precision_align_final_drop_height: 1.7      # 最终投放高度, 降低落体漂移和像素厘米换算
+    precision_align_final_drop_height: 1.5      # 最终投放高度, 降低落体漂移和像素厘米换算
     precision_align_final_descent_speed: 0.25   # 最终降高速度 (m/s)
     precision_align_log_interval: 0.75
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
@@ -162,5 +164,5 @@
     # --- 异常处理参数 ---
     battery_warning: 0.25         # 低电量警告阈值 (比例)
     battery_critical: 0.15        # 严重低电量阈值 (比例)
-    vision_loss_timeout: 3.0      # 视觉连续丢失超时 (s)
+    vision_loss_timeout: 5.0      # 视觉连续丢失超时 (s); 真机光照/遮挡易超 3s
     state_max_duration: 0.0       # 不用固定总时长中止真机任务，只监测无进展
