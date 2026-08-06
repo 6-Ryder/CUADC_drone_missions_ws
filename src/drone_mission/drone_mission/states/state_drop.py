@@ -178,9 +178,9 @@ class DropState:
                 return "EXECUTE_DROP"
 
             # ── 停滞检测: pixel_error 在低值振荡但无法收敛 → 提前触发最终下降 ──
-            stall_threshold = 25.0
-            stall_stable_band = 5.0
-            stall_duration = 2.0
+            stall_threshold = 45.0
+            stall_stable_band = 10.0
+            stall_duration = 5.0
             if (math.isfinite(status.pixel_error)
                     and status.pixel_error < stall_threshold
                     and not self._final_descent_started):
