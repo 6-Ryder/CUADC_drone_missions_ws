@@ -72,7 +72,7 @@
     drop_marker_fallback_delay: 15.0      # 搜索圆筒失败后才允许使用蓝色标识候选
     marker_memory_merge_distance: 0.75    # 同一蓝色标识世界坐标合并距离 (m)
     marker_memory_min_observations: 3     # 蓝色标识进入候选库所需观测次数
-    drop_descend_height: 2.0      # 投放降高高度 (m)
+    drop_descend_height: 2.8      # 投放降高高度 (m)
     drop_confirmation_timeout: 5.0  # 必须大于舵机层 3s 总预算 (s)
     drop_align_pixel_tolerance: 35.0 # 投放前圆筒中心允许像素误差
     # ── 低空视觉校准: 梯度下降探测 ──
@@ -118,8 +118,8 @@
     precision_align_reacquire_after_lost: 12   # 丢失 N 帧后清除像素锁定, 近中心重捕获
     precision_align_max_lost_frames: 48       # 丢失超限后放弃当前目标
     precision_align_drop_height_tolerance: 0.50 # 进入精校/投放的高度误差 (m), SITL 稳态~0.42m, 需留余量
-    precision_align_final_descent_enable: true  # 先在2m捕获, 再降至最终高度重精校
-    precision_align_final_drop_height: 1.25     # 最终投放高度, 降低落体漂移和像素厘米换算
+    precision_align_final_descent_enable: true  # 先在2.8m捕获, 再降至最终高度重精校
+    precision_align_final_drop_height: 1.7      # 最终投放高度, 降低落体漂移和像素厘米换算
     precision_align_final_descent_speed: 0.25   # 最终降高速度 (m/s)
     precision_align_log_interval: 0.75
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
