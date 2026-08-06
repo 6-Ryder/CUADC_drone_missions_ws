@@ -48,6 +48,30 @@ source install/setup.bash
 
 参数大多在节点初始化时读取。任务已经运行时，修改文件不会改变当前任务。
 
+### 1.4 ⚠️ YAML 类型陷阱：float 参数去掉小数点 → FSM 启动即崩溃
+
+`mission_state_machine` 用 `declare_parameter("precision_align_raw_pixel_tolerance", 9.0)`
+声明参数为 **double**。YAML 里 `35` 解析为 **int**、`35.0` 才是 double，rclpy 对覆盖值
+类型严格校验，int 值覆盖 double 声明会抛 `InvalidParameterTypeException`，
+`mission_fsm` 进程在 `_declare_params` 阶段 exit 1 崩溃 → 整机不启动、无法起飞
+（舵机一直"等待任务租约"也是这个下游症状）。
+
+**2026-08-06 真实事故**：提交 `4f0d8a0` 把三处参数去掉小数点后真机无法起飞：
+
+| 参数 | 声明 (double) | 崩溃写法 (int) | 正确写法 |
+|---|---|---|---|
+| `precision_align_raw_pixel_tolerance` | 9.0 | `35` | `35.0` |
+| `precision_align_smooth_pixel_tolerance` | 7.0 | `35` | `35.0` |
+| `landing_servo_deadzone_px` | 12.0 | `40` | `40.0` |
+
+改完先验证类型再上机（真机是 `--symlink-install`，改 YAML 无需重新编译，
+重启 launch 即可）：
+
+```bash
+python3 -c "import yaml; v=yaml.safe_load(open('src/drone_mission/config/mission_params_real.yaml'))['/mission_state_machine']['ros__parameters']; print(v['precision_align_raw_pixel_tolerance'], type(v['precision_align_raw_pixel_tolerance']))"
+# 期望: 35.0 <class 'float'>
+```
+
 ## 2. 坐标、单位和部署差异
 
 ### 2.1 两套坐标系
