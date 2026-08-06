@@ -113,7 +113,7 @@
     precision_align_max_lost_frames: 48       # 丢失超限后放弃当前目标
     precision_align_drop_height_tolerance: 0.50 # 进入精校/投放的高度误差 (m), SITL 稳态~0.42m, 需留余量
     precision_align_final_descent_enable: true  # 先在2.8m捕获, 再降至最终高度重精校
-    precision_align_final_drop_height: 1.7      # 最终投放高度, 降低落体漂移和像素厘米换算
+    precision_align_final_drop_height: 1.5      # 最终投放高度, 降低落体漂移和像素厘米换算
     precision_align_final_descent_speed: 0.25   # 最终降高速度 (m/s)
     precision_align_log_interval: 0.75
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
