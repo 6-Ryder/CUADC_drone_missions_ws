@@ -106,8 +106,8 @@
     precision_align_image_y_to_forward_sign: -1.0 # CUADC 标定: 图像下侧目标 → 机体后退
     precision_align_threshold_norm_x: 0.055 # 归一化水平误差阈值 (约 35px)
     precision_align_threshold_norm_y: 0.073 # 归一化垂直误差阈值 (约 35px)
-    precision_align_raw_pixel_tolerance: 35 # 当前帧必须保持厘米级像素误差
-    precision_align_smooth_pixel_tolerance: 35 # 平滑误差必须保持在中心附近
+    precision_align_raw_pixel_tolerance: 35.0 # 当前帧必须保持厘米级像素误差
+    precision_align_smooth_pixel_tolerance: 35.0 # 平滑误差必须保持在中心附近
     precision_align_stable_frames: 5      # 连续稳定帧后进入最终刹车复查
     precision_align_final_brake_s: 0.5    # 投放前零速度悬停复查时间 (s)
     precision_align_release_max_horizontal_speed: 0.04 # 释放时最大水平速度 (m/s)
@@ -142,7 +142,7 @@
     # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
     landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)
     landing_servo_max_horizontal_vel: 0.6  # 最大水平修正速度 (m/s)
-    landing_servo_deadzone_px: 40     # 像素死区 (px), 进入后停止水平修正
+    landing_servo_deadzone_px: 40.0     # 像素死区 (px), 进入后停止水平修正
     landing_servo_x_to_right_sign: 1.0  # u轴→右移符号
     landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)
     landing_target_min_confidence: 0.60  # 过滤近地低置信度 H 畸变
