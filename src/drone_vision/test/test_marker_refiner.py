@@ -61,6 +61,31 @@ def test_fallback_rejects_tiny_blue_clutter():
     assert BlueMarkerRefiner().detect(image) == []
 
 
+def test_refine_with_no_detections_skips_entire_scene_split():
+    """空检测直接返回, 不再对整图做分割 (低空 FPS 优化核心路径)."""
+    refiner = BlueMarkerRefiner()
+    assert refiner.refine(_scene(), []) == []
+
+
+def test_refine_roi_offset_recovers_component_near_image_corner():
+    """ROI 裁剪后组件坐标必须偏移回原图像素 (角落场景最容易丢偏移)."""
+    image = np.full((480, 640, 3), 60, dtype=np.uint8)
+    cv2.circle(image, (580, 420), 50, (255, 0, 0), -1)  # 右下角完整蓝色圆
+
+    refiner = BlueMarkerRefiner()
+    refined = refiner.refine(
+        image,
+        [_detection((550, 390, 610, 430), 0.9)],  # 部分框住圆的框
+    )
+
+    assert len(refined) == 1
+    np.testing.assert_allclose(
+        refined[0].bbox, (530, 370, 630, 470), atol=2,
+    )
+    assert abs(refined[0].cx - 580) < 8
+    assert abs(refined[0].cy - 420) < 8
+
+
 def test_physical_scale_filter_rejects_wrong_sized_marker():
     detections = [
         _detection((100, 100, 120, 120), 0.9),
