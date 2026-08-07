@@ -319,6 +319,80 @@ class ONNXYOLOEngine(YOLOEngine):
 
 
 # ============================================================
+# TensorRT 序列化引擎实现 (真机 Jetson)
+# ============================================================
+
+class TensorRTYOLOEngine(ONNXYOLOEngine):
+    """加载 .engine 序列化引擎 (trtexec/ultralytics 导出), 复用 ONNX 的预处理/后处理.
+
+    TRT 引擎硬件+版本绑定: 只能在构建它的 Jetson 上运行.
+    """
+
+    def _check_backend(self) -> bool:
+        try:
+            import tensorrt        # noqa: F401  (JetPack 自带)
+            import pycuda.driver   # noqa: F401
+            import pycuda.autoinit # noqa: F401  (初始化 CUDA context)
+            return True
+        except ImportError:
+            print("[TensorRTYOLOEngine] 需要安装 pycuda: pip install pycuda "
+                  "(tensorrt 由 JetPack 提供)")
+            return False
+
+    def _do_load(self) -> None:
+        import tensorrt as trt
+        import pycuda.driver as cuda
+
+        with open(str(self.model_path), "rb") as f:
+            engine_bytes = f.read()
+
+        runtime = trt.Runtime(trt.Logger(trt.Logger.WARNING))
+        self._trt_engine = runtime.deserialize_cuda_engine(engine_bytes)
+        if self._trt_engine is None:
+            raise RuntimeError(
+                f"TensorRT 引擎反序列化失败 (TRT 版本不匹配?): {self.model_path}")
+        self._trt_context = self._trt_engine.create_execution_context()
+
+        # YOLOv8 引擎: 单输入单输出
+        if self._trt_engine.num_io_tensors != 2:
+            raise RuntimeError(
+                f"预期 1 输入 1 输出, 实际 {self._trt_engine.num_io_tensors} 个")
+        self._input_name = self._trt_engine.get_tensor_name(0)
+        self._output_name = self._trt_engine.get_tensor_name(1)
+
+        # 固定输入/输出缓冲, 推理时仅 memcpy
+        in_shape = self._trt_engine.get_tensor_shape(self._input_name)
+        if -1 in in_shape:
+            raise RuntimeError(
+                f"引擎输入含动态维度 {in_shape}, 请用固定 shape 重新导出")
+        self._input_nbytes = int(trt.volume(in_shape)) * 4
+        self._d_input = cuda.mem_alloc(self._input_nbytes)
+        out_shape = self._trt_engine.get_tensor_shape(self._output_name)
+        self._output_np = np.empty(out_shape, dtype=np.float32)
+        self._d_output = cuda.mem_alloc(self._output_np.nbytes)
+
+    def _do_infer(self, image: np.ndarray) -> List[Detection]:
+        import pycuda.driver as cuda
+        tensor = np.ascontiguousarray(self._preprocess(image))
+        if tensor.nbytes != self._input_nbytes:
+            raise RuntimeError(
+                f"输入尺寸不匹配: 引擎 {self._input_nbytes}B "
+                f"vs 预处理 {tensor.nbytes}B")
+        cuda.memcpy_htod(self._d_input, tensor)
+        self._trt_context.execute_v2(
+            bindings=[int(self._d_input), int(self._d_output)])
+        cuda.memcpy_dtoh(self._output_np, self._d_output)
+        return self._postprocess(self._output_np, image.shape[:2])
+
+    def close(self) -> None:
+        for buf in ("_d_input", "_d_output"):
+            if getattr(self, buf, None) is not None:
+                getattr(self, buf).free()
+                setattr(self, buf, None)
+        super().close()
+
+
+# ============================================================
 # Ultralytics PyTorch 实现
 # ============================================================
 
@@ -420,6 +494,21 @@ def create_engine(
             return engine
         raise RuntimeError(
             "无可用的 Ultralytics YOLO 后端. 请安装 ultralytics/torch"
+        )
+
+    if suffix == ".engine":
+        engine = TensorRTYOLOEngine(
+            model_path=model_path,
+            conf_threshold=conf_threshold,
+            nms_iou_threshold=nms_iou_threshold,
+            input_size=input_size,
+            class_names=class_names,
+            device=device,
+        )
+        if engine.is_available:
+            return engine
+        raise RuntimeError(
+            "无可用的 TensorRT 后端. 请安装: pip install pycuda"
         )
 
     # 优先 ONNX
