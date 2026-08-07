@@ -29,8 +29,8 @@
 
     # --- 速度参数 (quick: 中转/扫描提速) ---
     sweep_speed: 1.2              # 投放区扫描速度 (原 0.8)
-    transit_speed: 3.0            # 中转速度 (原 2.0)
-    return_speed: 3.8             # 返航速度 (m/s)
+    transit_speed: 3.2            # 中转速度 (原 2.0, quick 提速至 3.2, 真机保守档)
+    return_speed: 4.2             # 返航速度 (m/s, quick 提速至 4.2, 真机保守档)
     return_altitude: 5.0          # 全流程从末航点直接返航时的目标高度 (m)
     navigation_progress_window: 30.0  # 仅无进展时的同目标重发观察窗口 (s)
     navigation_progress_min_improvement: 0.25 # 窗口内最低距离改进 (m)
@@ -127,7 +127,7 @@
     precision_align_fallback_max_pixel_error: 60.0 # quick 兜底: 超时重试耗尽后像素 ≤60px 才直接投
     precision_align_log_interval: 0.75
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
-    cylinder_approach_slow_speed: 0.15   # 接近对心后慢速微调
+    cylinder_approach_slow_speed: 0.18   # 接近对心后慢速微调 (quick 提速至 0.18, 真机保守档)
     cylinder_approach_memory_speed: 0.25 # 丢帧时向记忆圆心粗靠近速度
     camera_fx: 400.0
     camera_fy: 400.0
@@ -162,9 +162,9 @@
     landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)
     landing_target_min_confidence: 0.60  # 过滤近地低置信度 H 畸变
     landing_target_max_jump_px: 80.0  # 连续帧 H 中心最大允许跳变，超过则悬停
-    landing_descent_fast: 0.4           # >3m 下降速度 (m/s)
-    landing_descent_medium: 0.25        # 1.5-3m 下降速度 (m/s)
-    landing_descent_slow: 0.12          # <1.5m 下降速度 (m/s)
+    landing_descent_fast: 0.45          # >3m 下降速度 (m/s, quick 提速至 0.45, 真机保守档)
+    landing_descent_medium: 0.28        # 1.5-3m 下降速度 (m/s, quick 提速至 0.28, 真机保守档)
+    landing_descent_slow: 0.14          # <1.5m 下降速度 (m/s, quick 提速至 0.14, 真机保守档)
     # PX4 接地检测要求下降意图 >= 1.1 * LNDMC_Z_VEL_MAX (当前为 0.275m/s)
     # simple 模式用 test_mission 的 0.15 m/s (更慢但等 PX4 着陆检测更稳)
     # 注意: 盲降段视觉已关 → 3s 丢失超时先触发 → PX4 自主着陆接管 (test_mission 原样行为)
