@@ -1,7 +1,7 @@
 """Blue drop-zone marker geometry for YOLO refinement and OpenCV detection."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -49,7 +49,16 @@ class BlueMarkerRefiner:
 
     def _components(
         self, image: np.ndarray,
+        roi: Optional[Tuple[int, int, int, int]] = None,
     ) -> Tuple[np.ndarray, Dict[int, _BlueComponent]]:
+        """分割蓝色连通域.
+
+        roi=(x1, y1, x2, y2) 时仅在裁剪区域内分析 (低空 FPS 优化, 10:01
+        整图分割耗时 200-300ms); 返回的 labels/components 坐标为 ROI 局部.
+        """
+        if roi is not None:
+            rx1, ry1, rx2, ry2 = roi
+            image = image[ry1:ry2, rx1:rx2]
         mask = self._blue_mask(image)
         count, labels, stats, _ = cv2.connectedComponentsWithStats(
             mask, connectivity=8,
@@ -96,21 +105,38 @@ class BlueMarkerRefiner:
     def refine(
         self, image: np.ndarray, detections: List[Detection],
     ) -> List[Detection]:
-        """Validate YOLO boxes against blue pixels and restore full components."""
-        labels, components = self._components(image)
+        """Validate YOLO boxes against blue pixels and restore full components.
+
+        低空 FPS 优化: 只在检测框外扩 ROI 内分割, 空检测直接跳过 —
+        整图蓝色分割是投放区精校期 200-300ms/帧的主成本 (10:01 日志 FPS 3-5).
+        """
+        if not detections:
+            return []
         height, width = image.shape[:2]
+
+        # 合并所有检测框并外扩作为分割 ROI (标识直径 @2.5m ≈ 160px, 外扩 0.5 倍足够)
+        bx1 = int(min(d.bbox[0] for d in detections))
+        by1 = int(min(d.bbox[1] for d in detections))
+        bx2 = int(max(d.bbox[2] for d in detections))
+        by2 = int(max(d.bbox[3] for d in detections))
+        margin = max(40, int(0.5 * max(bx2 - bx1, by2 - by1)))
+        rx1, ry1 = max(0, bx1 - margin), max(0, by1 - margin)
+        rx2, ry2 = min(width, bx2 + margin), min(height, by2 + margin)
+
+        labels, components = self._components(image, (rx1, ry1, rx2, ry2))
         selected: Dict[int, Detection] = {}
 
         for detection in detections:
-            x1, y1, x2, y2 = detection.bbox
-            x1 = max(0, min(width, int(x1)))
-            y1 = max(0, min(height, int(y1)))
-            x2 = max(0, min(width, int(x2)))
-            y2 = max(0, min(height, int(y2)))
+            x1 = max(0, min(width, int(detection.bbox[0])))
+            y1 = max(0, min(height, int(detection.bbox[1])))
+            x2 = max(0, min(width, int(detection.bbox[2])))
+            y2 = max(0, min(height, int(detection.bbox[3])))
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            region = labels[y1:y2, x1:x2]
+            # bbox → ROI 局部坐标后验证蓝色占比
+            lx1, ly1, lx2, ly2 = x1 - rx1, y1 - ry1, x2 - rx1, y2 - ry1
+            region = labels[ly1:ly2, lx1:lx2]
             counts = np.bincount(region.ravel())
             if counts.size <= 1:
                 continue
@@ -125,9 +151,10 @@ class BlueMarkerRefiner:
                 class_id=detection.class_id,
                 class_name=detection.class_name,
                 confidence=detection.confidence,
-                bbox=component.bbox,
-                cx=component.cx,
-                cy=component.cy,
+                bbox=(component.bbox[0] + rx1, component.bbox[1] + ry1,
+                      component.bbox[2] + rx1, component.bbox[3] + ry1),
+                cx=component.cx + rx1,
+                cy=component.cy + ry1,
             )
             previous = selected.get(label)
             if previous is None or refined.confidence > previous.confidence:

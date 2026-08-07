@@ -16,6 +16,7 @@ YOLO 推理引擎 — 支持 ONNX Runtime / TensorRT 后端.
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -233,8 +234,15 @@ class ONNXYOLOEngine(YOLOEngine):
                 "expected cuda, tensorrt, or cpu"
             )
 
+        # 会话优化 (Jetson Orin Nano Super 6 核): 全图优化减 kernel 启动;
+        # intra_op 限 4 线程给 rclpy/相机留核, 真机可用 ORT_INTRA_OP_THREADS 调.
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.intra_op_num_threads = int(os.environ.get(
+            "ORT_INTRA_OP_THREADS", "4"))
         self._session = ort.InferenceSession(
             str(self.model_path), providers=providers,
+            sess_options=sess_options,
         )
         active_providers = self._session.get_providers()
         if not active_providers or active_providers[0] != expected_provider:

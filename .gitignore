@@ -16,6 +16,7 @@ real_flight_logs/
 __pycache__/
 *.py[cod]
 *.egg-info/
+tools/
 
 # Compiled extensions
 *.o

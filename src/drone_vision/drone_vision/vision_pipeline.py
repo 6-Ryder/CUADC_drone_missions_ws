@@ -403,6 +403,16 @@ class VisionPipelineNode(Node):
             self.set_servo_mode("none")
             if self._coverage:
                 self._coverage.end_scan()
+        elif request.mode == 6:
+            # quick 模式: 只跑蓝底标识模型, 投放区检测 FPS 翻倍
+            if self._detection_models_released:
+                response.success = False
+                response.message = "投放检测模型已在侦察阶段释放"
+                return response
+            self._detection_mode = "marker_only"
+            self.set_servo_mode("none")
+            if self._coverage:
+                self._coverage.end_scan()
         elif request.mode == 4:
             self._detection_mode = "idle"
             self.set_servo_mode("none")
@@ -603,29 +613,32 @@ class VisionPipelineNode(Node):
             return
 
         # 目标模型只在投放阶段运行。两模型顺序执行，避免无收益的 GPU 并发峰值。
+        # marker_only (quick 模式): 只跑蓝底标识模型, 检测 FPS 翻倍。
         all_dets: List[Detection] = []
         marker_dets: List[Detection] = []
         marker_source = "none"
-        if self._detection_mode == "all":
-            all_dets = self._engine.infer(image)
-            marker_dets = self._drop_marker_engine.infer(image)
-            marker_source = "yolo"
-            if (
-                self.get_parameter("drop_marker_refine_enable").value
-                and self._marker_refiner
-            ):
-                marker_dets = self._marker_refiner.refine(image, marker_dets)
-                marker_source = "yolo+blue"
-            expected_diameter = (
-                (self.get_parameter("fx").value + self.get_parameter("fy").value)
-                * 0.5 / max(self._current_altitude, 0.5)
-            )
-            marker_dets = self._marker_refiner.filter_by_expected_diameter(
-                marker_dets,
-                expected_diameter,
-                self.get_parameter("drop_marker_min_scale_ratio").value,
-                self.get_parameter("drop_marker_max_scale_ratio").value,
-            )
+        if self._detection_mode in ("all", "marker_only"):
+            if self._detection_mode == "all":
+                all_dets = self._engine.infer(image)
+            if self._drop_marker_engine is not None:
+                marker_dets = self._drop_marker_engine.infer(image)
+                marker_source = "yolo"
+                if (
+                    self.get_parameter("drop_marker_refine_enable").value
+                    and self._marker_refiner
+                ):
+                    marker_dets = self._marker_refiner.refine(image, marker_dets)
+                    marker_source = "yolo+blue"
+                expected_diameter = (
+                    (self.get_parameter("fx").value + self.get_parameter("fy").value)
+                    * 0.5 / max(self._current_altitude, 0.5)
+                )
+                marker_dets = self._marker_refiner.filter_by_expected_diameter(
+                    marker_dets,
+                    expected_diameter,
+                    self.get_parameter("drop_marker_min_scale_ratio").value,
+                    self.get_parameter("drop_marker_max_scale_ratio").value,
+                )
 
         # 发布投放区标识检测
         if self._marker_refiner:
@@ -695,6 +708,10 @@ class VisionPipelineNode(Node):
                 if d.class_name in ("cylinder", "empty_cylinder")
             ]
             landing_dets = [d for d in all_dets if d.class_name == "landing_H"]
+        elif self._detection_mode == "marker_only":
+            # quick 模式: 只发布蓝底标识, 圆筒/H 检测全关
+            cyl_dets = []
+            landing_dets = []
         else:
             cyl_dets = []
             landing_dets = []

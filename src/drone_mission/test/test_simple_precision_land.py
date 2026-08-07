@@ -1,0 +1,297 @@
+"""降落区 simple 模式 (landing_simple_mode, test_mission 方法) 契约测试.
+
+覆盖:
+  1. FSM 注册门控: landing_simple_mode=True → SimplePrecisionLandState
+  2. 参数声明存在性 (AST: 默认 False, 主任务行为零漂移)
+  3. SimplePrecisionLandState 行为:
+     - PX4 is_landed → COMPLETE
+     - 搜索超时 → 请求 PX4 LAND 一次 + COMPLETE
+     - 视觉丢失超时 → PX4 LAND + COMPLETE (不做重捕获)
+     - 盲降切换高度 (test_mission 0.5m) 与盲降速度
+  4. quick 参数文件契约: simple 参数值 = test_mission 照搬
+"""
+
+import ast
+import time
+from pathlib import Path
+
+from drone_mission.mission_state_machine import MissionFSM
+from drone_mission.states.state_precision_land import PrecisionLandState
+from drone_mission.states.state_precision_land_simple import SimplePrecisionLandState
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class _Logger:
+    def info(self, _m):
+        pass
+
+    def warn(self, _m):
+        pass
+
+    def error(self, _m):
+        pass
+
+
+class _LogState:
+    def log_state(self, *_a):
+        pass
+
+
+class _Bridge:
+    def __init__(self, landed=False, altitude=5.0):
+        self._landed = landed
+        self._alt = altitude
+        self.land_calls = 0
+        self._pos = type("P", (), {"down": -self._alt})()
+
+    def is_landed(self):
+        return self._landed
+
+    def land_at_current(self):
+        self.land_calls += 1
+
+    def get_current_position(self):
+        return self._pos
+
+
+class _FC:
+    def __init__(self):
+        self.calls = []
+
+    def ned_to_altitude(self, down):
+        return -float(down)
+
+    def set_velocity_body(self, f, r, d):
+        self.calls.append((f, r, d))
+
+    def loiter(self, *_a):
+        pass
+
+
+class _SimpleFSM:
+    def __init__(self, params=None, landed=False, target=None):
+        self._params = params or {}
+        self._landed = landed
+        self._target = target
+        self.bridge = _Bridge(landed=landed)
+        self.fc = _FC()
+        self.logger = _LogState()
+        self.vision_modes = []
+
+    def get_param(self, name, default=None):
+        return self._params.get(name, default)
+
+    def get_landing_target(self):
+        return self._target
+
+    def get_logger(self):
+        return _Logger()
+
+    def set_vision_mode(self, mode):
+        self.vision_modes.append(mode)
+
+    def loiter(self, *_a):
+        pass
+
+
+def _bare_fsm(simple=True):
+    fsm = object.__new__(MissionFSM)
+    fsm._params = {"landing_simple_mode": simple}
+    fsm.get_param = lambda name, default=None: fsm._params.get(name, default)
+    return fsm
+
+
+# ---------------------------------------------------------------------------
+# 1. FSM 注册门控
+# ---------------------------------------------------------------------------
+
+def test_simple_mode_registers_simple_land_state():
+    fsm = _bare_fsm(simple=True)
+    handler = (
+        SimplePrecisionLandState(fsm)
+        if fsm.get_param("landing_simple_mode", False)
+        else PrecisionLandState(fsm)
+    )
+    assert isinstance(handler, SimplePrecisionLandState)
+
+
+def test_default_mode_registers_main_land_state():
+    fsm = _bare_fsm(simple=False)
+    handler = (
+        SimplePrecisionLandState(fsm)
+        if fsm.get_param("landing_simple_mode", False)
+        else PrecisionLandState(fsm)
+    )
+    assert isinstance(handler, PrecisionLandState)
+
+
+# ---------------------------------------------------------------------------
+# 2. 参数声明存在性 (AST)
+# ---------------------------------------------------------------------------
+
+def test_simple_land_params_declared_with_current_behavior_defaults():
+    source = ROOT / "drone_mission/drone_mission/mission_state_machine.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    defaults = {}
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "declare_parameter"):
+            continue
+        if len(call.args) >= 2:
+            name, default = call.args[0], call.args[1]
+            if isinstance(name, ast.Constant) and isinstance(default, ast.Constant):
+                defaults[name.value] = default.value
+
+    assert defaults["landing_simple_mode"] is False
+    assert defaults["landing_search_timeout"] == 15.0
+    assert defaults["landing_simple_blind_timeout"] == 60.0
+
+
+def test_simple_land_state_imported_by_fsm():
+    source = ROOT / "drone_mission/drone_mission/mission_state_machine.py"
+    text = source.read_text(encoding="utf-8")
+    assert "from drone_mission.states.state_precision_land_simple import" in text
+    assert "SimplePrecisionLandState(self)" in text
+    assert "landing_simple_mode" in text
+
+
+# ---------------------------------------------------------------------------
+# 3. SimplePrecisionLandState 行为
+# ---------------------------------------------------------------------------
+
+def test_landed_triggers_complete():
+    fsm = _SimpleFSM(landed=True)
+    state = SimplePrecisionLandState(fsm)
+    assert state.execute() == "COMPLETE"
+
+
+def test_search_timeout_requests_px4_land_once():
+    fsm = _SimpleFSM(params={"landing_search_timeout": 15.0})
+    state = SimplePrecisionLandState(fsm)
+    state._start_time = 0.0  # elapsed 巨大 → 立即超时
+
+    result = state.execute()
+    assert result == "COMPLETE"
+    assert fsm.bridge.land_calls == 1
+
+
+def test_px4_land_sent_only_once():
+    fsm = _SimpleFSM(params={"landing_search_timeout": 15.0})
+    state = SimplePrecisionLandState(fsm)
+    state._start_time = 0.0
+
+    assert state.execute() == "COMPLETE"
+    state._request_px4_land()  # 重复调用不重复发送
+    assert fsm.bridge.land_calls == 1
+
+
+def test_vision_loss_timeout_requests_px4_land():
+    fsm = _SimpleFSM(params={"vision_loss_timeout": 3.0})
+    state = SimplePrecisionLandState(fsm)
+    # 先锁定目标, 然后丢失 (与 test_mission 一致: 首次丢失 tick 起计时)
+    state._has_target = True
+    state.execute()
+    assert state._vision_lost_start > 0  # 首次丢失 tick 已设置计时起点
+    # 模拟丢失超过 3s
+    state._vision_lost_start = time.time() - 10.0
+
+    result = state.execute()
+    assert result == "COMPLETE"
+    assert fsm.bridge.land_calls == 1
+
+
+def test_servo_switches_to_blind_at_test_mission_altitude():
+    fsm = _SimpleFSM(params={"landing_blind_altitude": 0.5})
+    fsm.bridge = _Bridge(altitude=0.4)  # 已低于盲降高度
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    state._execute_servo(has_target=False)
+    assert state._phase == state.PHASE_BLIND
+    assert fsm.vision_modes[-1] == "none"  # 切盲降关视觉
+
+
+def test_blind_timeout_requests_px4_land():
+    fsm = _SimpleFSM(params={"landing_simple_blind_timeout": 60.0})
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_BLIND
+    state._start_time = 0.0
+
+    result = state._execute_blind(elapsed=999.0)
+    assert result == "COMPLETE"
+    assert fsm.bridge.land_calls == 1
+
+
+def test_servo_p_control_uses_test_mission_defaults():
+    """照搬 test_mission: kp 0.004 / deadzone 12px / max_vel 0.6."""
+    fsm = _SimpleFSM({
+        "landing_servo_kp_pixel": 0.004,
+        "landing_servo_max_horizontal_vel": 0.6,
+        "landing_servo_deadzone_px": 12.0,
+        "landing_blind_altitude": 0.5,
+    })
+    fsm._target = {"center_u": 320.0 + 50.0, "center_v": 240.0, "confidence": 0.9}
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    state._execute_servo(has_target=True)
+    assert len(fsm.fc.calls) == 1
+    forward, right, descent = fsm.fc.calls[0]
+    # dv=0 → forward=0; du=50 → right = kp*50 = 0.2 m/s
+    assert forward == 0.0
+    assert abs(right - 0.2) < 1e-9
+    # 高度 5.0 > 3.0 → fast 0.4
+    assert descent == 0.4
+
+
+# ---------------------------------------------------------------------------
+# 4. quick 参数文件契约 (test_mission 照搬)
+# ---------------------------------------------------------------------------
+
+def _quick_params(name):
+    import yaml
+    config = yaml.safe_load((ROOT / "drone_mission/config" / name).read_text(encoding="utf-8"))
+    return next(iter(config.values()))["ros__parameters"]
+
+
+def test_quick_params_enable_simple_landing():
+    for name in ("mission_params_quick.yaml", "mission_params_quick_sim.yaml"):
+        p = _quick_params(name)
+        assert p["landing_simple_mode"] is True
+        assert p["landing_blind_descent_speed"] == 0.15  # test_mission 值
+        assert p["landing_search_timeout"] == 15.0
+        assert p["landing_simple_blind_timeout"] == 60.0
+
+
+def test_quick_real_blind_altitude_matches_test_mission():
+    """真机: 照搬 test_mission 0.5m (真机 H 标识大, 近地可检测)."""
+    p = _quick_params("mission_params_quick.yaml")
+    assert p["landing_blind_altitude"] == 0.5
+
+
+def test_quick_sim_blind_altitude_above_h_detection_limit():
+    """SITL: H 标识近地实测 ~0.9m 失效, 盲降高度取 1.0m 保伺服路径完整."""
+    p = _quick_params("mission_params_quick_sim.yaml")
+    assert p["landing_blind_altitude"] == 1.0
+
+
+def test_quick_params_vision_loss_timeout_matches_test_mission():
+    p = _quick_params("mission_params_quick.yaml")
+    assert p["vision_loss_timeout"] == 3.0  # test_mission 默认
+
+
+def test_base_params_untouched_by_simple_landing():
+    """原参数文件无 simple 参数 → 默认 False, 主任务降落零漂移."""
+    import yaml
+    for name in ("mission_params.yaml", "mission_params_real.yaml"):
+        config = yaml.safe_load(
+            (ROOT / "drone_mission/config" / name).read_text(encoding="utf-8")
+        )
+        node = next(iter(config.values()))["ros__parameters"]
+        assert "landing_simple_mode" not in node
+        assert "landing_search_timeout" not in node
+        assert "landing_simple_blind_timeout" not in node

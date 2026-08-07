@@ -37,6 +37,7 @@ from drone_mission.states.state_drop import DropState
 from drone_mission.states.state_recon_patrol import ReconPatrolState
 from drone_mission.states.state_return import ReturnState
 from drone_mission.states.state_precision_land import PrecisionLandState
+from drone_mission.states.state_precision_land_simple import SimplePrecisionLandState
 from drone_mission.states.state_hold_for_takeover import HoldForTakeoverState
 
 # 依赖层
@@ -358,6 +359,18 @@ class MissionFSM(Node):
         self.declare_parameter("battery_critical", 0.15)
         self.declare_parameter("vision_loss_timeout", 3.0)
         self.declare_parameter("state_max_duration", 180.0)
+        # 快速投放策略 (quick_drop_mode 默认关闭, 保持现状行为)
+        self.declare_parameter("quick_drop_mode", False)
+        self.declare_parameter("drop_target_source", "cylinder")  # "cylinder" | "marker"
+        self.declare_parameter("drop_align_stall_threshold", 40.0)
+        self.declare_parameter("drop_align_stall_stable_band", 5.0)
+        self.declare_parameter("drop_align_stall_duration", 2.0)
+        self.declare_parameter("precision_align_fallback_max_pixel_error", 0.0)  # 0=禁用兜底
+        self.declare_parameter("drop_descend_speed", 0.5)
+        # 降落区 simple 模式 (landing_simple_mode 默认关闭 = 主任务逻辑)
+        self.declare_parameter("landing_simple_mode", False)
+        self.declare_parameter("landing_search_timeout", 15.0)  # simple 搜索 H 超时
+        self.declare_parameter("landing_simple_blind_timeout", 60.0)  # simple 盲降超时
 
     # ================================================================
     # 延迟初始化
@@ -423,7 +436,13 @@ class MissionFSM(Node):
             MissionState.ASCEND: DropState(self),
             MissionState.RECON_PATROL: ReconPatrolState(self),
             MissionState.RETURN_TO_HOME: ReturnState(self),
-            MissionState.PRECISION_LAND: PrecisionLandState(self),
+            # 降落区: landing_simple_mode=True 时用 test_mission 方法 (quick 策略),
+            # 默认 False 保持主任务精准降落逻辑, 两套互不影响
+            MissionState.PRECISION_LAND: (
+                SimplePrecisionLandState(self)
+                if self.get_param("landing_simple_mode", False)
+                else PrecisionLandState(self)
+            ),
             MissionState.HOLD_FOR_TAKEOVER: HoldForTakeoverState(self),
         }
 
@@ -564,6 +583,9 @@ class MissionFSM(Node):
         self._markers_timestamp = time.time()
         if self._current_state == MissionState.CYLINDER_SEARCH:
             self._remember_markers(self._markers)
+        # marker_only 模式下 cylinders 恒空, 应急视觉信号必须由 marker 喂给
+        if self.get_param("drop_target_source", "cylinder") == "marker":
+            self._emergency.update_vision(len(self._markers) > 0)
 
     @staticmethod
     def _cyl_field(cyl, key: str, default=0.0):
@@ -1043,6 +1065,7 @@ class MissionFSM(Node):
     _VISION_MODE_ALL = 3
     _VISION_MODE_COVERAGE_RESET = 4
     _VISION_MODE_COVERAGE = 5
+    _VISION_MODE_MARKER_ONLY = 6
 
     def set_vision_mode(self, mode: str) -> None:
         """Switch the separately running vision pipeline through its ROS service."""
@@ -1068,6 +1091,9 @@ class MissionFSM(Node):
         elif mode == "none":
             request.mode = self._VISION_MODE_NONE
             request.enable = False
+        elif mode == "marker_only":
+            request.mode = self._VISION_MODE_MARKER_ONLY
+            request.enable = True
         else:
             # "all" / default — full detection mode
             request.mode = self._VISION_MODE_ALL
@@ -1225,13 +1251,20 @@ class MissionFSM(Node):
         """
         获取投放候选.
 
-        圆筒目标优先。只有完全没有圆筒候选时，才用蓝色圆形标识兜底。
+        默认圆筒目标优先。只有完全没有圆筒候选时，才用蓝色圆形标识兜底。
+        quick_drop_mode 下由 drop_target_source="marker" 门控：只认蓝色标识。
         """
+        if self.get_param("drop_target_source", "cylinder") == "marker":
+            return self._dedupe_markers(self.get_known_markers())
+
         cylinders = self.get_known_cylinders()
         if cylinders:
             return cylinders
 
-        markers = self.get_known_markers()
+        return self._dedupe_markers(self.get_known_markers())
+
+    def _dedupe_markers(self, markers: list) -> list:
+        """同一蓝色标识按世界坐标 0.6m 去重后返回."""
         targets = []
         for marker in markers:
             mx = float(marker.get("center_x", 0.0))

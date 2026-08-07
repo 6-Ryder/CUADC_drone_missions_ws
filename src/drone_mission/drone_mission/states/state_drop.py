@@ -103,7 +103,10 @@ class DropState:
         # 保持水平位置, 降高
         pos = self._fsm.bridge.get_current_position()
         self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
-        self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_h), speed=0.5)
+        self._fsm.fc.goto_ned(
+            pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_h),
+            speed=float(self._fsm.get_param("drop_descend_speed", 0.5)),
+        )
         self._descent_progress = self._new_navigation_progress()
         self._alignment_progress = self._new_alignment_progress()
 
@@ -178,10 +181,16 @@ class DropState:
                 return "EXECUTE_DROP"
 
             # ── 停滞检测: pixel_error 在低值振荡但无法收敛 → 提前触发最终下降 ──
-            # 40 = 精校段窗口 35 + 5 兜底: 25-35px 的合法徘徊不再误触发停滞.
-            stall_threshold = 40.0
-            stall_stable_band = 5.0
-            stall_duration = 2.0
+            # 默认 40 = 精校段窗口 35 + 5 兜底: 25-35px 的合法徘徊不再误触发停滞.
+            stall_threshold = float(
+                self._fsm.get_param("drop_align_stall_threshold", 40.0)
+            )
+            stall_stable_band = float(
+                self._fsm.get_param("drop_align_stall_stable_band", 5.0)
+            )
+            stall_duration = float(
+                self._fsm.get_param("drop_align_stall_duration", 2.0)
+            )
             if (math.isfinite(status.pixel_error)
                     and status.pixel_error < stall_threshold
                     and not self._final_descent_started):
@@ -229,6 +238,13 @@ class DropState:
             if self._alignment_stalled(status):
                 if self._retry_precision_align_in_place(drop_h, "低空精校超时"):
                     return None
+
+                if self._quick_fallback_allow_drop(status):
+                    self._fsm.get_logger().warn(
+                        "DESCEND: 低空精校超时重试耗尽, quick 兜底直接投放 "
+                        f"source={status.source} pixel_error={status.pixel_error:.1f}px"
+                    )
+                    return "EXECUTE_DROP"
 
                 self._fsm.get_logger().error(
                     "DESCEND: 低空精校重试耗尽 "
@@ -574,13 +590,26 @@ class DropState:
             status.pixel_error, now=time.monotonic()
         )
 
+    def _quick_fallback_allow_drop(self, status) -> bool:
+        """quick 模式超时兜底: 像素误差有限且 ≤ 门限才允许直接投放, 不做盲投."""
+        if not self._fsm.get_param("quick_drop_mode", False):
+            return False
+        limit = float(self._fsm.get_param(
+            "precision_align_fallback_max_pixel_error", 0.0
+        ))
+        if limit <= 0.0:
+            return False
+        # TARGET_LOST 走 _nudge_to_visible_drop_target 另一分支, 不会到这里;
+        # 兜底仍要求有限像素误差, 丢失时 pixel_error=NaN 自然被拒
+        return math.isfinite(status.pixel_error) and status.pixel_error <= limit
+
     def _command_descend_target(self, drop_height: float) -> None:
         pos = self._fsm.bridge.get_current_position()
         self._fsm.fc.goto_ned(
             pos.north,
             pos.east,
             self._fsm.fc.altitude_to_ned(drop_height),
-            speed=0.5,
+            speed=float(self._fsm.get_param("drop_descend_speed", 0.5)),
         )
 
     def _command_ascend_target(self) -> None:

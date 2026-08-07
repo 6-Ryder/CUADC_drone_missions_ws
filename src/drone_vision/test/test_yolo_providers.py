@@ -16,11 +16,12 @@ class _Output:
 
 
 def _fake_onnxruntime(active_provider):
-    state = SimpleNamespace(preloaded=False, requested=None)
+    state = SimpleNamespace(preloaded=False, requested=None, session_options=None)
 
     class Session:
-        def __init__(self, _path, providers):
+        def __init__(self, _path, providers, sess_options=None):
             state.requested = providers
+            state.session_options = sess_options
 
         @staticmethod
         def get_inputs():
@@ -38,9 +39,16 @@ def _fake_onnxruntime(active_provider):
         assert directory == ""
         state.preloaded = True
 
+    class SessionOptions:
+        def __init__(self):
+            self.graph_optimization_level = None
+            self.intra_op_num_threads = None
+
     module = SimpleNamespace(
         InferenceSession=Session,
         preload_dlls=preload_dlls,
+        SessionOptions=SessionOptions,
+        GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL="ORT_ENABLE_ALL"),
     )
     return module, state
 
@@ -55,6 +63,10 @@ def test_cuda_device_preloads_python_cuda_libraries(monkeypatch):
     assert state.preloaded
     assert state.requested[0][0] == "CUDAExecutionProvider"
     assert state.requested[0][1]["cudnn_conv_algo_search"] == "HEURISTIC"
+    # 会话优化生效: 全量图优化 + 6 核 Jetson 留 2 核给系统
+    assert state.session_options is not None
+    assert state.session_options.graph_optimization_level == "ORT_ENABLE_ALL"
+    assert state.session_options.intra_op_num_threads == 4
 
 
 def test_tensorrt_device_requests_tensorrt_provider(monkeypatch):
