@@ -182,7 +182,7 @@ class VisionPipelineNode(Node):
         self.declare_parameter("model_width", 640)
         self.declare_parameter("model_height", 640)
         self.declare_parameter("device", "cuda")
-        self.declare_parameter("max_inference_fps", 20.0)
+        self.declare_parameter("max_inference_fps", 30.0)
         # 类别名 (YAML 配置, 必须与模型输出类别数一致)
         self.declare_parameter("class_names", ["cylinder"])
         self.declare_parameter("drop_marker_class_names", ["drop_zone_marker"])
@@ -386,7 +386,12 @@ class VisionPipelineNode(Node):
             self._release_detection_models()
         elif request.mode == 2:
             self._detection_mode = "landing"
-            self.set_servo_mode("landing")
+            # B4 (2026-08-07): 不再激活内嵌伺服。视觉管线伺服与 FSM/test_mission
+            # 的像素伺服会同时写入 px4_bridge 速度缓存互相抵消 —— 8/7 真机
+            # H 降落漂移丢失的直接根因(视觉伺服按"图像下方=机头"的下视相机
+            # 约定, 前视下倾相机下纵向符号反向, 见 PLAN_visual_servo_optimization.md B4)。
+            # 伺服由任务节点独占, 本管线只负责检测与 landing_target 发布。
+            self.set_servo_mode("none")
             self._ensure_landing_engine()
             self._release_detection_models()
         elif request.mode in (0, 3):

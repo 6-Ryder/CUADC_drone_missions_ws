@@ -207,6 +207,10 @@ class PX4Bridge(Node):
         self._vision_vel_sub = self.create_subscription(
             TwistStamped, "/drone/vision/servo_cmd", self._vision_velocity_cb, 10,
         )
+        # 注意: 此路径与 _cmd_velocity_cb 共享 _last_velocity_cmd 缓存, 心跳只发
+        # 最后写入的值 —— 双写入者会互相覆盖。B4 (2026-08-07) 起发布端已禁用
+        # (vision_pipeline SetVisionMode(2) 不再激活内嵌伺服), 保留订阅仅为兼容。
+        # 新发布者接入前必须确认与 FSM 速度指令的独占关系。
         # 订阅 VehicleCommand 中继 — FSM 等节点通过此话题发送命令,
         # px4_bridge 转发到 /fmu/in/vehicle_command (已验证的 DDS 路径)
         self._cmd_relay_sub = self.create_subscription(

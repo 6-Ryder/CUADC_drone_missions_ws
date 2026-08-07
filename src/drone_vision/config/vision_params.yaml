@@ -26,7 +26,7 @@
     conf_threshold: 0.35                   # YOLO 置信度阈值 (匹配 cv_trainer 推理脚本)
     nms_iou_threshold: 0.45               # NMS IoU 阈值
     device: "cuda"                         # cuda / cpu / tensorrt
-    max_inference_fps: 20.0                # 匹配任务控制频率，限制 GPU 压力
+    max_inference_fps: 30.0                # 推理帧率上限 (当前实测未触达, 为后续单模型/TRT 加速预留)
     # 主模型类别映射: ID → 名称 (必须与模型输出类别数一致)
     class_names:
       - "cylinder"                         # 0: 白色圆筒
