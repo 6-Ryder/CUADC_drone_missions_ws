@@ -42,6 +42,15 @@ class CylinderSearchState:
         self._min_cylinders_required = int(
             self._fsm.get_param("min_drop_targets_required", 2)
         )
+        if self._fsm.get_param("quick_drop_mode", False):
+            # quick 模式: 视觉只跑蓝底识别模型 (mode 6 marker_only)
+            # 服务不可用会抛异常并被 _transition_to 升级为 takeover, 必须兜住
+            try:
+                self._fsm.set_vision_mode("marker_only")
+            except Exception as exc:
+                self._fsm.get_logger().warn(
+                    f"CYL_SEARCH: 切换到 marker_only 失败, 继续用默认检测模式: {exc}"
+                )
         self._target_progress = ProgressMonitor(
             window_s=float(self._fsm.get_param("search_progress_window", 30.0)),
             min_improvement=1.0,
@@ -78,6 +87,13 @@ class CylinderSearchState:
             known_cylinders = valid
 
         if (
+            self._fsm.get_param("quick_drop_mode", False)
+            and hasattr(self._fsm, "get_known_markers")
+        ):
+            # quick 模式只认蓝底标识; mode 6 切换是异步服务调用,
+            # 生效窗口内圆筒可能仍入记忆, 此处显式排除只数 marker
+            known = self._fsm.get_known_markers()
+        elif (
             allow_marker_fallback
             and not known_cylinders
             and hasattr(self._fsm, "get_known_drop_targets")

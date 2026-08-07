@@ -180,9 +180,15 @@ class CylinderApproachState:
 
         cylinders = self._fsm.get_cylinders()
         markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
-        target_cyl = self._find_nearest_target(cylinders, max_dist=2.0)
-        if target_cyl is None:
+        if self._fsm.get_param("quick_drop_mode", False):
+            # quick 模式只认蓝底标识; mode 6 异步生效窗口内优先 marker, 圆筒仅兜底
             target_cyl = self._find_nearest_target(markers, max_dist=2.5)
+            if target_cyl is None:
+                target_cyl = self._find_nearest_target(cylinders, max_dist=2.0)
+        else:
+            target_cyl = self._find_nearest_target(cylinders, max_dist=2.0)
+            if target_cyl is None:
+                target_cyl = self._find_nearest_target(markers, max_dist=2.5)
 
         try:
             speed = (
