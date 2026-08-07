@@ -15,7 +15,7 @@
 | # | 现象 | 日志证据 |
 |---|---|---|
 | 1 | **投放两次盲投**:2.8m 精校成功(5.0px)后按两级策略降至 1.5m 复查,复查首帧像素误差跳变 232px,振荡 24s 不收敛,目标全丢时强制盲投 | 19:11:34 "视觉精校稳定, 允许投放 5.0px stable=5/4";19:11:57.9 "最终下降停滞, 直接执行投放 pixel_error=infpx"(盲投#1);19:12:38 第二次同型盲投 |
-| 2 | **降落无限悬停**:H 标识 2.6m 以下连续单帧跳变(>80px)→ 跳变帧零速悬停 → 3s 判丢 → 重捕获失败 → HOLD_FOR_TAKEOVER,悬停约 2.2m | 19:14:11-31:px_err 331→181 伺服正常,然后 106/261/401px 单帧跳变被拒;"H target was lost after reacquire" |
+| 2 | **降落无限悬停**:H 标识 2.6m 以下连续单帧跳变(>80px)→ 跳变帧零速悬停 → 3s 判丢 → 重捕获失败 → HOLD_FOR_TAKEOVER,2.6m 起零速悬停约 8s 至接管 | 19:14:11-31:px_err 331→181(5.0m→2.6m)伺服正常,随后 122/106/261/401px 等单帧跳变被拒(最后一帧 servo 日志 2.6m);19:14:31 "H target was lost after reacquire" |
 | 3 | **只扫到一个目标**:高处搜索只识别 1 个区内圆筒,两次投放同一目标(Phase 2 处理) | ID=2 与 ID=1 为同一圆筒换视角重复登记 |
 | 4 | 新 .engine 模型(cylinder_new)识别/推理明显增强 | 本次架次受益,保留现状不再改动 |
 | 5 | 扫描时飞机沿投放区来回飞行 | 单线航点路径,Phase 2 改单次横穿 |
@@ -85,15 +85,21 @@ def _compose_aligner_descent(self, descent_speed: float):
 
 | 阶段 | 高度段 | 行为 | 退出条件(任一) |
 |---|---|---|---|
-| 1 锁定 | 5m→2.8m | 合成命令持续下降 | ① `pixel_error < 60px`(`descend_align_coarse_lock_px`,真机);② 10s 无锁(`descend_align_lock_timeout_s`);③ 到达 2.8m(align_h)。均只簿记+日志,无缝穿过 |
-| 2 边降边校 | 2.8m→1.5m,0.35m/s | 持续合成命令;TARGET_LOST 不阻塞(丢失时精校器命令归零→自然发纯垂直) | 到达 final_h(1.5m) |
-| 3 到点判定 | 1.5m | 原地继续合成+判定 | ① `_drop_target_is_centered(final_h)` → 立即投;② 目标丢失停滞 2s(`drop_arrival_lost_drop_s`)→ 投;③ 原地精校 ≤5s(`drop_arrival_align_timeout`)→ **无论误差投放**;④ 外层 `drop_total_timeout` 30s 硬上限(自 DESCEND enter 起)→ **强制投** |
+| 1 锁定 | 巡航高→2.8m,垂直 `drop_descend_speed`(0.35) | 合成命令持续下降 | ① `pixel_error < 60px`(`descend_align_coarse_lock_px`,真机);② 10s 无锁(`descend_align_lock_timeout_s`);③ 到达 2.8m(align_h)。均只簿记+日志,无缝穿过 |
+| 2 边降边校 | 2.8m→1.5m,垂直同 `drop_descend_speed`(0.35) | 持续合成命令;TARGET_LOST 不阻塞(丢失时精校器命令归零→自然发纯垂直) | 到达 final_h(1.5m) |
+| 3 到点判定 | 1.5m,垂直 = 0.0(到点悬停,不再下降) | 水平脉冲照常合成+判定 | ① `_drop_target_is_centered(final_h)` → 立即投;② 目标丢失停滞 2s(`drop_arrival_lost_drop_s`)→ 投;③ 原地精校 ≤5s(`drop_arrival_align_timeout`)→ **无论误差投放**;④ 外层 `drop_total_timeout` 30s 硬上限(自 DESCEND enter 起)→ **强制投** |
 
 **任何路径 ≤30s 出结果**(解决 24s 振荡 + infpx 盲投:盲投从"丢失才投"改为"限时必投")。
 
+**实现要点(消除歧义)**:
+- **垂直速度参数**:阶段1/2 垂直分量统一取 `drop_descend_speed`(改后 0.35);`precision_align_final_descent_speed`(0.25)仅 legacy 路径使用,新路径不复用。
+- **阶段3 垂直 = 0.0**:已到 1.5m,再降会撞目标;合成命令水平分量照常脉冲,垂直归零悬停精校。
+- **`drop_total_timeout` 计时源**:用独立字段 `_descend_enter_time`(enter() 打点)——`_start_time` 会被 `_start_final_descent_if_needed`(407 行)和 `_retry_precision_align_in_place`(435 行)重置,不可用作硬上限计时。
+- **高度无进展守卫(安全网)**:阶段1/2 复用 `_descent_progress`(ProgressMonitor)观测高度误差;无进展 → 重发一次 → 仍无进展 → **takeover(不投放)**——防止 PX4 未接受速度命令(offboard 失效)时 30s 超时在高空盲投。仅阶段3 允许超时投放。
+
 ### 3.4 配套改动
 
-- `_drop_target_is_centered(drop_h: Optional[float] = None)`(现 473-511)加可选参数,阶段3 显式传 `final_h` 保证紧窗口生效。
+- `_drop_target_is_centered(drop_h: Optional[float] = None)`(现 473-520,precision 分支 473-510)加可选参数,阶段3 显式传 `final_h` 保证紧窗口生效。
 - 进入阶段3 时:`fc.stop_velocity()`;若此刻已 TARGET_LOST,则 `self._precision_aligner.reset()` 冷重置,给一次重新锁定机会。
 - `mission_state_machine.py`:**只加 declare_parameter 行**(新参数默认值),不动状态机骨架。
 
@@ -105,7 +111,7 @@ def _compose_aligner_descent(self, descent_speed: float):
 
 | # | 改动 | 位置 | 语义 |
 |---|---|---|---|
-| 1 | **低空不计视觉丢失** | `execute()` 78-128 | `altitude ≤ 3.0m`(`landing_jump_bypass_altitude`)时不启动 `_vision_lost_start` 计时 → 断掉"跳变→3s判丢→重捕获→接管"链路(跳变拒绝本身保留,拒绝的是"追跳变",不再导致悬停) |
+| 1 | **低空不计视觉丢失** | `execute()` 105-121 判丢段 | **判丢触发条件加高度门**:仅 `altitude > 3.0m`(`landing_jump_bypass_altitude`)才进入判丢/重捕获/接管链。低空时即使 `_vision_lost_start` 已在高空启动(如 3.2m 起计时、2.8m 时到点),也直接跳过判丢——彻底断链(跳变拒绝本身保留,拒绝的是"追跳变",不再导致悬停) |
 | 2 | **跳变不悬停** | `_execute_servo()` 161-265 | `target is None` 分支按高度分流:**≤3m** 下发 `(last_fwd, last_rgt, layered_descent)`(锁存修正速度继续降);**>3m** 维持现状 `(0,0,0)`。有效目标分支记录 `_last_servo_fwd/rgt`(限幅后)。抽 `_layered_descent_speed(altitude)` 复用现有 fast/medium/slow 分层 |
 | 3 | **锁存放宽** | 原"10 帧连续死区"锁存块 | 删除 10 帧死区锁存,改为 `_has_landing_target`(本会话曾见 H)且 `altitude ≤ 2.5m`(`landing_alignment_latch_max_altitude`,现有参数)→ `_visual_alignment_latched = True`。安全网自动成立(从未见 H 不锁存) |
 | 4 | **盲降水平衰减** | `_switch_to_blind()` 380-387、`_execute_blind()` 298-327 | `_switch_to_blind` 锁存 `_last_servo_fwd/rgt`;`_execute_blind` 内水平速度按 `landing_blind_horiz_decay_s`(1s)线性衰减至 0,垂直 0.3m/s 直降;落地检测 `_fallback_touchdown_confirmed` + `_finish_touchdown`(366-378)沿用 |
@@ -126,7 +132,7 @@ def _compose_aligner_descent(self, descent_speed: float):
 | `drop_total_timeout`(新) | 30.0 | 30.0 | 30.0 | — |
 | `landing_jump_bypass_altitude`(新) | 3.0 | 3.0 | 3.0 | — |
 | `landing_blind_horiz_decay_s`(新) | 1.0 | 1.0 | 1.0 | — |
-| `drop_descend_speed`(改) | 0.5→**0.35** | 0.35 | 0.35 | 0.8 不变 |
+| `drop_descend_speed`(改;新路径阶段1/2 垂直速度) | 0.5→**0.35** | 0.35 | 0.35 | 0.8 不变 |
 | `landing_alignment_latch_max_altitude`(复用,现有) | 2.5 | 2.5 | 2.5 | 2.5 |
 
 ## 6. 测试计划(沿用现有轻量 mock 模式:`test_precision_align_controller.py` 的 `_Clock/_Fsm/_Bridge`)
@@ -135,14 +141,14 @@ def _compose_aligner_descent(self, descent_speed: float):
 1. 门控:`descend_align_enable=false` → legacy 路径;2. 门控:`final_descent_enable=false` → legacy;3. 门控:`final_h` 越界 → legacy;4. 调度:新模式下 `_execute_descend` 走 `_execute_descend_align`
 5. 阶段1:锁定成功(pixel<60px)→ 阶段2;6. 阶段1:10s 无锁 → 阶段2;7. 阶段1:到达 2.8m → 阶段2
 8. 合成:脉冲窗口内 `(fwd, rgt, descent)`;9. 合成:停机窗口 `(0,0,descent)`;10. 合成:TARGET_LOST 时纯垂直不阻塞
-11. 阶段2:下降中持续合成,到达 final_h → 阶段3
+11. 阶段2:下降中持续合成,到达 final_h → 阶段3(垂直归零悬停);11b. 阶段3 合成命令垂直分量 = 0.0、水平脉冲照常;11c. 阶段1/2 高度无进展 → 重发 → takeover(不投放)
 12. 阶段3:release_ready → EXECUTE_DROP;13. 阶段3:丢失 2s → EXECUTE_DROP;14. 阶段3:5s 未对齐 → EXECUTE_DROP;15. 阶段3:30s 总超时 → EXECUTE_DROP(**全有界**)
 
 **新增 `src/drone_mission/test/test_precision_land_low_alt.py`(~10 用例)**:
 1. 3.2m 跳变(target None)→ 悬停 `(0,0,0)`;2. 2.8m 跳变 → `(last_fwd, last_rgt, descent)` 继续降;3. 有效帧记录 `_last_servo_fwd/rgt`;4. 曾见 H + ≤2.5m → 锁存;5. 从未见 H → 不锁存;6. ≤3m 视觉丢失不启动计时;7. >3m 视觉丢失仍计时;8. 盲降水平 1s 线性衰减至 0;9. 盲降垂直 0.3m/s 直降;10. 落地检测 → COMPLETE
 
 **修改现有**:
-- `test_flight_safety_contract.py` 3 处(mock 高度边界落入 ≤3m 新语义):`-3.0→-3.2` ×2、`-1.0→-4.0`
+- `test_flight_safety_contract.py` 2 处:mock 高度 `-3.0→-3.2` ×2(444 行跳变悬停用例、497 行低置信用例——3.0m 整恰落 ≤3m 新语义边界,移出至 3.2m 保持"悬停/零速"期望);**515 行盲降用例不经过判丢段(execute() 90-91 行 PHASE_BLIND 提前返回),无需改动**
 - `test_quick_drop_strategy.py`:`drop_descend_speed` 断言 0.5→0.35 + 新参数默认断言(`descend_align_enable: false` 语义)
 
 ## 7. 提交计划(3 commits,分支 Full,推 GitHub)
