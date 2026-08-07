@@ -123,7 +123,7 @@ def generate_launch_description():
                 "fy": 400.0,
                 "cx": 320.0,
                 "cy": 240.0,
-                "device": "cuda",
+                "device": "tensorrt",
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
                 "coverage_zone_x_min": -4.0,
                 "coverage_zone_x_max": 4.0,
