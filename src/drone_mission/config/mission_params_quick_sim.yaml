@@ -71,6 +71,9 @@
     marker_memory_min_observations: 1     # 蓝底 1 次观测即入库 (原 3)
     drop_descend_height: 2.4      # 单次降高高度 (取消两级降高, 原 2.8+1.5)
     drop_descend_speed: 0.8       # 降高速度提速 (原 0.5)
+    # ── 边伺服边下降 (quick: 降高同时像素 P 控制水平对心, 复用降落区伺服参数) ──
+    drop_servo_descend_fast: 0.5   # 伺服下降: >3m 垂直速度 (m/s)
+    drop_servo_descend_slow: 0.3   # 伺服下降: ≤3m 垂直速度 (m/s), 近投放高度减速保对心稳定
     drop_confirmation_timeout: 5.0  # 必须大于舵机层 3s 总预算 (s)
     drop_align_pixel_tolerance: 80.0 # 投放前目标中心允许像素误差 (1280 宽图像, = 真机 40px 等比)
     # ── 低空视觉校准: 梯度下降探测 (quick 下不使用, 继承 SITL 基线) ──

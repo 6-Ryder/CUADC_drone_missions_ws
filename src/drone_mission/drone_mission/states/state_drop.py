@@ -53,6 +53,8 @@ class DropState:
         self._descent_progress: Optional[ProgressMonitor] = None
         self._ascend_progress: Optional[ProgressMonitor] = None
         self._alignment_progress: Optional[ProgressMonitor] = None
+        # 快速模式边伺服边下降: 下降中像素 P 控制水平对心, 到位后停速度悬停
+        self._servo_descend_active: bool = False
 
     # ---- 子状态切换 ----
 
@@ -82,6 +84,7 @@ class DropState:
         self._descent_progress = None
         self._ascend_progress = None
         self._alignment_progress = None
+        self._servo_descend_active = False
         self._visual_aligner.reset()
         self._precision_aligner.reset()
         # 停滞检测: pixel_error 在低值附近振荡但无法收敛 → 提前触发最终下降
@@ -100,15 +103,26 @@ class DropState:
         self._fsm.get_logger().info(f"DESCEND: 降高至 {drop_h}m")
         self._precision_aligner.reset(self._selected_memory_xy())
 
-        # 保持水平位置, 降高
         pos = self._fsm.bridge.get_current_position()
         self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
+        self._descent_progress = self._new_navigation_progress()
+        self._alignment_progress = self._new_alignment_progress()
+
+        if self._fsm.get_param("quick_drop_mode", False):
+            # 快速模式: 边伺服边下降 — 不发纯垂直 goto, 下降中像素 P 控制水平对心
+            self._servo_descend_active = True
+            self._fsm.get_logger().info(
+                "DESCEND: 快速模式边伺服边下降 "
+                f"(fast={float(self._fsm.get_param('drop_servo_descend_fast', 0.5)):.2f}, "
+                f"slow={float(self._fsm.get_param('drop_servo_descend_slow', 0.3)):.2f} m/s)"
+            )
+            return
+
+        # 保持水平位置, 降高
         self._fsm.fc.goto_ned(
             pos.north, pos.east, self._fsm.fc.altitude_to_ned(drop_h),
             speed=float(self._fsm.get_param("drop_descend_speed", 0.5)),
         )
-        self._descent_progress = self._new_navigation_progress()
-        self._alignment_progress = self._new_alignment_progress()
 
     def _enter_drop(self):
         self._fsm.get_logger().info("DROP: 执行投放")
@@ -155,6 +169,18 @@ class DropState:
 
         height_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
         descent_ready = self._check_descent_ready(height_error)
+
+        # 快速模式: 边伺服边下降 — 到位前每 tick 像素 P 控制水平 + 垂直下降
+        if self._servo_descend_active:
+            if not descent_ready:
+                self._servo_descend_tick(pos.down)
+                return None
+            self._servo_descend_active = False
+            self._fsm.fc.stop_velocity()
+            self._fsm.get_logger().info(
+                "DESCEND: 边伺服边下降到位, 悬停复查对心"
+            )
+
         if not descent_ready and self._descent_progress is not None:
             now = time.monotonic()
             if self._descent_progress.observe(height_error, now=now):
@@ -305,6 +331,88 @@ class DropState:
         if not selected_positions:
             return None
         return selected_positions[-1]
+
+    def _servo_descend_tick(self, down: float) -> None:
+        """快速模式边伺服边下降单 tick: 像素 P 控制水平对心 + 分层垂直速度.
+
+        目标选择: quick 只追蓝底标识, 取置信度达标且像素误差最小者
+        (与降落区伺服同方法: 连续像素 P 控制, 非步进脉冲).
+        """
+        altitude = float(self._fsm.fc.ned_to_altitude(down))
+
+        markers = (
+            self._fsm.get_markers()
+            if hasattr(self._fsm, "get_markers")
+            else []
+        )
+        min_conf = float(self._fsm.get_param("precision_align_min_confidence", 0.25))
+        cx = float(self._fsm.get_param("camera_cx", 640.0))
+        cy = float(self._fsm.get_param("camera_cy", 480.0))
+
+        target = None
+        best_err = float("inf")
+        for m in markers:
+            conf = float(
+                getattr(m, "confidence", 0.0)
+                if not isinstance(m, dict)
+                else m.get("confidence", 0.0)
+            )
+            if conf < min_conf:
+                continue
+            u = float(
+                getattr(m, "center_u", cx)
+                if not isinstance(m, dict)
+                else m.get("center_u", cx)
+            )
+            v = float(
+                getattr(m, "center_v", cy)
+                if not isinstance(m, dict)
+                else m.get("center_v", cy)
+            )
+            err = math.hypot(u - cx, v - cy)
+            if err < best_err:
+                best_err = err
+                target = (u, v)
+
+        if target is None:
+            # 目标丢失: 悬停等待恢复 (与降落区伺服一致)
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            return
+
+        u, v = target
+        du = u - cx
+        dv = v - cy
+
+        # 像素 P 控制 (复用降落区伺服参数, quick 文件已配置同值)
+        kp = float(self._fsm.get_param("landing_servo_kp_pixel", 0.004))
+        max_vel = float(self._fsm.get_param("landing_servo_max_horizontal_vel", 0.6))
+        deadzone = float(self._fsm.get_param("landing_servo_deadzone_px", 12.0))
+        x_sign = float(self._fsm.get_param("landing_servo_x_to_right_sign", 1.0))
+        y_sign = float(self._fsm.get_param("landing_servo_y_to_forward_sign", -1.0))
+
+        if best_err < deadzone:
+            forward, right = 0.0, 0.0
+        else:
+            forward = max(-max_vel, min(max_vel, y_sign * kp * dv))
+            right = max(-max_vel, min(max_vel, x_sign * kp * du))
+
+        # 分层垂直速度: 高空快降, 近投放高度减速保对心稳定
+        if altitude > 3.0:
+            descent = float(self._fsm.get_param("drop_servo_descend_fast", 0.5))
+        else:
+            descent = float(self._fsm.get_param("drop_servo_descend_slow", 0.3))
+
+        self._fsm.fc.set_velocity_body(forward, right, descent)
+
+        # 1Hz 日志
+        now = time.time()
+        if now - self._last_descend_log_time >= 1.0:
+            self._last_descend_log_time = now
+            self._fsm.get_logger().info(
+                f"DESCEND: servo alt={altitude:.1f}m px_err={best_err:.0f}px "
+                f"du={du:+.0f} dv={dv:+.0f} "
+                f"vel=(fwd:{forward:.2f},r:{right:.2f},d:{descent:.2f})"
+            )
 
     def _precision_enabled(self) -> bool:
         return bool(self._fsm.get_param("precision_align_enable", True))

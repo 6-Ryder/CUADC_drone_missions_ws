@@ -393,3 +393,160 @@ def test_base_params_untouched_by_quick_strategy():
     assert "quick_drop_mode" not in base_real
     assert "drop_align_stall_threshold" not in base
     assert "drop_align_stall_threshold" not in base_real
+
+
+# ---------------------------------------------------------------------------
+# 6. 边伺服边下降 (quick 投放区降高段: 像素 P 控制水平 + 分层垂直)
+# ---------------------------------------------------------------------------
+
+class _ServoFC:
+    def __init__(self, alt=5.6):
+        self.alt = alt
+        self.calls = []
+        self.goto_calls = 0
+
+    def ned_to_altitude(self, down):
+        return float(self.alt)
+
+    def altitude_to_ned(self, h):
+        return -float(h)
+
+    def set_velocity_body(self, f, r, d):
+        self.calls.append((f, r, d))
+
+    def stop_velocity(self):
+        self.calls.append(("stop",))
+
+    def goto_ned(self, *args, **kwargs):
+        self.goto_calls += 1
+
+
+class _ServoBridge:
+    def __init__(self, alt=5.6):
+        self._alt = alt
+
+    def get_current_position(self):
+        return type("P", (), {"north": 0.0, "east": 0.0, "down": -self._alt})()
+
+
+def _marker(u, v, conf=0.9):
+    return type("M", (), {"center_u": u, "center_v": v, "confidence": conf})()
+
+
+def _servo_fsm(params):
+    fsm = _DropFSM(params)
+    fsm.fc = _ServoFC()
+    fsm.bridge = _ServoBridge()
+    fsm.get_markers = lambda: [_marker(640, 480)]
+    fsm.cylinder_selector = type("CS", (), {"_selected_positions": []})()
+    return fsm
+
+
+def test_quick_descend_uses_servo_not_goto():
+    fsm = _servo_fsm({"quick_drop_mode": True, "drop_descend_height": 2.4})
+    state = DropState(fsm)
+    state.enter()
+    assert state._servo_descend_active is True
+    assert fsm.fc.goto_calls == 0  # 不发纯垂直 goto
+
+
+def test_default_descend_keeps_goto():
+    fsm = _servo_fsm({})
+    state = DropState(fsm)
+    state.enter()
+    assert state._servo_descend_active is False
+    assert fsm.fc.goto_calls == 1  # 非 quick 保持原行为
+
+
+def test_servo_descend_tick_p_control_and_fast_layer():
+    fsm = _servo_fsm({
+        "camera_cx": 640.0, "camera_cy": 480.0,
+        "precision_align_min_confidence": 0.25,
+        "landing_servo_kp_pixel": 0.004,
+        "landing_servo_max_horizontal_vel": 0.6,
+        "landing_servo_deadzone_px": 12.0,
+        "landing_servo_x_to_right_sign": 1.0,
+        "landing_servo_y_to_forward_sign": -1.0,
+        "drop_servo_descend_fast": 0.5,
+        "drop_servo_descend_slow": 0.3,
+    })
+    fsm.get_markers = lambda: [_marker(640 + 50, 480)]  # du=50 → right=0.2
+    state = DropState(fsm)
+    state._servo_descend_tick(-5.6)  # >3m → fast 层
+    fwd, right, d = fsm.fc.calls[0]
+    assert fwd == 0.0
+    assert abs(right - 0.2) < 1e-9
+    assert d == 0.5
+
+
+def test_servo_descend_tick_slow_layer_and_deadzone():
+    fsm = _servo_fsm({
+        "camera_cx": 640.0, "camera_cy": 480.0,
+        "landing_servo_kp_pixel": 0.004,
+        "landing_servo_max_horizontal_vel": 0.6,
+        "landing_servo_deadzone_px": 12.0,
+        "drop_servo_descend_fast": 0.5,
+        "drop_servo_descend_slow": 0.3,
+    })
+    fsm.fc = _ServoFC(alt=2.5)  # ≤3m → slow 层
+    fsm.get_markers = lambda: [_marker(640, 480)]  # 中心 → 死区内零水平修正
+    state = DropState(fsm)
+    state._servo_descend_tick(-2.5)
+    fwd, right, d = fsm.fc.calls[0]
+    assert fwd == 0.0
+    assert right == 0.0
+    assert d == 0.3
+
+
+def test_servo_descend_tick_lost_hovers():
+    fsm = _servo_fsm({
+        "camera_cx": 640.0, "camera_cy": 480.0,
+        "precision_align_min_confidence": 0.25,
+        "drop_servo_descend_fast": 0.5,
+        "drop_servo_descend_slow": 0.3,
+    })
+    fsm.get_markers = lambda: []
+    state = DropState(fsm)
+    state._servo_descend_tick(-5.6)
+    assert fsm.fc.calls[0] == (0.0, 0.0, 0.0)  # 丢失悬停等待恢复
+
+
+def test_servo_descend_stops_when_arrived():
+    fsm = _servo_fsm({
+        "quick_drop_mode": True,
+        "drop_descend_height": 2.4,
+        "precision_align_enable": True,
+        "precision_align_drop_height_tolerance": 0.5,
+        "precision_align_final_descent_enable": False,
+    })
+    fsm.bridge = _ServoBridge(alt=2.0)  # 已到位 (误差 0.4 < 0.5)
+    state = DropState(fsm)
+    state.enter()
+    assert state._servo_descend_active is True
+    state._drop_target_is_centered = lambda: True  # 到位且已对心 → 直接投放
+    result = state._execute_descend()
+    assert result == "EXECUTE_DROP"
+    assert state._servo_descend_active is False
+    assert fsm.fc.calls[0] == ("stop",)  # 停速度悬停
+
+
+def test_servo_descend_params_declared():
+    defaults = _declare_param_defaults(
+        ROOT / "drone_mission/drone_mission/mission_state_machine.py"
+    )
+    assert defaults["drop_servo_descend_fast"] == 0.5
+    assert defaults["drop_servo_descend_slow"] == 0.3
+
+
+def test_quick_params_include_servo_descend_speeds():
+    for name in ("mission_params_quick.yaml", "mission_params_quick_sim.yaml"):
+        p = _quick_params(name)
+        assert p["drop_servo_descend_fast"] > 0.0
+        assert p["drop_servo_descend_slow"] > 0.0
+        assert p["drop_servo_descend_fast"] > p["drop_servo_descend_slow"]
+
+
+def test_base_params_untouched_by_servo_descend():
+    base = _load_parameters(ROOT / "drone_mission/config/mission_params.yaml")
+    assert "drop_servo_descend_fast" not in base
+    assert "drop_servo_descend_slow" not in base
