@@ -371,6 +371,9 @@ class MissionFSM(Node):
         self.declare_parameter("landing_simple_mode", False)
         self.declare_parameter("landing_search_timeout", 15.0)  # simple 搜索 H 超时
         self.declare_parameter("landing_simple_blind_timeout", 60.0)  # simple 盲降超时
+        # 快速模式边伺服边下降: 降高中像素 P 控制水平对心, 分层垂直速度
+        self.declare_parameter("drop_servo_descend_fast", 0.5)
+        self.declare_parameter("drop_servo_descend_slow", 0.3)
 
     # ================================================================
     # 延迟初始化
