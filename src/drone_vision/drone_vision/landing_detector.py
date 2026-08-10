@@ -21,6 +21,7 @@ from drone_interfaces.msg import LandingTarget
 from cv_bridge import CvBridge
 import numpy as np
 import cv2
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
@@ -206,6 +207,198 @@ class LandingPadRefiner:
             return angle_deg
         except Exception:
             return 0.0
+
+
+@dataclass(frozen=True)
+class LandingCircleTrack:
+    """One accepted circular landing-pad measurement in image coordinates."""
+
+    center_u: float
+    center_v: float
+    radius_px: float
+    confidence: float
+    fit_residual: float
+    edge_margin_px: float
+
+
+class LandingCircleTracker:
+    """Track the physical landing circle inside a bounded, seeded ROI."""
+
+    def __init__(
+        self,
+        circle_min_area: int = 80,
+        adaptive_thresh_block: int = 11,
+        roi_padding_px: int = 48,
+        min_edge_margin_px: float = 12.0,
+        max_center_jump_px: float = 80.0,
+        max_radius_change_ratio: float = 0.35,
+    ):
+        self._circle_min_area = circle_min_area
+        self._adaptive_thresh_block = adaptive_thresh_block | 1
+        self._roi_padding_px = roi_padding_px
+        self._min_edge_margin_px = min_edge_margin_px
+        self._max_center_jump_px = max_center_jump_px
+        self._max_radius_change_ratio = max_radius_change_ratio
+        self._last_track: Optional[LandingCircleTrack] = None
+        self._last_rejection_reason = "uninitialized"
+
+    def reset(self) -> None:
+        self._last_track = None
+        self._last_rejection_reason = "reset"
+
+    @property
+    def has_track(self) -> bool:
+        return self._last_track is not None
+
+    @property
+    def last_rejection_reason(self) -> str:
+        return self._last_rejection_reason
+
+    def seed(
+        self,
+        image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+    ) -> Optional[LandingCircleTrack]:
+        """Seed tracking from a geometrically validated YOLO acquisition ROI."""
+        return self._accept(self._find_circle(image, self._padded_roi(image, bbox)))
+
+    def track(self, image: np.ndarray) -> Optional[LandingCircleTrack]:
+        """Return the next coherent circle track without performing full-frame search."""
+        if self._last_track is None:
+            return None
+        radius = self._last_track.radius_px + self._roi_padding_px
+        bbox = (
+            int(round(self._last_track.center_u - radius)),
+            int(round(self._last_track.center_v - radius)),
+            int(round(self._last_track.center_u + radius)),
+            int(round(self._last_track.center_v + radius)),
+        )
+        return self._accept(self._find_circle(image, self._clip_roi(image, bbox)))
+
+    def _padded_roi(
+        self,
+        image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+    ) -> Tuple[int, int, int, int]:
+        x1, y1, x2, y2 = bbox
+        padded = (
+            x1 - self._roi_padding_px,
+            y1 - self._roi_padding_px,
+            x2 + self._roi_padding_px,
+            y2 + self._roi_padding_px,
+        )
+        return self._clip_roi(image, padded)
+
+    @staticmethod
+    def _clip_roi(
+        image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+    ) -> Tuple[int, int, int, int]:
+        x1, y1, x2, y2 = bbox
+        return (
+            max(0, x1),
+            max(0, y1),
+            min(image.shape[1], x2),
+            min(image.shape[0], y2),
+        )
+
+    def _find_circle(
+        self,
+        image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+    ) -> Optional[LandingCircleTrack]:
+        x1, y1, x2, y2 = bbox
+        roi = image[y1:y2, x1:x2]
+        if roi.size == 0:
+            self._last_rejection_reason = "empty_roi"
+            return None
+
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        binary = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, self._adaptive_thresh_block, 2,
+        )
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+        contours, _ = cv2.findContours(
+            cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+        )
+
+        best: Optional[LandingCircleTrack] = None
+        self._last_rejection_reason = "no_circle"
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < self._circle_min_area:
+                self._last_rejection_reason = "small_contour"
+                continue
+            if len(contour) < 5:
+                self._last_rejection_reason = "non_elliptical"
+                continue
+            ellipse = cv2.fitEllipse(contour)
+            (center_x, center_y), (axis_a, axis_b), _angle = ellipse
+            radius = max(axis_a, axis_b) / 2.0
+            if radius <= 0.0 or min(axis_a, axis_b) <= 0.0:
+                self._last_rejection_reason = "zero_radius"
+                continue
+            axis_ratio = min(axis_a, axis_b) / max(axis_a, axis_b)
+            ellipse_fill = area / max(np.pi * axis_a * axis_b / 4.0, 1.0)
+            # A horizontal circle becomes an ellipse for the vehicle's
+            # down-tilted camera.  Validate ellipse fit rather than reject a
+            # physically correct perspective projection as "non-circular".
+            if axis_ratio < 0.45 or ellipse_fill < 0.55:
+                self._last_rejection_reason = "non_elliptical"
+                continue
+            absolute_x = center_x + x1
+            absolute_y = center_y + y1
+            edge_margin = min(
+                absolute_x - radius,
+                absolute_y - radius,
+                image.shape[1] - (absolute_x + radius),
+                image.shape[0] - (absolute_y + radius),
+            )
+            if edge_margin < self._min_edge_margin_px:
+                self._last_rejection_reason = "edge_clipped"
+                continue
+            residual = 1.0 - min(ellipse_fill, 1.0)
+            margin_quality = min(1.0, edge_margin / max(radius, 1.0))
+            confidence = min(
+                0.99,
+                0.55 + 0.25 * min(ellipse_fill, 1.0)
+                + 0.10 * axis_ratio + 0.10 * margin_quality,
+            )
+            candidate = LandingCircleTrack(
+                center_u=absolute_x,
+                center_v=absolute_y,
+                radius_px=radius,
+                confidence=confidence,
+                fit_residual=residual,
+                edge_margin_px=edge_margin,
+            )
+            if best is None or candidate.confidence > best.confidence:
+                best = candidate
+        return best
+
+    def _accept(
+        self,
+        candidate: Optional[LandingCircleTrack],
+    ) -> Optional[LandingCircleTrack]:
+        if candidate is None:
+            return None
+        if self._last_track is not None:
+            center_jump = np.hypot(
+                candidate.center_u - self._last_track.center_u,
+                candidate.center_v - self._last_track.center_v,
+            )
+            if center_jump > self._max_center_jump_px:
+                self._last_rejection_reason = "center_jump"
+                return None
+            radius_change = abs(candidate.radius_px - self._last_track.radius_px)
+            if radius_change / max(self._last_track.radius_px, 1.0) > self._max_radius_change_ratio:
+                self._last_rejection_reason = "radius_change"
+                return None
+        self._last_track = candidate
+        self._last_rejection_reason = "accepted"
+        return candidate
 
 
 class LandingDetectorNode(Node):

@@ -327,6 +327,91 @@ def test_fine_alignment_uses_low_speed_cap():
     assert (forward ** 2 + right ** 2) ** 0.5 <= 0.0200001
 
 
+def test_ground_error_is_height_invariant_for_same_physical_offset():
+    controller = PrecisionAlignController(_Fsm({
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+    }))
+
+    forward_high, right_high = controller._ground_error_m(40.0, 0.0, 2.0)
+    forward_low, right_low = controller._ground_error_m(80.0, 0.0, 1.0)
+
+    assert forward_high == forward_low == 0.0
+    assert right_high == right_low == 0.20
+
+
+def test_continuous_step_keeps_horizontal_servo_and_descent_in_one_command():
+    fsm = _Fsm({
+        "precision_align_continuous_enable": True,
+        "precision_align_ground_kp": 0.40,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "precision_align_max_speed": 1.0,
+        "precision_align_raw_pixel_tolerance": 6.0,
+        "precision_align_smooth_pixel_tolerance": 5.0,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+
+    controller.step(
+        markers=[],
+        cylinders=[{
+            "confidence": 0.9,
+            "center_u": 680.0,
+            "center_v": 480.0,
+            "center_x": 42.3,
+            "center_y": 5.5,
+        }],
+        drop_height=2.4,
+        altitude_m=2.4,
+        descent_speed=0.28,
+        allow_release=False,
+    )
+
+    forward, right, down = fsm.fc.body_commands[-1]
+    assert forward == 0.0
+    assert right == 0.096
+    assert down == 0.28
+    assert fsm.fc.stop_count == 0
+
+
+def test_continuous_descent_keeps_correcting_inside_release_pixel_window():
+    """下降阶段不能因投放容差而暂停横向伺服。"""
+    fsm = _Fsm({
+        "precision_align_continuous_enable": True,
+        "precision_align_ground_kp": 0.40,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "precision_align_max_speed": 1.0,
+        "precision_align_raw_pixel_tolerance": 80.0,
+        "precision_align_smooth_pixel_tolerance": 80.0,
+        "precision_align_threshold_norm_x": 0.10,
+        "precision_align_threshold_norm_y": 0.10,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+
+    controller.step(
+        markers=[],
+        cylinders=[{
+            "confidence": 0.9,
+            "center_u": 680.0,  # 40 px: 在投放容差内，但仍有 0.24 m 地面偏差
+            "center_v": 480.0,
+            "center_x": 42.3,
+            "center_y": 5.5,
+        }],
+        drop_height=2.4,
+        altitude_m=2.4,
+        descent_speed=0.28,
+        allow_release=False,
+    )
+
+    forward, right, down = fsm.fc.body_commands[-1]
+    assert forward == 0.0
+    assert right == 0.096
+    assert down == 0.28
+
+
 def _window_target(center_u=640.0, center_v=480.0):
     return [{
         "confidence": 0.9,

@@ -139,6 +139,40 @@ def test_takeoff_waits_for_confirmed_offboard(monkeypatch):
     assert fsm.offboard_confirmations == 1
 
 
+def test_takeoff_reports_control_loop_gap_while_climbing(monkeypatch):
+    """A delayed mission callback must leave a diagnostic trace after recovery."""
+    class _RecordingLogger:
+        def __init__(self):
+            self.errors = []
+
+        def info(self, _message):
+            pass
+
+        def warn(self, _message):
+            pass
+
+        def error(self, message):
+            self.errors.append(message)
+
+    fsm = _FSM()
+    logger = _RecordingLogger()
+    fsm.get_logger = lambda: logger
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": 0.0})()
+    state = TakeoffState(fsm)
+    state._sub_phase = state.SUB_CLIMB
+    state._start_time = 0.0
+    state._last_control_tick_monotonic = 10.0
+    monkeypatch.setattr(
+        "drone_mission.states.state_takeoff.time.monotonic", lambda: 12.0,
+    )
+    monkeypatch.setattr(
+        "drone_mission.states.state_takeoff.time.time", lambda: 2.0,
+    )
+
+    assert state.execute() is None
+    assert any("control-loop gap" in message for message in logger.errors)
+
+
 def test_takeoff_prestreams_a_hold_before_requesting_offboard(monkeypatch):
     fsm = _FSM()
     state = TakeoffState(fsm)

@@ -47,7 +47,7 @@ from drone_vision.cylinder_detector import (
     CylinderTracker,
 )
 from drone_vision.marker_detector import BlueMarkerRefiner
-from drone_vision.landing_detector import LandingPadRefiner
+from drone_vision.landing_detector import LandingCircleTracker, LandingPadRefiner
 from drone_vision.coverage_monitor import CoverageMonitor
 from drone_vision.coordinate_transforms import CoordinateTransformer
 from drone_vision.visual_servoing import (
@@ -98,6 +98,8 @@ class VisionPipelineNode(Node):
         self._cyl_tracker: Optional[CylinderTracker] = None
         self._marker_refiner: Optional[BlueMarkerRefiner] = None
         self._landing_refiner: Optional[LandingPadRefiner] = None
+        self._landing_circle_tracker: Optional[LandingCircleTracker] = None
+        self._landing_tracker_diagnostic = None
         self._coverage: Optional[CoverageMonitor] = None
 
         # 伺服控制器
@@ -116,6 +118,7 @@ class VisionPipelineNode(Node):
         self._current_altitude = 5.0
         self._current_yaw_ned = 0.0
         self._last_frame_time = time.time()
+        self._landing_last_yolo_inference_monotonic = 0.0
         self._frame_count = 0
         self._skip_count = 0
 
@@ -220,6 +223,12 @@ class VisionPipelineNode(Node):
         self.declare_parameter("landing_H_orientation_enable", True)
         self.declare_parameter("landing_model_path", "landing_h_yolo.onnx")
         self.declare_parameter("landing_class_names", ["landing_H"])
+        self.declare_parameter("landing_circle_track_enable", False)
+        self.declare_parameter("landing_circle_tracker_roi_padding_px", 48)
+        self.declare_parameter("landing_circle_tracker_min_edge_margin_px", 12.0)
+        self.declare_parameter("landing_circle_tracker_max_center_jump_px", 80.0)
+        self.declare_parameter("landing_circle_tracker_max_radius_change_ratio", 0.35)
+        self.declare_parameter("landing_yolo_guard_rate_hz", 2.0)
         # 覆盖 — 侦察区 World 坐标 (北向布局: Home X=4,Y=10; Recon NED north=55-60 east=±4)
         self.declare_parameter("coverage_zone_x_min", 0.0)   # World X = east_min + home_x = -4+4
         self.declare_parameter("coverage_zone_x_max", 8.0)   # World X = east_max + home_x = 4+4
@@ -292,6 +301,24 @@ class VisionPipelineNode(Node):
         self._landing_refiner = LandingPadRefiner(
             adaptive_thresh_block=self.get_parameter("landing_adaptive_thresh_block").value,
             circle_min_area=self.get_parameter("landing_circle_min_area").value,
+        )
+        self._landing_circle_tracker = LandingCircleTracker(
+            adaptive_thresh_block=self.get_parameter(
+                "landing_adaptive_thresh_block"
+            ).value,
+            circle_min_area=self.get_parameter("landing_circle_min_area").value,
+            roi_padding_px=self.get_parameter(
+                "landing_circle_tracker_roi_padding_px"
+            ).value,
+            min_edge_margin_px=self.get_parameter(
+                "landing_circle_tracker_min_edge_margin_px"
+            ).value,
+            max_center_jump_px=self.get_parameter(
+                "landing_circle_tracker_max_center_jump_px"
+            ).value,
+            max_radius_change_ratio=self.get_parameter(
+                "landing_circle_tracker_max_radius_change_ratio"
+            ).value,
         )
         self._coverage = CoverageMonitor(
             zone_x_range=(
@@ -701,7 +728,18 @@ class VisionPipelineNode(Node):
         # 根据任务阶段筛选检测。
         if self._detection_mode == "landing":
             cyl_dets = []
-            landing_dets = self._infer_landing(image)
+            now_monotonic = time.monotonic()
+            guard_rate_hz = float(self.get_parameter(
+                "landing_yolo_guard_rate_hz"
+            ).value)
+            if (
+                not self._circle_tracking_active()
+                or self._landing_yolo_inference_due(now_monotonic, guard_rate_hz)
+            ):
+                landing_dets = self._infer_landing(image)
+                self._landing_last_yolo_inference_monotonic = now_monotonic
+            else:
+                landing_dets = []
         elif self._detection_mode == "all":
             cyl_dets = [
                 d for d in all_dets
@@ -833,46 +871,139 @@ class VisionPipelineNode(Node):
     # 降落处理 v2 (姿态补偿 + 伺服)
     # ================================================================
 
+    def _landing_yolo_inference_due(
+        self,
+        now_monotonic: float,
+        guard_rate_hz: float,
+    ) -> bool:
+        """Keep full-frame YOLO active until a track exists, then use a guard rate."""
+        if (
+            self._landing_circle_tracker is None
+            or not self._landing_circle_tracker.has_track
+        ):
+            return True
+        guard_period = 1.0 / max(guard_rate_hz, 0.1)
+        return (
+            now_monotonic - self._landing_last_yolo_inference_monotonic
+            >= guard_period
+        )
+
+    def _circle_tracking_active(self) -> bool:
+        """Limit the quick circle tracker strictly to the landing phase."""
+        return (
+            self._detection_mode == "landing"
+            and bool(self.get_parameter("landing_circle_track_enable").value)
+        )
+
+    def _select_landing_circle_track(
+        self,
+        image: np.ndarray,
+        dets: List[Detection],
+    ):
+        """Choose a refined YOLO seed or a continuous bounded CV circle track."""
+        if self._landing_refiner is None or self._landing_circle_tracker is None:
+            return None, "none"
+
+        if dets:
+            best = max(dets, key=lambda detection: detection.confidence)
+            refined = self._landing_refiner.refine(image, best.bbox)
+            if refined is not None:
+                track = self._landing_circle_tracker.seed(image, best.bbox)
+                if track is not None:
+                    return track, "yolo_refined"
+
+        track = self._landing_circle_tracker.track(image)
+        if track is not None:
+            return track, "cv_tracked"
+        return None, "none"
+
+    def _select_landing_legacy_target(
+        self,
+        image: np.ndarray,
+        dets: List[Detection],
+    ):
+        """Return the pre-existing YOLO/OpenCV target as a safe fallback.
+        Circle tracking is an enhancement, never evidence that the landing
+        target disappeared.  This preserves the established quick landing
+        behaviour whenever the new geometric tracker cannot fit a frame.
+        """
+        if not dets:
+            result = self._landing_refiner.detect(image) if self._landing_refiner else None
+            if result is None:
+                return None, "none"
+            return result, "opencv_global_fallback"
+
+        best = max(dets, key=lambda detection: detection.confidence)
+        enable_refine = self.get_parameter("landing_refine_enable").value
+        if enable_refine and self._landing_refiner:
+            result = self._landing_refiner.refine(image, best.bbox)
+            if result is not None:
+                cx_px, cy_px, confidence, yaw = result
+                return (
+                    cx_px,
+                    cy_px,
+                    max(best.confidence, confidence),
+                    yaw,
+                ), "yolo_refined_fallback"
+        return (best.cx, best.cy, best.confidence, 0.0), "yolo_bbox_fallback"
+
     def _process_landing_v2(self, image: np.ndarray, dets: List[Detection]):
         target = LandingTarget()
         target.confidence = 0.0
 
-        if not dets:
-            result = None
-            if self._landing_refiner:
-                result = self._landing_refiner.detect(image)
-            if result is None:
+        if self._circle_tracking_active():
+            track, source = self._select_landing_circle_track(image, dets)
+            if track is None:
+                reason = (
+                    self._landing_circle_tracker.last_rejection_reason
+                    if self._landing_circle_tracker is not None
+                    else "uninitialized"
+                )
+                # Tracking may fail for a perspective-distorted ring.  Retry
+                # YOLO immediately and retain the original landing detector
+                # instead of publishing a false "target lost" sample.
+                if not dets:
+                    dets = self._infer_landing(image)
+                    self._landing_last_yolo_inference_monotonic = time.monotonic()
+                fallback, source = self._select_landing_legacy_target(image, dets)
+                if fallback is None:
+                    diagnostic = ("rejected", reason, len(dets))
+                    if diagnostic != self._landing_tracker_diagnostic:
+                        self.get_logger().warn(
+                            "LANDING_CIRCLE: rejected "
+                            f"reason={reason} yolo_detections={len(dets)}"
+                        )
+                    self._landing_tracker_diagnostic = diagnostic
+                    self._landing_pub.publish(target)
+                    return
+                target.center_u, target.center_v, target.confidence, target.yaw_correction = fallback
+                diagnostic = ("fallback", reason, source)
+                if diagnostic != self._landing_tracker_diagnostic:
+                    self.get_logger().warn(
+                        "LANDING_CIRCLE: rejected "
+                        f"reason={reason}, fallback={source}"
+                    )
+                self._landing_tracker_diagnostic = diagnostic
+            else:
+                target.center_u = track.center_u
+                target.center_v = track.center_v
+                target.confidence = track.confidence
+                target.yaw_correction = 0.0
+                diagnostic = ("tracking", source)
+                if diagnostic != self._landing_tracker_diagnostic:
+                    self.get_logger().info(
+                        "LANDING_CIRCLE: "
+                        f"source={source} conf={track.confidence:.2f} "
+                        f"r={track.radius_px:.0f}px margin={track.edge_margin_px:.0f}px "
+                        f"residual={track.fit_residual:.3f}"
+                    )
+                self._landing_tracker_diagnostic = diagnostic
+        else:
+            fallback, source = self._select_landing_legacy_target(image, dets)
+            if fallback is None:
                 self._landing_pub.publish(target)
                 return
-            cx_px, cy_px, confidence, yaw = result
-            target.center_u = cx_px
-            target.center_v = cy_px
-            target.confidence = confidence
-            target.yaw_correction = yaw
-            best = None
-        else:
-            best = max(dets, key=lambda d: d.confidence)
-
-        enable_refine = self.get_parameter("landing_refine_enable").value
-
-        if best is not None and enable_refine and self._landing_refiner:
-            result = self._landing_refiner.refine(image, best.bbox)
-            if result:
-                cx_px, cy_px, conf, yaw = result
-                target.center_u = cx_px
-                target.center_v = cy_px
-                target.confidence = max(best.confidence, conf)
-                target.yaw_correction = yaw
-            else:
-                target.center_u = best.cx
-                target.center_v = best.cy
-                target.confidence = best.confidence
-                target.yaw_correction = 0.0
-        elif best is not None:
-            target.center_u = best.cx
-            target.center_v = best.cy
-            target.confidence = best.confidence
-            target.yaw_correction = 0.0
+            target.center_u, target.center_v, target.confidence, target.yaw_correction = fallback
 
         # ---- 姿态补偿坐标变换 ----
         if self._coord_xform:

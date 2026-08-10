@@ -222,6 +222,7 @@ class MissionFSM(Node):
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
+        self.declare_parameter("takeoff_control_loop_gap_warn_s", 1.0)
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
         self.declare_parameter("rc_require_arm_signal", True)
         self.declare_parameter("control_frequency", 20.0)
@@ -284,6 +285,8 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_image_height", 960.0)
         self.declare_parameter("precision_align_alpha", 0.55)
         self.declare_parameter("precision_align_gain", 1.25)
+        self.declare_parameter("precision_align_continuous_enable", False)
+        self.declare_parameter("precision_align_ground_kp", 0.40)
         self.declare_parameter("precision_align_max_speed", 0.25)
         self.declare_parameter("precision_align_fine_pixel_error", 90.0)
         self.declare_parameter("precision_align_fine_max_speed", 0.065)
@@ -371,6 +374,10 @@ class MissionFSM(Node):
         self.declare_parameter("landing_simple_mode", False)
         self.declare_parameter("landing_search_timeout", 15.0)  # simple 搜索 H 超时
         self.declare_parameter("landing_simple_blind_timeout", 60.0)  # simple 盲降超时
+        self.declare_parameter("landing_target_reacquire_timeout", 3.0)
+        self.declare_parameter("landing_visual_handoff_altitude", 0.0)
+        self.declare_parameter("landing_visual_handoff_max_ground_error_m", 0.20)
+        self.declare_parameter("landing_visual_handoff_stable_frames", 10)
         # 快速模式边伺服边下降: 降高中像素 P 控制水平对心, 分层垂直速度
         self.declare_parameter("drop_servo_descend_fast", 0.5)
         self.declare_parameter("drop_servo_descend_slow", 0.3)
@@ -1198,6 +1205,7 @@ class MissionFSM(Node):
             ("drop_descend_height", 0.3, 10.0),
             ("precision_align_alpha", 0.01, 1.0),
             ("precision_align_gain", 0.1, 10.0),
+            ("precision_align_ground_kp", 0.01, 3.0),
             ("precision_align_max_speed", 0.01, 2.0),
             ("precision_align_timeout", 2.0, 120.0),
             ("precision_align_stable_frames", 1, 50),

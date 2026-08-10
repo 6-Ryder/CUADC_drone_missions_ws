@@ -511,7 +511,7 @@ def test_servo_descend_tick_lost_hovers():
     assert fsm.fc.calls[0] == (0.0, 0.0, 0.0)  # 丢失悬停等待恢复
 
 
-def test_servo_descend_stops_when_arrived():
+def test_legacy_servo_descend_stops_when_arrived():
     fsm = _servo_fsm({
         "quick_drop_mode": True,
         "drop_descend_height": 2.4,
@@ -530,6 +530,27 @@ def test_servo_descend_stops_when_arrived():
     assert fsm.fc.calls[0] == ("stop",)  # 停速度悬停
 
 
+def test_continuous_servo_descend_handoff_does_not_stop_velocity():
+    fsm = _servo_fsm({
+        "quick_drop_mode": True,
+        "precision_align_continuous_enable": True,
+        "drop_descend_height": 2.4,
+        "precision_align_enable": True,
+        "precision_align_drop_height_tolerance": 0.5,
+        "precision_align_final_descent_enable": False,
+    })
+    fsm.bridge = _ServoBridge(alt=2.0)  # 已到位 (误差 0.4 < 0.5)
+    state = DropState(fsm)
+    state.enter()
+    state._drop_target_is_centered = lambda: True  # 到位且已对心 → 直接投放
+
+    result = state._execute_descend()
+
+    assert result == "EXECUTE_DROP"
+    assert state._servo_descend_active is False
+    assert ("stop",) not in fsm.fc.calls
+
+
 def test_servo_descend_params_declared():
     defaults = _declare_param_defaults(
         ROOT / "drone_mission/drone_mission/mission_state_machine.py"
@@ -544,6 +565,13 @@ def test_quick_params_include_servo_descend_speeds():
         assert p["drop_servo_descend_fast"] > 0.0
         assert p["drop_servo_descend_slow"] > 0.0
         assert p["drop_servo_descend_fast"] > p["drop_servo_descend_slow"]
+
+
+def test_quick_params_enable_continuous_ground_error_drop_servo():
+    for name in ("mission_params_quick.yaml", "mission_params_quick_sim.yaml"):
+        p = _quick_params(name)
+        assert p["precision_align_continuous_enable"] is True
+        assert p["precision_align_ground_kp"] == 0.40
 
 
 def test_base_params_untouched_by_servo_descend():

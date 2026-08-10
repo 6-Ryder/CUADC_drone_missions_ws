@@ -48,6 +48,7 @@ class TakeoffState:
         self._rc_arm_mode: bool = True  # True=等遥控器, False=代码arm
         self._rc_wait_logged: bool = False
         self._offboard_prestream_start: float = 0.0
+        self._last_control_tick_monotonic: float = 0.0
 
     def enter(self):
         self._fsm.logger.log_state("ARM", "TAKEOFF", "开始起飞")
@@ -68,6 +69,7 @@ class TakeoffState:
         self._rc_arm_mode = self._fsm.get_param("rc_require_arm_signal", True)
         self._rc_wait_logged = False
         self._offboard_prestream_start = time.monotonic()
+        self._last_control_tick_monotonic = self._offboard_prestream_start
 
         takeoff_h = self._fsm.get_param("takeoff_height", 5.0)
         self._fsm.get_logger().info(f"TAKEOFF: 目标高度 {takeoff_h}m")
@@ -80,6 +82,26 @@ class TakeoffState:
         takeoff_h = self._fsm.get_param("takeoff_height", 5.0)
         elapsed = time.time() - self._start_time
         sub_elapsed = time.time() - self._sub_phase_start
+
+        # A 20 Hz FSM normally has ~50 ms between callbacks.  The real-flight
+        # logs show occasional multi-second gaps during climb; record the
+        # recovered gap together with PX4 state so it can be correlated with
+        # ULog/failsafe data.  This is diagnostic only and does not alter the
+        # current flight command.
+        now_monotonic = time.monotonic()
+        if self._last_control_tick_monotonic > 0.0:
+            gap = now_monotonic - self._last_control_tick_monotonic
+            gap_warn_s = float(self._fsm.get_param(
+                "takeoff_control_loop_gap_warn_s", 1.0,
+            ))
+            if gap > gap_warn_s:
+                self._fsm.get_logger().error(
+                    "TAKEOFF: control-loop gap "
+                    f"{gap:.2f}s phase={self._sub_phase} "
+                    f"armed={self._fsm.bridge.is_armed()} "
+                    f"offboard={self._fsm.bridge.is_offboard()}"
+                )
+        self._last_control_tick_monotonic = now_monotonic
 
         # === SUB_ARM: 等待解锁 (RC 模式) 或发送 arm (仿真模式) ===
         if self._sub_phase == self.SUB_ARM:

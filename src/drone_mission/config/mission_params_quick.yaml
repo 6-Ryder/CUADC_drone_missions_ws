@@ -97,6 +97,8 @@
     precision_align_image_height: 480.0
     precision_align_alpha: 0.55           # EMA 平滑系数, 兼顾检测抖动和闭环响应
     precision_align_gain: 1.25            # 归一化像素误差 → 机体系速度比例
+    precision_align_continuous_enable: true  # 快速投放: 下降到投放高度不中断同一目标锁
+    precision_align_ground_kp: 0.40       # 地面误差(m) → 水平速度(m/s), 保持跨高度增益一致
     precision_align_max_speed: 0.25       # 粗调水平合速度上限 (m/s)
     precision_align_fine_pixel_error: 90.0 # 进入精调速度限制的像素误差
     precision_align_fine_max_speed: 0.065 # 精调水平合速度上限 (m/s)
@@ -145,17 +147,21 @@
     drop_align_stall_stable_band: 5.0     # 停滞稳定带宽 (px)
     drop_align_stall_duration: 2.0        # 停滞判定时长 (s)
 
-    # --- 精准降落: simple 模式 (landing_simple_mode=true, test_mission 方法) ---
-    # 无对心锁存/备用接地确认, 接地只认 PX4 is_landed; 丢失/超时 → PX4 自主着陆
+    # --- 精准降落: simple 模式 (quick) ---
+    # 仅连续、几何确认的 H 目标可伺服；近地丢失短暂重捕获失败 → PX4 原地 LAND
     landing_simple_mode: true
     landing_search_timeout: 15.0      # simple: H 搜索超时 → PX4 LAND (test_mission 值)
     landing_simple_blind_timeout: 60.0  # simple: 盲降超时 → PX4 LAND (test_mission 值)
+    landing_target_reacquire_timeout: 1.0  # 低空目标失效后最多重捕获 1s
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
     landing_blind_altitude: 0.5   # simple: 伺服降到 0.5m 才切盲降 (test_mission 值)
     landing_blind_align_tolerance_px: 30.0  # 切入盲降前最大像素误差
     landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
     landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
+    landing_visual_handoff_altitude: 1.6  # 圆形几何对心后，开始纯垂直下降高度 (m)
+    landing_visual_handoff_max_ground_error_m: 0.20  # 交接前最大估算地面中心误差 (m)
+    landing_visual_handoff_stable_frames: 10  # 圆心地面误差连续达标帧数
     landing_precision_target: 0.1 # 目标水平精度 (m)
     # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
     landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)
