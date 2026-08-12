@@ -14,8 +14,8 @@
 #   3. ros_gz_image bridge (Gazebo 相机 → ROS2 Image 话题)
 #   4. ROS2 全系统节点 (px4_bridge + vision_pipeline + servo_controller + mission_fsm)
 #
-# 场地: 70m×8m (北向), H起降点(4,10), 投放区(Gazebo y~42.5), 侦察区(Gazebo y~67.5)
-# 飞行方向: 向北 (NED north)
+# 场地: 70m×8m, H起降点(4,10)，默认北偏东30°；可由 layout_heading_deg 覆盖
+# 飞行方向: 由 layout_heading_deg 指定 (NED 顺时针角度)
 # ==============================================================================
 set -eo pipefail
 
@@ -56,14 +56,21 @@ if [ ! -d "$(dirname "$PX4_WORLD")" ]; then
 fi
 
 # 从原始 ROS launch 参数解析场地朝向；原始参数随后完整转发给 ROS2。
-LAYOUT_HEADING_DEG="0.0"
+# 默认场地方向：北偏东 30°。传入 layout_heading_deg:=... 可临时覆盖。
+LAYOUT_HEADING_DEG="30.0"
+HAS_LAYOUT_HEADING=0
 for task_arg in "$@"; do
     case "$task_arg" in
         layout_heading_deg:=*)
             LAYOUT_HEADING_DEG="${task_arg#layout_heading_deg:=}"
+            HAS_LAYOUT_HEADING=1
             ;;
     esac
 done
+# 未显式传参时，也必须把脚本默认值传给 ROS launch，避免场地与任务方向不一致。
+if [ "$HAS_LAYOUT_HEADING" -eq 0 ]; then
+    set -- "layout_heading_deg:=${LAYOUT_HEADING_DEG}" "$@"
+fi
 
 # 每次运行生成独立场地，确保 Gazebo 场地、机体初始 yaw 与 ROS 任务朝向一致。
 RUNTIME_FIELD="$LOG_DIR/drone_field.sdf"
