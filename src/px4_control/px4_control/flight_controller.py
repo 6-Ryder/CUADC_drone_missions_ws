@@ -29,7 +29,7 @@ class FlightController:
     所有速度使用 NED 坐标系 (vn, ve, vd).
     """
 
-    def __init__(self, bridge):
+    def __init__(self, bridge, task_yaw: float = 0.0):
         """
         初始化飞行控制接口.
 
@@ -40,9 +40,15 @@ class FlightController:
             is_armed / arm / set_offboard_mode / get_current_position /
             set_position_target / set_velocity_target / is_landed / force_disarm /
             land_at_current / get_current_attitude / get_parameter / get_telemetry
+        task_yaw : float, optional
+            Absolute task heading in radians, used when a position command does
+            not provide an explicit yaw.
 
         """
         self._bridge = bridge
+        self._task_yaw = float(task_yaw)
+        if not math.isfinite(self._task_yaw):
+            raise ValueError("task yaw must be finite")
 
         # 参数缓存 (bridge 通过 get_parameter 委托到所属 ROS2 Node)
         self._takeoff_height = bridge.get_parameter("takeoff_height").value
@@ -59,6 +65,15 @@ class FlightController:
         self._land_mode_requested = False
 
         self._origin_down: Optional[float] = None
+
+    @property
+    def task_yaw(self) -> float:
+        """Return the absolute yaw shared by all task setpoints."""
+        return self._task_yaw
+
+    def _resolve_yaw(self, yaw: Optional[float]) -> float:
+        """Use the task heading unless a waypoint explicitly overrides it."""
+        return self._task_yaw if yaw is None else float(yaw)
 
     # ================================================================
     # 获取初始相对限制
@@ -123,7 +138,9 @@ class FlightController:
         # 从当前位置起飞
         pos = self._bridge.get_current_position()
         target_down = self.altitude_to_ned(altitude)  # NED: 负值=上升
-        self._bridge.set_position_target(pos.north, pos.east, target_down)
+        self._bridge.set_position_target(
+            pos.north, pos.east, target_down, self._task_yaw,
+        )
         self._current_waypoint = Position(pos.north, pos.east, target_down)
         self._waypoint_start_time = time.time()
 
@@ -134,7 +151,7 @@ class FlightController:
     # ================================================================
 
     def goto_ned(self, north: float, east: float, down: float,
-                 yaw: float = 0.0, speed: float = 1.0):
+                 yaw: Optional[float] = None, speed: float = 1.0):
         """
         设置 NED 航点.
 
@@ -148,13 +165,15 @@ class FlightController:
             飞行速度 (m/s)
 
         """
-        self._bridge.set_position_target(north, east, down, yaw, speed=speed)
+        self._bridge.set_position_target(
+            north, east, down, self._resolve_yaw(yaw), speed=speed,
+        )
         self._current_waypoint = Position(north, east, down)
         self._waypoint_start_time = time.time()
         self._waypoint_timeout = self._default_waypoint_timeout
 
     def goto_world(self, x: float, y: float, z: float,
-                   yaw: float = 0.0, speed: float = 1.0):
+                   yaw: Optional[float] = None, speed: float = 1.0):
         """
         设置 World 坐标航点, 自动转换为 NED.
 
@@ -183,7 +202,9 @@ class FlightController:
 
         """
         pos = self._bridge.get_current_position()
-        self._bridge.set_position_target(pos.north, pos.east, pos.down)
+        self._bridge.set_position_target(
+            pos.north, pos.east, pos.down, self._task_yaw,
+        )
         self._current_waypoint = pos
         self._waypoint_start_time = time.time()
         # 使用 loiter 专用超时, 不影响后续航点的默认超时

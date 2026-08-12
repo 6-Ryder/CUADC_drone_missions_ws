@@ -131,7 +131,6 @@ class TransitState:
             tn,
             te,
             td,
-            yaw=0.0,
             speed=self._fsm.get_param("transit_speed", 2.0),
         )
 

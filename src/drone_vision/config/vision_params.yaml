@@ -15,6 +15,8 @@
     # 相机画面顶是否朝机头: false=gz x500_mono_cam_down (画面底朝机头, 旧约定);
     # 真机 real_flight.launch.py 覆盖为 true (画面顶朝机头).
     image_top_faces_forward: false
+    # World 坐标投影只接受此时间窗口内收到的完整 6-DoF 位姿。
+    vision_pose_max_age_s: 0.5
 
     # ============================================================
     # YOLO 模型参数
@@ -83,13 +85,16 @@
     servo_target_deadzone: 0.03         # 目标死区 (m), 进入后停止水平修正
 
     # ============================================================
-    # 覆盖监控参数 (北向场地)
+    # 覆盖监控参数 (场地局部 forward/right 坐标)
     # ============================================================
-    # 侦察区 World 坐标范围 (Home X=4, Y=10; NED North=57.5, East=±4)
-    coverage_zone_x_min: 0.0            # 侦察区 World X 下限 (m), East=-4
-    coverage_zone_x_max: 8.0            # 侦察区 World X 上限 (m), East=+4
-    coverage_zone_y_min: 65.0           # 侦察区 World Y 下限 (m), North=55
-    coverage_zone_y_max: 70.0           # 侦察区 World Y 上限 (m), North=60
+    # Home 是局部坐标原点；layout_heading_deg: NED 北为0°, 顺时针为正
+    home_x: 4.0
+    home_y: 10.0
+    layout_heading_deg: 0.0
+    coverage_zone_forward_min: 55.0     # 侦察区局部前方下限 (m)
+    coverage_zone_forward_max: 60.0     # 侦察区局部前方上限 (m)
+    coverage_zone_right_min: -4.0       # 侦察区局部右侧下限 (m)
+    coverage_zone_right_max: 4.0        # 侦察区局部右侧上限 (m)
     coverage_grid_resolution: 0.5       # 网格分辨率 (m)
     coverage_fov_half_angle: 35.0       # 相机 FOV 半角 (度)
     coverage_complete_ratio: 0.95       # 全覆盖判定阈值

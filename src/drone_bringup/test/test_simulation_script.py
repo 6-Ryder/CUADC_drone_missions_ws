@@ -20,8 +20,9 @@ def test_mission_owns_arming_and_offboard_transition():
 
 
 def test_workspace_world_is_installed_before_px4_starts():
-    assert '"$PROJ/field/drone_field.sdf"' in SCRIPT
-    assert '"$PX4_DIR/Tools/simulation/gz/worlds/drone_field.sdf"' in SCRIPT
+    assert 'RUNTIME_FIELD="$LOG_DIR/drone_field.sdf"' in SCRIPT
+    assert 'cp "$RUNTIME_FIELD" "$PX4_WORLD"' in SCRIPT
+    assert 'cp "$PROJ/field/drone_field.sdf" "$PX4_WORLD"' not in SCRIPT
 
 
 def test_headless_sitl_does_not_require_a_gcs_link():

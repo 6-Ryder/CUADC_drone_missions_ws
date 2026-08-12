@@ -1,7 +1,8 @@
 # 圆筒检测结果
 int32 id             # 跟踪ID
-float64 center_x     # 圆心 NED east
-float64 center_y     # 圆心 NED north
+bool world_position_valid  # world_x/world_y 是否来自有效 World 投影
+float64 world_x      # World frame x
+float64 world_y      # World frame y
 float64 center_u     # 圆心像素 u
 float64 center_v     # 圆心像素 v
 float64 radius       # 估计真实半径 (m)

@@ -35,6 +35,7 @@ from px4_control.flight_controller import FlightController
 from px4_control.telemetry import configure_home, world_to_ned
 
 from drone_mission.path_planner import PathPlanner
+from drone_utils.layout_frame import LayoutFrame
 
 from drone_interfaces.msg import LandingTarget
 from drone_interfaces.srv import SetVisionMode
@@ -111,12 +112,12 @@ class TestForwardRecon(Node):
 
         # Phase 2: 侦察区参数
         self.declare_parameter("recon_altitude", 2.5)          # 侦察扫描高度 (m)
-        self.declare_parameter("recon_area_half_north", 2.5)   # 侦察区 north 半宽 (m), 对齐主任务 Area2 5m
-        self.declare_parameter("recon_area_half_east", 4.0)    # 侦察区 east 半宽 (m), 对齐主任务 Area2 8m
-        self.declare_parameter("sweep_speed", 1.2)             # 扫描飞行速度 (m/s)
-        self.declare_parameter("grid_spacing", 1.67)           # 条带间距 (m), 对齐 PathPlanner 默认
-        self.declare_parameter("sweep_margin_north", 0.5)      # north 方向边距 (m)
-        self.declare_parameter("sweep_margin_east", 0.5)       # east 方向边距 (m)
+        self.declare_parameter("recon_area_half_forward", 2.5)
+        self.declare_parameter("recon_area_half_right", 4.0)
+        self.declare_parameter("sweep_speed", 1.2)
+        self.declare_parameter("grid_spacing", 1.67)
+        self.declare_parameter("sweep_margin_forward", 0.5)
+        self.declare_parameter("sweep_margin_right", 0.5)
 
         # 返航
         self.declare_parameter("return_speed", 3.8)
@@ -154,12 +155,13 @@ class TestForwardRecon(Node):
 
         # ---- 路径规划器 ----
         self._planner = PathPlanner(
+            layout_frame=LayoutFrame(0.0),
             sweep_speed=self.get_param("sweep_speed", 0.8),
             transit_speed=self.get_param("transit_speed", 2.0),
             return_speed=self.get_param("return_speed", 3.0),
             grid_spacing=self.get_param("grid_spacing", 1.67),
-            margin_north=self.get_param("sweep_margin_north", 0.5),
-            margin_east=self.get_param("sweep_margin_east", 0.5),
+            margin_forward=self.get_param("sweep_margin_forward", 0.5),
+            margin_right=self.get_param("sweep_margin_right", 0.5),
         )
 
         # ---- 状态机 ----
@@ -217,8 +219,8 @@ class TestForwardRecon(Node):
         # ---- 启动日志 ----
         fwd = self.get_param("forward_distance", 20.0)
         ralt = self.get_param("recon_altitude", 2.5)
-        half_n = self.get_param("recon_area_half_north", 2.5)
-        half_e = self.get_param("recon_area_half_east", 4.0)
+        half_forward = self.get_param("recon_area_half_forward", 2.5)
+        half_right = self.get_param("recon_area_half_right", 4.0)
 
         self.get_logger().info("=" * 60)
         self.get_logger().info("  TestForwardRecon — 分阶段真机测试")
@@ -228,8 +230,8 @@ class TestForwardRecon(Node):
         self.get_logger().info(f"  Phase 1: 向北直飞 {fwd}m"
                                f" @ {self.get_param('transit_speed')}m/s")
         self.get_logger().info(f"  Phase 2: 侦察区 "
-                               f"N[{fwd - half_n}:{fwd + half_n}] ×"
-                               f" E[{-half_e}:{half_e}] @ {ralt}m")
+                               f"F[{fwd - half_forward}:{fwd + half_forward}] ×"
+                               f" R[{-half_right}:{half_right}] @ {ralt}m")
         self.get_logger().info("  解锁: 遥控器 Arm Switch → PX4 → is_armed() → TAKEOFF")
         self.get_logger().info("  流程: INIT → WAIT_ARMED → TAKEOFF → TRANSIT_FWD")
         self.get_logger().info("         → DESCEND → RECON_SWEEP → RETURN → LAND")
@@ -318,7 +320,10 @@ class TestForwardRecon(Node):
             self._fc.takeoff(cruise_alt)
             pos = self._bridge.get_current_position()
 
-            if abs(pos.down - self._fc.altitude_to_ned(cruise_alt)) < self.get_param("takeoff_tolerance", 0.3):
+            altitude_error = abs(
+                pos.down - self._fc.altitude_to_ned(cruise_alt)
+            )
+            if altitude_error < self.get_param("takeoff_tolerance", 0.3):
                 self._stable_count += 1
             else:
                 self._stable_count = 0
@@ -535,20 +540,20 @@ class TestForwardRecon(Node):
     def _generate_recon_waypoints(self):
         """生成侦察区弓字形全覆盖航点 (NED 坐标系)."""
         fwd = self.get_param("forward_distance", 20.0)
-        half_n = self.get_param("recon_area_half_north", 2.5)
-        half_e = self.get_param("recon_area_half_east", 4.0)
+        half_forward = self.get_param("recon_area_half_forward", 2.5)
+        half_right = self.get_param("recon_area_half_right", 4.0)
         ralt = self.get_param("recon_altitude", 2.5)
 
-        area_north_min = fwd - half_n
-        area_north_max = fwd + half_n
-        area_east_min = -half_e
-        area_east_max = half_e
+        area_forward_min = fwd - half_forward
+        area_forward_max = fwd + half_forward
+        area_right_min = -half_right
+        area_right_max = half_right
 
         self._recon_waypoints = self._planner.plan_coverage_ned(
-            area_north_min=area_north_min,
-            area_north_max=area_north_max,
-            area_east_min=area_east_min,
-            area_east_max=area_east_max,
+            area_forward_min=area_forward_min,
+            area_forward_max=area_forward_max,
+            area_right_min=area_right_min,
+            area_right_max=area_right_max,
             altitude=self._fc.altitude_to_ned(ralt),
         )
 
@@ -556,8 +561,8 @@ class TestForwardRecon(Node):
         self.get_logger().info(
             f"RECON_SWEEP: 生成 {len(self._recon_waypoints)} 个航点"
             f" ({num_strips} 条带),"
-            f" 区域 NED N[{area_north_min:.1f}:{area_north_max:.1f}]"
-            f" E[{area_east_min:.1f}:{area_east_max:.1f}],"
+            f" 区域 local F[{area_forward_min:.1f}:{area_forward_max:.1f}]"
+            f" R[{area_right_min:.1f}:{area_right_max:.1f}],"
             f" 高度 {ralt:.1f}m,"
             f" 间距 {self.get_param('grid_spacing', 1.67)}m"
         )

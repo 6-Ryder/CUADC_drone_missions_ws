@@ -18,6 +18,8 @@
 import math
 from typing import List, Tuple, Optional
 
+from drone_utils.layout_frame import LayoutFrame
+
 
 # ============================================================
 # 路径规划器
@@ -28,26 +30,28 @@ class PathPlanner:
     路径规划器.
 
     使用方式:
-      planner = PathPlanner(sweep_speed=1.2, transit_speed=2.5)
+      planner = PathPlanner(LayoutFrame(0.0), sweep_speed=1.2, transit_speed=2.5)
       waypoints = planner.plan_coverage(zone_bounds, altitude=5.0)
       waypoints = planner.plan_transit(from_xyz, to_xyz)
     """
 
     def __init__(
         self,
+        layout_frame: LayoutFrame,
         sweep_speed: float = 0.8,
         transit_speed: float = 2.0,
         return_speed: float = 3.0,
         grid_spacing: float = 1.67,
-        margin_north: float = 1.0,
-        margin_east: float = 0.5,
+        margin_forward: float = 1.0,
+        margin_right: float = 0.5,
     ):
+        self.layout_frame = layout_frame
         self.sweep_speed = sweep_speed
         self.transit_speed = transit_speed
         self.return_speed = return_speed
         self.grid_spacing = grid_spacing
-        self.margin_north = margin_north
-        self.margin_east = margin_east
+        self.margin_forward = margin_forward
+        self.margin_right = margin_right
 
     # ================================================================
     # 覆盖路径
@@ -75,10 +79,10 @@ class PathPlanner:
         list of dict: 每个航点为 {x, y, z, yaw, speed, hover_s, label}
 
         """
-        x_min = zone_bounds["x_min"] + self.margin_east
-        x_max = zone_bounds["x_max"] - self.margin_east
-        y_min = zone_bounds["y_min"] + self.margin_north
-        y_max = zone_bounds["y_max"] - self.margin_north
+        x_min = zone_bounds["x_min"] + self.margin_right
+        x_max = zone_bounds["x_max"] - self.margin_right
+        y_min = zone_bounds["y_min"] + self.margin_forward
+        y_max = zone_bounds["y_max"] - self.margin_forward
 
         x_range = x_max - x_min  # east 方向
         y_range = y_max - y_min  # north 方向
@@ -155,10 +159,10 @@ class PathPlanner:
 
     def plan_coverage_ned(
         self,
-        area_north_min: float,
-        area_north_max: float,
-        area_east_min: float,
-        area_east_max: float,
+        area_forward_min: float,
+        area_forward_max: float,
+        area_right_min: float,
+        area_right_max: float,
         altitude: float = 5.0,
     ) -> List[dict]:
         """
@@ -168,10 +172,10 @@ class PathPlanner:
 
         Parameters
         ----------
-        area_north_min, area_north_max : float
-            NED north 范围 (m)
-        area_east_min, area_east_max : float
-            NED east 范围 (m)
+        area_forward_min, area_forward_max : float
+            Field-local forward range (m).
+        area_right_min, area_right_max : float
+            Field-local right range (m).
         altitude : float
             NED down (负值=上升), e.g. -5.0 = 飞行高度 5m
 
@@ -181,36 +185,44 @@ class PathPlanner:
             沿长边飞行的弓字形航点序列
 
         """
-        north_range = area_north_max - area_north_min
-        east_range = area_east_max - area_east_min
+        forward_range = area_forward_max - area_forward_min
+        right_range = area_right_max - area_right_min
 
-        if north_range <= 0 or east_range <= 0:
+        if forward_range <= 0 or right_range <= 0:
             return []
 
         # ---- 自动选择最优方向: 沿长边飞行, 条带沿短边分布 ----
-        # fly_along == "north": 沿 north 飞长条, east 方向分段 (适用于 north > east)
-        # fly_along == "east":  沿 east 飞长条, north 方向分段 (适用于 east > north)
-        if north_range >= east_range:
-            # 沿 north 飞行 (长边), 条带沿 east 分布 (短边)
-            fly_along = "north"
-            strip_range = east_range
-            strip_min = area_east_min
-            strip_max = area_east_max
-            flight_min = area_north_min
-            flight_max = area_north_max
+        if forward_range >= right_range:
+            fly_along = "forward"
+            strip_range = right_range
+            strip_min = area_right_min
+            strip_max = area_right_max
+            flight_min = area_forward_min
+            flight_max = area_forward_max
         else:
-            # 沿 east 飞行 (长边), 条带沿 north 分布 (短边)
-            fly_along = "east"
-            strip_range = north_range
-            strip_min = area_north_min
-            strip_max = area_north_max
-            flight_min = area_east_min
-            flight_max = area_east_max
+            fly_along = "right"
+            strip_range = forward_range
+            strip_min = area_forward_min
+            strip_max = area_forward_max
+            flight_min = area_right_min
+            flight_max = area_right_max
 
         num_strips = max(1, math.ceil(strip_range / self.grid_spacing))
         actual_spacing = strip_range / max(1, num_strips - 1) if num_strips > 1 else 0.0
 
         waypoints = []
+
+        def waypoint(forward: float, right: float, label: str) -> dict:
+            north, east = self.layout_frame.local_to_ned(forward, right)
+            return {
+                "north": north,
+                "east": east,
+                "down": altitude,
+                "yaw": self.layout_frame.yaw_rad,
+                "speed": self.sweep_speed,
+                "hover_s": 0.0,
+                "label": label,
+            }
 
         for i in range(num_strips):
             strip_pos = strip_min + i * actual_spacing if num_strips > 1 else (
@@ -224,39 +236,20 @@ class PathPlanner:
                 start_flight = flight_max
                 end_flight = flight_min
 
-            if fly_along == "north":
-                # 条带沿 east, 沿 north 飞行
-                waypoints.append({
-                    "north": start_flight, "east": strip_pos, "down": altitude,
-                    "yaw": 0.0 if i % 2 == 0 else math.pi,
-                    "speed": self.sweep_speed,
-                    "hover_s": 0.0,
-                    "label": f"strip_{i}_enter",
-                })
-                waypoints.append({
-                    "north": end_flight, "east": strip_pos, "down": altitude,
-                    "yaw": 0.0 if i % 2 == 0 else math.pi,
-                    "speed": self.sweep_speed,
-                    "hover_s": 0.0,
-                    "label": f"strip_{i}_exit",
-                })
+            if fly_along == "forward":
+                waypoints.append(waypoint(
+                    start_flight, strip_pos, f"strip_{i}_enter"
+                ))
+                waypoints.append(waypoint(
+                    end_flight, strip_pos, f"strip_{i}_exit"
+                ))
             else:
-                # 条带沿 north, 沿 east 飞行
-                waypoints.append({
-                    "north": strip_pos, "east": start_flight, "down": altitude,
-                    # 侦察阶段不需要机头随扫描方向旋转，固定朝 NED North。
-                    "yaw": 0.0,
-                    "speed": self.sweep_speed,
-                    "hover_s": 0.0,
-                    "label": f"strip_{i}_enter",
-                })
-                waypoints.append({
-                    "north": strip_pos, "east": end_flight, "down": altitude,
-                    "yaw": 0.0,
-                    "speed": self.sweep_speed,
-                    "hover_s": 0.0,
-                    "label": f"strip_{i}_exit",
-                })
+                waypoints.append(waypoint(
+                    strip_pos, start_flight, f"strip_{i}_enter"
+                ))
+                waypoints.append(waypoint(
+                    strip_pos, end_flight, f"strip_{i}_exit"
+                ))
 
         return waypoints
 

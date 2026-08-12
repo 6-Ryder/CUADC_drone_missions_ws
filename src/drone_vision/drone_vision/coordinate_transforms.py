@@ -229,37 +229,6 @@ class CoordinateTransformer:
         return (float(u), float(v))
 
     # ----------------------------------------------------------------
-    # 简化版 (无姿态信息时的回退)
-    # ----------------------------------------------------------------
-
-    @staticmethod
-    def pixel_to_world_simple(
-        u: float, v: float,
-        altitude: float,
-        fx: float, fy: float,
-        cx: float, cy: float,
-        drone_world_x: float = 0.0,
-        drone_world_y: float = 0.0,
-        image_top_faces_forward: bool = True,
-    ) -> Tuple[float, float]:
-        """
-        简化版 (假设相机垂直向下, 无姿态, 且偏航朝向 north).
-
-        用于姿态数据不可用时的回退.
-        方向约定与补偿版一致:
-          - image_top_faces_forward=True (真机): v+ (画面下) → south
-          - False (gz SITL): v+ → north
-        u+ (画面右) → east 始终不变.
-        """
-        v_sign = -1.0 if image_top_faces_forward else 1.0
-        dx = v_sign * (v - cy) * altitude / fy  # 像素行方向 (画面下)
-        dy = (u - cx) * altitude / fx           # 像素列 u+ (画面右) → world east
-
-        world_x = drone_world_x + dy
-        world_y = drone_world_y + dx
-        return (world_x, world_y)
-
-    # ----------------------------------------------------------------
     # 批量操作
     # ----------------------------------------------------------------
 
