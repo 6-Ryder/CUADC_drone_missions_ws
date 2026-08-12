@@ -434,9 +434,10 @@ class PX4Bridge(Node):
             setpoint = TrajectorySetpoint()
             setpoint.timestamp = int(self.get_clock().now().nanoseconds / 1000)
             setpoint.position = [float('nan'), float('nan'), float('nan')]
-            setpoint.yaw = float('nan')
             setpoint.velocity = [float(vn), float(ve), float(vd)]
             setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+            setpoint.yaw = float(self._target_yaw)
+            setpoint.yawspeed = float('nan')
             self._trajectory_pub.publish(setpoint)
 
     # ================================================================
@@ -474,16 +475,18 @@ class PX4Bridge(Node):
             if is_vel_mode:
                 # 速度模式: 位置=NAN, 速度=缓存的上次指令 (避免覆写为 NAN)
                 setpoint.position = [float('nan'), float('nan'), float('nan')]
-                setpoint.yaw = float('nan')
                 vn, ve, vd = self._last_velocity_cmd
                 setpoint.velocity = [float(vn), float(ve), float(vd)]
                 setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+                setpoint.yaw = float(self._target_yaw)
+                setpoint.yawspeed = float('nan')
             else:
                 setpoint.position = [float(sp.north), float(sp.east), float(sp.down)]
                 setpoint.yaw = float(yaw)
                 # NAN 表示"不控制此轴"
                 setpoint.velocity = [float('nan'), float('nan'), float('nan')]
                 setpoint.acceleration = [float('nan'), float('nan'), float('nan')]
+                setpoint.yawspeed = float('nan')
 
             self._trajectory_pub.publish(setpoint)
 

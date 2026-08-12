@@ -1,6 +1,10 @@
 # 方案规划：侦察 yaw 参数化 + 任务按任意制定方向运行
 
-> 状态：**规划文档，未实施**（2026-08-02）
+> 状态：**已被取代，未实施**（2026-08-12）
+>
+> 替代方案：[`2026-08-12-arbitrary-layout-heading-design.md`](../superpowers/specs/2026-08-12-arbitrary-layout-heading-design.md)
+>
+> 本文仅保留为历史设计记录，不再作为实施依据。
 > 基线：HEAD `4b5b5db`
 
 ---

@@ -49,7 +49,7 @@ class CylinderSelector:
 
         Parameters
         ----------
-        cylinders : list of CylinderDetection (或 dict with id/center_x/center_y/radius/confidence)
+        cylinders : list of CylinderDetection (或 dict with id/world_x/world_y/radius/confidence)
             当前可见的圆筒目标.
 
         Returns
@@ -64,8 +64,16 @@ class CylinderSelector:
             if cid in self._selected_ids:
                 continue
             # 位置去重检查
-            cx = c.center_x if hasattr(c, 'center_x') else c.get('center_x', 0)
-            cy = c.center_y if hasattr(c, 'center_y') else c.get('center_y', 0)
+            if isinstance(c, dict):
+                world_valid = bool(c.get('world_position_valid', False))
+                cx = c.get('world_x', math.nan)
+                cy = c.get('world_y', math.nan)
+            else:
+                world_valid = bool(getattr(c, 'world_position_valid', False))
+                cx = getattr(c, 'world_x', math.nan)
+                cy = getattr(c, 'world_y', math.nan)
+            if not world_valid or not (math.isfinite(cx) and math.isfinite(cy)):
+                continue
             is_duplicate = any(
                 math.hypot(cx - px, cy - py) < self._position_tolerance
                 for px, py in self._selected_positions

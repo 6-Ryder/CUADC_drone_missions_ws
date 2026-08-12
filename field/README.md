@@ -1,12 +1,14 @@
 # Drone Field — Gazebo 无人机仿真场地
 
-为 Gazebo 无人机仿真任务生成北向飞行布局、投放区和侦察区的圆筒/标识物。
+为 Gazebo 无人机仿真任务生成任意绝对 NED 航向的场地布局，以及投放区和
+侦察区的随机圆筒/标识物。
 
 ## 目录结构
 
 ```
 field/
 ├── drone_field.sdf              # 场地模板（固定结构：地面、围栏、灯光等）
+├── layout_field.py              # 绕 Home 旋转任务资产
 ├── generate_random_field.py     # 随机生成脚本（核心）
 ├── drone_field_random.sdf       # 生成的随机场地（每次运行覆盖）
 ├── drone_field_meshes/
@@ -52,6 +54,21 @@ Gazebo World 使用 `x=east`、`y=north`。SITL Home 为 World `(4,10,0)`，任�
 - 以子区域中心为均值，采用截断二维正态分布采样 x、y 坐标
 - 拒绝采样：保证圆筒整体位于区域内，且任意两圆筒中心间距不小于阈值
 - 同一模板每次运行生成不同的随机布局，适合训练场景多样化
+- 使用 `--seed` 可同时固定 Python 和 NumPy 随机源，复现完全相同的规范布局
+
+### 任意航向刚体旋转
+
+`layout_field.py` 只旋转显式列出的任务模型。无限地面、物理、重力、磁场、
+天空、太阳和 GUI 相机等环境保持不变。旋转中心默认是 SITL Home World
+`(x=4, y=10)`。
+
+`heading-deg` 使用任务统一的 NED 约定：0° 指向北，顺时针为正。Gazebo 使用
+ENU，因而施加的 yaw 增量符号相反。例如正 50° NED heading 对应
+`-0.8726646259971648` rad Gazebo yaw，规范场地北侧的点会转向东北。
+
+生成器先在未旋转的规范区域中采样，再对完整任务布局做相同刚体旋转。因此
+相同 seed 的 0° 与 50° 输出在逆旋转后具有相同的局部采样。两个工具都只写
+指定输出文件；不要把规范 `drone_field.sdf` 用作输出路径。
 
 ## 依赖
 
@@ -70,6 +87,21 @@ python3 generate_random_field.py
 
 # 指定输入/输出文件
 python3 generate_random_field.py 模板.sdf 输出.sdf
+
+# 可复现的 50° 随机场地
+python3 generate_random_field.py drone_field.sdf runtime_50.sdf \
+  --seed 20260812 --heading-deg 50
+
+# 只旋转现有 SDF（Home 默认为 4,10）
+python3 layout_field.py drone_field.sdf runtime_50.sdf --heading-deg 50
+
+# 同时将供 PX4_GZ_MODEL_POSE 使用的 Gazebo ENU yaw 增量输出到 stdout
+python3 layout_field.py drone_field.sdf runtime_50.sdf --heading-deg 50 \
+  --print-gazebo-yaw-rad
+
+# 非默认 Home
+python3 layout_field.py input.sdf output.sdf --heading-deg 50 \
+  --home-x 4 --home-y 10
 ```
 
 运行后会打印每个圆筒的位置信息：
@@ -77,12 +109,12 @@ python3 generate_random_field.py 模板.sdf 输出.sdf
 ```
 已生成随机场地文件: /path/to/drone_field_random.sdf
 投放区圆筒位置:
-  筒1: x=42.123, y=3.456, r=0.075
-  筒2: x=43.789, y=5.012, r=0.100
-  筒3: x=41.567, y=2.345, r=0.125
+  筒1: x=3.123, y=42.456, r=0.075
+  筒2: x=5.789, y=43.012, r=0.100
+  筒3: x=2.567, y=41.345, r=0.125
 侦察区圆筒位置:
-  筒1: x=67.890, y=3.210
-  筒2: x=66.543, y=5.678
+  筒1: x=6.890, y=67.210
+  筒2: x=3.543, y=66.678
   ...
 ```
 

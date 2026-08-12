@@ -48,30 +48,30 @@ class ReconPatrolState:
         self._fsm.set_vision_mode("coverage_reset")
 
         # 生成低空弓字形覆盖路径 (NED 坐标系)
-        area2_n_min = self._fsm.get_param("area2_north_min", 55.0)
-        area2_n_max = self._fsm.get_param("area2_north_max", 60.0)
-        area2_e_min = self._fsm.get_param("area2_east_min", -4.0)
-        area2_e_max = self._fsm.get_param("area2_east_max", 4.0)
+        area2_forward_min, area2_forward_max, area2_right_min, area2_right_max = (
+            self._fsm.zone_bounds("area2")
+        )
         recon_alt = self._fsm.get_param("area2_altitude", 2.5)
 
         self._waypoints = self._fsm.path_planner.plan_coverage_ned(
-            area_north_min=area2_n_min,
-            area_north_max=area2_n_max,
-            area_east_min=area2_e_min,
-            area_east_max=area2_e_max,
-            altitude= self._fsm.fc.altitude_to_ned(recon_alt),  # NED: 负值=向上
+            area_forward_min=area2_forward_min,
+            area_forward_max=area2_forward_max,
+            area_right_min=area2_right_min,
+            area_right_max=area2_right_max,
+            altitude=self._fsm.fc.altitude_to_ned(recon_alt),  # NED: 负值=向上
         )
 
         # 计算预计覆盖参数
-        north_range = area2_n_max - area2_n_min
-        east_range = area2_e_max - area2_e_min
-        total_area = north_range * east_range
+        forward_range = area2_forward_max - area2_forward_min
+        right_range = area2_right_max - area2_right_min
+        total_area = forward_range * right_range
         grid_spacing = self._fsm.get_param("grid_spacing", 1.67)
         num_strips = len(self._waypoints) // 2  # 每 strip 2 个航点
 
         self._fsm.get_logger().info(
             f"RECON_PATROL: {len(self._waypoints)} 个航点 ({num_strips} 条带), "
-            f"区域 NED N[{area2_n_min}:{area2_n_max}] E[{area2_e_min}:{area2_e_max}], "
+            f"区域 local F[{area2_forward_min}:{area2_forward_max}] "
+            f"R[{area2_right_min}:{area2_right_max}], "
             f"面积 {total_area:.0f}m², 高度 {recon_alt:.1f}m, 间距 {grid_spacing}m"
         )
 

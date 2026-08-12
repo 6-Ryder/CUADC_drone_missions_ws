@@ -110,7 +110,6 @@ class ReturnState:
             north,
             east,
             down,
-            yaw=0.0,
             speed=self._fsm.get_param("return_speed", 3.0),
         )
 

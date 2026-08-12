@@ -19,11 +19,13 @@
 运行频率: 20Hz (0.05s 控制周期)
 """
 
+import math
 import time
 from enum import Enum
 from typing import Any, Dict, List, Optional, Protocol
 
 import rclpy
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from std_msgs.msg import String
 
@@ -44,14 +46,25 @@ from drone_mission.states.state_hold_for_takeover import HoldForTakeoverState
 from px4_control.px4_bridge import PX4Bridge
 from px4_control.flight_controller import FlightController
 from px4_control.standalone_bridge import StandaloneBridge
-from px4_control.telemetry import configure_home, ned_to_world
+from px4_control.telemetry import configure_home, ned_to_world, world_to_ned
 
 from drone_mission.cylinder_selector import CylinderSelector
 from drone_mission.path_planner import PathPlanner
 
 from drone_utils.logger import TaskLogger
+from drone_utils.layout_frame import LayoutFrame
 from drone_utils.watchdog import Watchdog
 from drone_utils.emergency import EmergencyHandler, EmergencyLevel
+
+
+FROZEN_LAYOUT_PARAMETERS = frozenset({
+    "layout_heading_deg",
+    "area1_forward_min", "area1_forward_max",
+    "area1_right_min", "area1_right_max",
+    "area2_forward_min", "area2_forward_max",
+    "area2_right_min", "area2_right_max",
+    "sweep_margin_forward", "sweep_margin_right",
+})
 
 
 # ============================================================
@@ -132,6 +145,8 @@ class MissionFSM(Node):
         super().__init__("mission_state_machine")
 
         self._declare_params()
+        self._layout_frame = LayoutFrame(float(self.get_param("layout_heading_deg", 0.0)))
+        self.add_on_set_parameters_callback(self._reject_layout_heading_update)
 
         # ---- 核心组件 ----
         self._bridge: Optional[PX4Bridge] = None
@@ -216,9 +231,7 @@ class MissionFSM(Node):
         self.declare_parameter("home_x", 4.0)
         self.declare_parameter("home_y", 10.0)
         self.declare_parameter("home_z", 0.0)
-        self.declare_parameter("flight_axis", "north")
-        self.declare_parameter("drop_distance", 32.5)
-        self.declare_parameter("recon_distance", 57.5)
+        self.declare_parameter("layout_heading_deg", 0.0)
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
         self.declare_parameter("takeoff_tolerance", 0.3)
@@ -239,22 +252,22 @@ class MissionFSM(Node):
         self.declare_parameter("search_progress_window", 30.0)
         self.declare_parameter("visual_progress_min_improvement", 2.0)
         # Area 1
-        self.declare_parameter("area1_north_min", 30.0)
-        self.declare_parameter("area1_north_max", 35.0)
-        self.declare_parameter("area1_east_min", -4.0)
-        self.declare_parameter("area1_east_max", 4.0)
+        self.declare_parameter("area1_forward_min", 30.0)
+        self.declare_parameter("area1_forward_max", 35.0)
+        self.declare_parameter("area1_right_min", -4.0)
+        self.declare_parameter("area1_right_max", 4.0)
         self.declare_parameter("area1_altitude", 2.0)
         self.declare_parameter("area1_search_altitude", 5.0)
         # Area 2
-        self.declare_parameter("area2_north_min", 55.0)
-        self.declare_parameter("area2_north_max", 60.0)
-        self.declare_parameter("area2_east_min", -4.0)
-        self.declare_parameter("area2_east_max", 4.0)
+        self.declare_parameter("area2_forward_min", 55.0)
+        self.declare_parameter("area2_forward_max", 60.0)
+        self.declare_parameter("area2_right_min", -4.0)
+        self.declare_parameter("area2_right_max", 4.0)
         self.declare_parameter("area2_altitude", 2.5)   # 侦察区低空扫描高度, 与 YAML 一致
         # 覆盖
         self.declare_parameter("grid_spacing", 1.67)
-        self.declare_parameter("sweep_margin_north", 1.0)
-        self.declare_parameter("sweep_margin_east", 0.5)
+        self.declare_parameter("sweep_margin_forward", 1.0)
+        self.declare_parameter("sweep_margin_right", 0.5)
         self.declare_parameter("recon_require_full_path", True)
         # 投放
         self.declare_parameter("min_radius_first", True)
@@ -379,33 +392,67 @@ class MissionFSM(Node):
     # 延迟初始化
     # ================================================================
 
+    @property
+    def layout_frame(self) -> LayoutFrame:
+        """Return the immutable field layout captured at mission startup."""
+        return self._layout_frame
+
+    @property
+    def layout_yaw_rad(self) -> float:
+        """Return the fixed absolute yaw used for mission setpoints."""
+        return self._layout_frame.yaw_rad
+
+    def zone_bounds(self, prefix: str) -> tuple[float, float, float, float]:
+        """Return a named area's local forward/right bounds."""
+        return (
+            float(self.get_param(f"{prefix}_forward_min")),
+            float(self.get_param(f"{prefix}_forward_max")),
+            float(self.get_param(f"{prefix}_right_min")),
+            float(self.get_param(f"{prefix}_right_max")),
+        )
+
+    def _validate_zone_bounds(self, prefix: str) -> tuple[float, float, float, float]:
+        """Fail closed before arming when an area cannot define a rectangle."""
+        bounds = self.zone_bounds(prefix)
+        if not all(math.isfinite(value) for value in bounds):
+            raise ValueError(f"{prefix} bounds must be finite")
+        forward_min, forward_max, right_min, right_max = bounds
+        if forward_min >= forward_max or right_min >= right_max:
+            raise ValueError(f"{prefix} bounds must have min < max")
+        return bounds
+
+    def _reject_layout_heading_update(self, params):
+        """Keep all launch-time layout geometry immutable for one mission."""
+        if any(param.name in FROZEN_LAYOUT_PARAMETERS for param in params):
+            return SetParametersResult(
+                successful=False,
+                reason="layout geometry is fixed at mission startup",
+            )
+        return SetParametersResult(successful=True)
+
     def _lazy_init(self):
         """等待 PX4 Bridge 就绪后初始化."""
         if self._initialized:
             return
+
+        drop_bounds = self._validate_zone_bounds("area1")
+        recon_bounds = self._validate_zone_bounds("area2")
+        drop_north, drop_east = self._layout_frame.bounds_center_ned(*drop_bounds)
+        recon_north, recon_east = self._layout_frame.bounds_center_ned(*recon_bounds)
 
         hx = self.get_param("home_x", 4.0)
         hy = self.get_param("home_y", 10.0)
         hz = self.get_param("home_z", 0.0)
         configure_home(hx, hy, hz)
 
-        # 从参数动态计算投放区/侦察区的 World 坐标
-        flight_axis = self.get_param("flight_axis", "north")
-        drop_dist = float(self.get_param("drop_distance", 32.5))
-        recon_dist = float(self.get_param("recon_distance", 57.5))
-
-        if flight_axis == "north":
-            drop_north, drop_east = drop_dist, 0.0
-            recon_north, recon_east = recon_dist, 0.0
-        else:  # east (默认, 向后兼容)
-            drop_north, drop_east = 0.0, drop_dist
-            recon_north, recon_east = 0.0, recon_dist
-
-        # NED east → World x, NED north → World y（仿真/真机相对关系一致）
-        drop_world_x = hx + drop_east
-        drop_world_y = hy + drop_north
-        recon_world_x = hx + recon_east
-        recon_world_y = hy + recon_north
+        drop_world_x, drop_world_y, _ = ned_to_world(drop_north, drop_east, 0.0)
+        recon_world_x, recon_world_y, _ = ned_to_world(recon_north, recon_east, 0.0)
+        self.get_logger().info(
+            f"MISSION_LAYOUT: heading={self._layout_frame.heading_deg:.1f}deg "
+            f"home=({hx:.2f}, {hy:.2f}, {hz:.2f}) "
+            f"drop_ned=({drop_north:.2f}, {drop_east:.2f}) "
+            f"recon_ned=({recon_north:.2f}, {recon_east:.2f})"
+        )
         drop_zone = (drop_world_x, drop_world_y, self.TARGET_ALTITUDE)
         recon_zone = (recon_world_x, recon_world_y, self.TARGET_ALTITUDE)
 
@@ -417,12 +464,13 @@ class MissionFSM(Node):
         # 我们假设 PX4Bridge 已在另一个进程中运行
         # 此时仅初始化内部组件
         self._path_planner = PathPlanner(
+            layout_frame=self._layout_frame,
             sweep_speed=self.get_param("sweep_speed", 0.8),
             transit_speed=self.get_param("transit_speed", 2.0),
             return_speed=self.get_param("return_speed", 3.0),
             grid_spacing=self.get_param("grid_spacing", 1.67),
-            margin_north=self.get_param("sweep_margin_north", 1.0),
-            margin_east=self.get_param("sweep_margin_east", 0.5),
+            margin_forward=self.get_param("sweep_margin_forward", 1.0),
+            margin_right=self.get_param("sweep_margin_right", 0.5),
         )
 
         # 创建状态处理器
@@ -605,9 +653,13 @@ class MissionFSM(Node):
             if conf < min_conf:
                 continue
 
-            raw_x = float(self._cyl_field(cyl, "center_x", 0.0))
-            raw_y = float(self._cyl_field(cyl, "center_y", 0.0))
-            target_xy = self._normalize_drop_target_xy(raw_x, raw_y)
+            if not bool(self._cyl_field(cyl, "world_position_valid", False)):
+                continue
+            raw_x = float(self._cyl_field(cyl, "world_x", math.nan))
+            raw_y = float(self._cyl_field(cyl, "world_y", math.nan))
+            if not (math.isfinite(raw_x) and math.isfinite(raw_y)):
+                continue
+            target_xy = self.validate_drop_target_world_xy(raw_x, raw_y)
             if target_xy is None:
                 continue
             cx, cy = target_xy
@@ -616,7 +668,7 @@ class MissionFSM(Node):
             best = None
             best_dist = float("inf")
             for known in self._known_cylinders:
-                dist = ((known["center_x"] - cx) ** 2 + (known["center_y"] - cy) ** 2) ** 0.5
+                dist = ((known["world_x"] - cx) ** 2 + (known["world_y"] - cy) ** 2) ** 0.5
                 if dist < best_dist:
                     best = known
                     best_dist = dist
@@ -625,8 +677,9 @@ class MissionFSM(Node):
                 obs = best["observations"]
                 weight = min(conf, 1.0)
                 total = obs + weight
-                best["center_x"] = (best["center_x"] * obs + cx * weight) / total
-                best["center_y"] = (best["center_y"] * obs + cy * weight) / total
+                best["world_position_valid"] = True
+                best["world_x"] = (best["world_x"] * obs + cx * weight) / total
+                best["world_y"] = (best["world_y"] * obs + cy * weight) / total
                 best["radius"] = (best["radius"] * obs + radius * weight) / total
                 best["confidence"] = max(best["confidence"], conf)
                 best["observations"] = obs + 1
@@ -634,8 +687,9 @@ class MissionFSM(Node):
             else:
                 self._known_cylinders.append({
                     "id": self._next_known_cylinder_id,
-                    "center_x": cx,
-                    "center_y": cy,
+                    "world_position_valid": True,
+                    "world_x": cx,
+                    "world_y": cy,
                     "radius": radius,
                     "confidence": conf,
                     "observations": 1,
@@ -654,9 +708,13 @@ class MissionFSM(Node):
             if conf < min_conf:
                 continue
 
-            raw_x = float(self._cyl_field(marker, "center_x", 0.0))
-            raw_y = float(self._cyl_field(marker, "center_y", 0.0))
-            target_xy = self._normalize_drop_target_xy(raw_x, raw_y)
+            if not bool(self._cyl_field(marker, "world_position_valid", False)):
+                continue
+            raw_x = float(self._cyl_field(marker, "world_x", math.nan))
+            raw_y = float(self._cyl_field(marker, "world_y", math.nan))
+            if not (math.isfinite(raw_x) and math.isfinite(raw_y)):
+                continue
+            target_xy = self.validate_drop_target_world_xy(raw_x, raw_y)
             if target_xy is None:
                 continue
             mx, my = target_xy
@@ -664,7 +722,7 @@ class MissionFSM(Node):
             best = None
             best_dist = float("inf")
             for known in self._known_markers:
-                dist = ((known["center_x"] - mx) ** 2 + (known["center_y"] - my) ** 2) ** 0.5
+                dist = ((known["world_x"] - mx) ** 2 + (known["world_y"] - my) ** 2) ** 0.5
                 if dist < best_dist:
                     best = known
                     best_dist = dist
@@ -673,16 +731,18 @@ class MissionFSM(Node):
                 obs = best["observations"]
                 weight = min(conf, 1.0)
                 total = obs + weight
-                best["center_x"] = (best["center_x"] * obs + mx * weight) / total
-                best["center_y"] = (best["center_y"] * obs + my * weight) / total
+                best["world_position_valid"] = True
+                best["world_x"] = (best["world_x"] * obs + mx * weight) / total
+                best["world_y"] = (best["world_y"] * obs + my * weight) / total
                 best["confidence"] = max(best["confidence"], conf)
                 best["observations"] = obs + 1
                 best["last_seen"] = now
             else:
                 self._known_markers.append({
                     "id": self._next_known_marker_id,
-                    "center_x": mx,
-                    "center_y": my,
+                    "world_position_valid": True,
+                    "world_x": mx,
+                    "world_y": my,
                     "radius": 0.5,
                     "confidence": conf,
                     "observations": 1,
@@ -691,47 +751,25 @@ class MissionFSM(Node):
                 })
                 self._next_known_marker_id += 1
 
-    def _drop_zone_world_bounds(self, margin: float = 1.0):
-        n_min = float(self.get_param("area1_north_min", 30.0))
-        n_max = float(self.get_param("area1_north_max", 35.0))
-        e_min = float(self.get_param("area1_east_min", -4.0))
-        e_max = float(self.get_param("area1_east_max", 4.0))
-        corners = [
-            ned_to_world(n_min, e_min, 0.0),
-            ned_to_world(n_min, e_max, 0.0),
-            ned_to_world(n_max, e_min, 0.0),
-            ned_to_world(n_max, e_max, 0.0),
-        ]
-        xs = [c[0] for c in corners]
-        ys = [c[1] for c in corners]
-        return min(xs) - margin, max(xs) + margin, min(ys) - margin, max(ys) + margin
-
-    def _normalize_drop_target_xy(self, raw_x: float, raw_y: float):
-        """
-        Return a bounded world XY target for a cylinder detection.
-
-        Some detector outputs can be in world XY, some older nodes publish
-        NED east/north, and bad pose projections can jump outside the drop
-        area. The mission may use memory targets for descent, so never store
-        an out-of-zone coordinate.
-        """
-        wx_min, wx_max, wy_min, wy_max = self._drop_zone_world_bounds(margin=1.0)
-        if wx_min <= raw_x <= wx_max and wy_min <= raw_y <= wy_max:
-            return raw_x, raw_y
-
-        n_min = float(self.get_param("area1_north_min", 30.0))
-        n_max = float(self.get_param("area1_north_max", 35.0))
-        e_min = float(self.get_param("area1_east_min", -4.0))
-        e_max = float(self.get_param("area1_east_max", 4.0))
-        if e_min - 1.0 <= raw_x <= e_max + 1.0 and n_min - 1.0 <= raw_y <= n_max + 1.0:
-            wx, wy, _ = ned_to_world(raw_y, raw_x, 0.0)
-            if wx_min <= wx <= wx_max and wy_min <= wy <= wy_max:
-                return wx, wy
-
+    def validate_drop_target_world_xy(
+        self, world_x: float, world_y: float, margin: float = 1.0,
+    ) -> Optional[tuple[float, float]]:
+        """Return a world target only when it lies in the local drop rectangle."""
+        if self._contains_drop_target_world_xy(world_x, world_y, margin=margin):
+            return world_x, world_y
         self.get_logger().warn(
-            f"CYL_SEARCH: 丢弃投放区外圆筒坐标 ({raw_x:.2f}, {raw_y:.2f})"
+            f"CYL_SEARCH: discard out-of-zone world target ({world_x:.2f}, {world_y:.2f})"
         )
         return None
+
+    def _contains_drop_target_world_xy(
+        self, world_x: float, world_y: float, margin: float,
+    ) -> bool:
+        """Check exact local drop bounds without emitting a rejection warning."""
+        north, east, _ = world_to_ned(world_x, world_y, 0.0)
+        return self.layout_frame.contains_ned(
+            north, east, *self.zone_bounds("area1"), margin=margin,
+        )
 
     def _hazard_cb(self, msg):
         self._hazards = list(msg.hazards)
@@ -965,6 +1003,8 @@ class MissionFSM(Node):
         self.get_logger().info("=" * 60)
         self._task_logger.write_summary({
             "success": success,
+            "layout_heading_deg": self.layout_frame.heading_deg,
+            "strategy": "quick" if self.get_param("quick_drop_mode", False) else "main",
             "drops_completed": self._drop_success_count,
             "drops_total": self._drop_count,
             "coverage_ratio": coverage.get("coverage_ratio", 0) if coverage else 0,
@@ -1043,14 +1083,16 @@ class MissionFSM(Node):
             self._standalone_bridge = None
             self._standalone_fc = None
         self._bridge = b
-        self._fc = FlightController(b)
+        self._fc = FlightController(b, task_yaw=self._layout_frame.yaw_rad)
 
     @property
     def fc(self):
         if self._fc is not None:
             return self._fc
         if self._standalone_fc is None:
-            self._standalone_fc = FlightController(self.bridge)
+            self._standalone_fc = FlightController(
+                self.bridge, task_yaw=self._layout_frame.yaw_rad
+            )
         return self._standalone_fc
 
     @property
@@ -1270,11 +1312,11 @@ class MissionFSM(Node):
         """同一蓝色标识按世界坐标 0.6m 去重后返回."""
         targets = []
         for marker in markers:
-            mx = float(marker.get("center_x", 0.0))
-            my = float(marker.get("center_y", 0.0))
+            mx = float(marker.get("world_x", 0.0))
+            my = float(marker.get("world_y", 0.0))
             duplicate = any(
-                ((float(t.get("center_x", 0.0)) - mx) ** 2
-                 + (float(t.get("center_y", 0.0)) - my) ** 2) ** 0.5 < 0.6
+                ((float(t.get("world_x", 0.0)) - mx) ** 2
+                 + (float(t.get("world_y", 0.0)) - my) ** 2) ** 0.5 < 0.6
                 for t in targets
             )
             if not duplicate:
@@ -1294,8 +1336,9 @@ class MissionFSM(Node):
         self._current_drop_cyl_id = -1
 
     def is_in_drop_zone_world(self, world_x: float, world_y: float, margin: float = 0.5) -> bool:
-        wx_min, wx_max, wy_min, wy_max = self._drop_zone_world_bounds(margin=margin)
-        return wx_min <= world_x <= wx_max and wy_min <= world_y <= wy_max
+        return self._contains_drop_target_world_xy(
+            world_x, world_y, margin=margin,
+        )
 
     def get_hazards(self) -> list:
         """获取最新的危险品检测结果."""

@@ -1,13 +1,16 @@
 import pytest
 
+from drone_utils.layout_frame import LayoutFrame
 from drone_vision.coverage_monitor import CoverageMonitor
 
 
 def test_coverage_only_accumulates_during_an_explicit_recon_scan():
     """Transit observations must not count toward reconnaissance coverage."""
     monitor = CoverageMonitor(
-        zone_x_range=(0.0, 8.0),
-        zone_y_range=(65.0, 70.0),
+        zone_forward_range=(55.0, 60.0),
+        zone_right_range=(-4.0, 4.0),
+        layout_frame=LayoutFrame(0.0),
+        home_world_xy=(4.0, 10.0),
         grid_resolution=0.5,
         fov_half_angle_deg=35.0,
     )
