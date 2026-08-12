@@ -32,6 +32,9 @@ def generate_launch_description():
 
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
+    vision_quick_param_file = os.path.join(
+        pkg_vision, "config", "vision_params_quick.yaml"
+    )
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params_quick.yaml")
     mission_param_file = os.path.join(
         pkg_mission, "config", "mission_params_quick.yaml"
@@ -113,6 +116,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             vision_param_file,
+            vision_quick_param_file,
             {
                 "camera_width": 640,
                 "camera_height": 480,

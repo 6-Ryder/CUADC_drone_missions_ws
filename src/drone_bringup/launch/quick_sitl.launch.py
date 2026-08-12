@@ -75,6 +75,9 @@ def generate_launch_description():
     # ---- 参数文件路径 (quick: 独立参数, 不影响原 SITL) ----
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
+    vision_quick_param_file = os.path.join(
+        pkg_vision, "config", "vision_params_quick.yaml"
+    )
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params_quick.yaml")
     mission_param_file = os.path.join(
         pkg_mission, "config", "mission_params_quick_sim.yaml"
@@ -104,7 +107,7 @@ def generate_launch_description():
         executable="vision_pipeline",
         name="vision_pipeline",
         output="screen",
-        parameters=[vision_param_file, {
+        parameters=[vision_param_file, vision_quick_param_file, {
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
         }],
         arguments=[
