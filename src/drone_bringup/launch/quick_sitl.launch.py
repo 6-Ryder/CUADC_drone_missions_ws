@@ -22,6 +22,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import LaunchConfiguration
 
 
@@ -97,7 +98,9 @@ def generate_launch_description():
         parameters=[vision_param_file, {
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
-            "layout_heading_deg": LaunchConfiguration("layout_heading_deg"),
+            "layout_heading_deg": ParameterValue(
+                LaunchConfiguration("layout_heading_deg"), value_type=float,
+            ),
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
         }],
         arguments=[
@@ -131,7 +134,9 @@ def generate_launch_description():
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
             "home_z": LaunchConfiguration("home_z"),
-            "layout_heading_deg": LaunchConfiguration("layout_heading_deg"),
+            "layout_heading_deg": ParameterValue(
+                LaunchConfiguration("layout_heading_deg"), value_type=float,
+            ),
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头

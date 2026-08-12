@@ -22,6 +22,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -116,7 +117,9 @@ def generate_launch_description():
                 "device": "cuda",
                 "home_x": LaunchConfiguration("home_x"),
                 "home_y": LaunchConfiguration("home_y"),
-                "layout_heading_deg": LaunchConfiguration("layout_heading_deg"),
+                "layout_heading_deg": ParameterValue(
+                    LaunchConfiguration("layout_heading_deg"), value_type=float,
+                ),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
             },
         ],
@@ -145,7 +148,9 @@ def generate_launch_description():
                 "home_x": LaunchConfiguration("home_x"),
                 "home_y": LaunchConfiguration("home_y"),
                 "home_z": LaunchConfiguration("home_z"),
-                "layout_heading_deg": LaunchConfiguration("layout_heading_deg"),
+                "layout_heading_deg": ParameterValue(
+                    LaunchConfiguration("layout_heading_deg"), value_type=float,
+                ),
                 "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
             },
