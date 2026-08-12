@@ -23,6 +23,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import rclpy
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from rclpy.qos import (
     QoSDurabilityPolicy,
@@ -49,6 +50,7 @@ from drone_vision.cylinder_detector import (
 from drone_vision.marker_detector import BlueMarkerRefiner
 from drone_vision.landing_detector import LandingCircleTracker, LandingPadRefiner
 from drone_vision.coverage_monitor import CoverageMonitor
+from drone_utils.layout_frame import LayoutFrame
 from drone_vision.coordinate_transforms import CoordinateTransformer
 from drone_vision.visual_servoing import (
     VisualServoController, CylinderApproachController, ServoState,
@@ -68,6 +70,9 @@ IMAGE_QOS = QoSProfile(
 )
 
 
+FROZEN_LAYOUT_PARAMETERS = frozenset({"layout_heading_deg"})
+
+
 class VisionPipelineNode(Node):
     """
     统一视觉管线 v2 — 姿态补偿 + 高度自适应.
@@ -82,6 +87,10 @@ class VisionPipelineNode(Node):
         super().__init__("vision_pipeline")
 
         self._declare_params()
+        self._layout_frame = LayoutFrame(
+            float(self.get_parameter("layout_heading_deg").value)
+        )
+        self.add_on_set_parameters_callback(self._reject_layout_heading_update)
 
         # ---- 核心组件 (延迟加载) ----
         self._engine: Optional[YOLOEngine] = None
@@ -115,6 +124,8 @@ class VisionPipelineNode(Node):
         self._drone_pose: Tuple[float, float, float, float, float, float, float] = (
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         )  # (x, y, z, qx, qy, qz, qw)
+        self._pose_received = False
+        self._last_pose_monotonic: Optional[float] = None
         self._current_altitude = 5.0
         self._current_yaw_ned = 0.0
         self._last_frame_time = time.time()
@@ -205,6 +216,7 @@ class VisionPipelineNode(Node):
         self.declare_parameter("cy", 240.0)
         # True=画面顶朝机头 (真机), False=gz SITL 相机 (画面底朝机头)
         self.declare_parameter("image_top_faces_forward", True)
+        self.declare_parameter("vision_pose_max_age_s", 0.5)
         # 圆筒
         self.declare_parameter("cylinder_refine_enable", True)
         self.declare_parameter("cylinder_edge_blur", 5)
@@ -229,11 +241,14 @@ class VisionPipelineNode(Node):
         self.declare_parameter("landing_circle_tracker_max_center_jump_px", 80.0)
         self.declare_parameter("landing_circle_tracker_max_radius_change_ratio", 0.35)
         self.declare_parameter("landing_yolo_guard_rate_hz", 2.0)
-        # 覆盖 — 侦察区 World 坐标 (北向布局: Home X=4,Y=10; Recon NED north=55-60 east=±4)
-        self.declare_parameter("coverage_zone_x_min", 0.0)   # World X = east_min + home_x = -4+4
-        self.declare_parameter("coverage_zone_x_max", 8.0)   # World X = east_max + home_x = 4+4
-        self.declare_parameter("coverage_zone_y_min", 65.0)  # World Y = north_min + home_y = 55+10
-        self.declare_parameter("coverage_zone_y_max", 70.0)  # World Y = north_max + home_y = 60+10
+        # 覆盖 — 侦察区场地局部坐标 (forward/right)
+        self.declare_parameter("coverage_zone_forward_min", 55.0)
+        self.declare_parameter("coverage_zone_forward_max", 60.0)
+        self.declare_parameter("coverage_zone_right_min", -4.0)
+        self.declare_parameter("coverage_zone_right_max", 4.0)
+        self.declare_parameter("home_x", 4.0)
+        self.declare_parameter("home_y", 10.0)
+        self.declare_parameter("layout_heading_deg", 0.0)
         self.declare_parameter("coverage_grid_resolution", 0.5)
         self.declare_parameter("coverage_fov_half_angle", 35.0)
         self.declare_parameter("coverage_complete_ratio", 0.95)
@@ -245,6 +260,15 @@ class VisionPipelineNode(Node):
         self.declare_parameter("servo_descent_speed", 0.3)
         self.declare_parameter("servo_integral_max", 0.5)
         self.declare_parameter("servo_target_deadzone", 0.03)
+
+    def _reject_layout_heading_update(self, params):
+        """Keep coverage and mission geometry on one launch-time heading."""
+        if any(param.name in FROZEN_LAYOUT_PARAMETERS for param in params):
+            return SetParametersResult(
+                successful=False,
+                reason="layout geometry is fixed at mission startup",
+            )
+        return SetParametersResult(successful=True)
 
     # ================================================================
     # 初始化
@@ -321,13 +345,18 @@ class VisionPipelineNode(Node):
             ).value,
         )
         self._coverage = CoverageMonitor(
-            zone_x_range=(
-                self.get_parameter("coverage_zone_x_min").value,
-                self.get_parameter("coverage_zone_x_max").value,
+            zone_forward_range=(
+                self.get_parameter("coverage_zone_forward_min").value,
+                self.get_parameter("coverage_zone_forward_max").value,
             ),
-            zone_y_range=(
-                self.get_parameter("coverage_zone_y_min").value,
-                self.get_parameter("coverage_zone_y_max").value,
+            zone_right_range=(
+                self.get_parameter("coverage_zone_right_min").value,
+                self.get_parameter("coverage_zone_right_max").value,
+            ),
+            layout_frame=self._layout_frame,
+            home_world_xy=(
+                self.get_parameter("home_x").value,
+                self.get_parameter("home_y").value,
             ),
             grid_resolution=self.get_parameter("coverage_grid_resolution").value,
             fov_half_angle_deg=self.get_parameter("coverage_fov_half_angle").value,
@@ -593,7 +622,7 @@ class VisionPipelineNode(Node):
 
     def _pose_cb(self, msg: PoseStamped):
         """接收无人机位姿 (用于姿态补偿坐标变换)."""
-        self._drone_pose = (
+        pose = (
             msg.pose.position.x,
             msg.pose.position.y,
             msg.pose.position.z,
@@ -602,6 +631,19 @@ class VisionPipelineNode(Node):
             msg.pose.orientation.z,
             msg.pose.orientation.w,
         )
+        quaternion_norm_sq = sum(value * value for value in pose[3:])
+        if (
+            not all(math.isfinite(value) for value in pose)
+            or quaternion_norm_sq <= 1e-12
+        ):
+            self._pose_received = False
+            self._last_pose_monotonic = None
+            self.get_logger().warn("VISION: 忽略无效无人机位姿")
+            return
+
+        self._drone_pose = pose
+        self._pose_received = True
+        self._last_pose_monotonic = time.monotonic()
         self._current_altitude = msg.pose.position.z
         q = msg.pose.orientation
         world_yaw = math.atan2(
@@ -612,6 +654,35 @@ class VisionPipelineNode(Node):
             math.sin(math.pi / 2.0 - world_yaw),
             math.cos(math.pi / 2.0 - world_yaw),
         )
+
+    def _pose_is_fresh(self, now_monotonic: Optional[float] = None) -> bool:
+        """Whether a valid 6-DoF pose is available for World projection."""
+        if not self._pose_received or self._last_pose_monotonic is None:
+            return False
+        now = time.monotonic() if now_monotonic is None else now_monotonic
+        max_age = float(self.get_parameter("vision_pose_max_age_s").value)
+        return 0.0 <= now - self._last_pose_monotonic <= max_age
+
+    def _project_world_xy(self, u: float, v: float) -> Optional[tuple[float, float]]:
+        """Project a pixel using only a fresh full 6-DoF pose."""
+        if not self._pose_is_fresh() or self._coord_xform is None:
+            return None
+        result = self._coord_xform.pixel_to_world(
+            u, v, self._drone_pose[:3], self._drone_pose[3:7],
+            ground_z=0.0, q_convention="xyzw",
+        )
+        if result is None:
+            return None
+        offset = math.hypot(
+            result[0] - self._drone_pose[0], result[1] - self._drone_pose[1],
+        )
+        return result if offset <= max(self._current_altitude * 1.5, 3.0) else None
+
+    def _new_cylinder_array(self) -> CylinderArray:
+        msg = CylinderArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "world"
+        return msg
 
     # ================================================================
     # 主回调
@@ -669,51 +740,30 @@ class VisionPipelineNode(Node):
 
         # 发布投放区标识检测
         if self._marker_refiner:
-            marker_array = CylinderArray()
-            marker_array.header.stamp = self.get_clock().now().to_msg()
-            marker_array.header.frame_id = "world"
+            marker_array = self._new_cylinder_array()
             for i, md in enumerate(marker_dets):
                 det = CylinderDetection()
                 det.id = i
                 det.confidence = float(md.confidence)
                 det.center_u = float(md.cx)
                 det.center_v = float(md.cy)
+                det.world_position_valid = False
+                det.world_x = math.nan
+                det.world_y = math.nan
                 det.radius = 0.5  # 蓝色标识固定 1m 直径, 半径 0.5m
                 det.bbox_x1 = int(md.bbox[0])
                 det.bbox_y1 = int(md.bbox[1])
                 det.bbox_x2 = int(md.bbox[2])
                 det.bbox_y2 = int(md.bbox[3])
 
-                fx = self.get_parameter("fx").value
-                fy = self.get_parameter("fy").value
-                cx = self.get_parameter("cx").value
-                cy = self.get_parameter("cy").value
-                alt = max(self._current_altitude, 0.5)
-                selected_xy = CoordinateTransformer.pixel_to_world_simple(
-                    md.cx, md.cy, alt, fx, fy, cx, cy,
-                    drone_world_x=self._drone_pose[0],
-                    drone_world_y=self._drone_pose[1],
-                    image_top_faces_forward=self.get_parameter(
-                        "image_top_faces_forward"
-                    ).value,
-                )
-                if self._coord_xform:
-                    world_xy = self._coord_xform.pixel_to_world(
-                        md.cx, md.cy,
-                        (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
-                        (self._drone_pose[3], self._drone_pose[4],
-                         self._drone_pose[5], self._drone_pose[6]),
-                        ground_z=0.0, q_convention="xyzw",
-                    )
-                    if world_xy:
-                        dx = world_xy[0] - self._drone_pose[0]
-                        dy = world_xy[1] - self._drone_pose[1]
-                        max_reasonable_offset = max(alt * 1.5, 3.0)
-                        if (dx * dx + dy * dy) ** 0.5 <= max_reasonable_offset:
-                            selected_xy = world_xy
+                selected_xy = self._project_world_xy(md.cx, md.cy)
 
-                det.center_x = selected_xy[0]
-                det.center_y = selected_xy[1]
+                if selected_xy is not None and all(
+                    math.isfinite(value) for value in selected_xy
+                ):
+                    det.world_x = float(selected_xy[0])
+                    det.world_y = float(selected_xy[1])
+                    det.world_position_valid = True
                 marker_array.cylinders.append(det)
             self._marker_pub.publish(marker_array)
             if marker_dets and self._frame_count % 30 == 0:
@@ -805,7 +855,7 @@ class VisionPipelineNode(Node):
                                 d.confidence, bbox_px))
 
         if not refined:
-            self._cyl_pub.publish(CylinderArray())
+            self._cyl_pub.publish(self._new_cylinder_array())
             return
 
         self._cyl_tracker.update(refined)
@@ -816,9 +866,7 @@ class VisionPipelineNode(Node):
         fy = self.get_parameter("fy").value
         alt = max(self._current_altitude, 0.5)
 
-        msg_array = CylinderArray()
-        msg_array.header.stamp = self.get_clock().now().to_msg()
-        msg_array.header.frame_id = "world"
+        msg_array = self._new_cylinder_array()
 
         for t in active:
             det = CylinderDetection()
@@ -826,39 +874,23 @@ class VisionPipelineNode(Node):
             det.confidence = float(t["confidence"])
             det.center_u = float(t["cx"])
             det.center_v = float(t["cy"])
+            det.world_position_valid = False
+            det.world_x = math.nan
+            det.world_y = math.nan
             # YOLO bbox (用于调试可视化)
             bbox = t.get("bbox")
             if bbox and len(bbox) == 4:
                 det.bbox_x1, det.bbox_y1, det.bbox_x2, det.bbox_y2 = bbox
 
-            # ---- 姿态补偿坐标变换 ----
-            # 优先使用 6-DoF 精确投影；debug 模式无位姿时回退 simple 投影
-            cx = self.get_parameter("cx").value
-            cy = self.get_parameter("cy").value
-            selected_xy = CoordinateTransformer.pixel_to_world_simple(
-                t["cx"], t["cy"], alt, fx, fy, cx, cy,
-                drone_world_x=self._drone_pose[0],
-                drone_world_y=self._drone_pose[1],
-                image_top_faces_forward=self.get_parameter(
-                    "image_top_faces_forward"
-                ).value,
-            )
-            if self._coord_xform:
-                world_xy = self._coord_xform.pixel_to_world(
-                    t["cx"], t["cy"],
-                    (self._drone_pose[0], self._drone_pose[1], self._drone_pose[2]),
-                    self._drone_pose[3:7],
-                    ground_z=0.0, q_convention="xyzw",
-                )
-                if world_xy is not None:
-                    dx = world_xy[0] - self._drone_pose[0]
-                    dy = world_xy[1] - self._drone_pose[1]
-                    max_reasonable_offset = max(alt * 1.5, 3.0)
-                    if (dx * dx + dy * dy) ** 0.5 <= max_reasonable_offset:
-                        selected_xy = world_xy
+            # World coordinates require a fresh full 6-DoF pose; pixels stay usable.
+            selected_xy = self._project_world_xy(t["cx"], t["cy"])
 
-            det.center_x = selected_xy[0]
-            det.center_y = selected_xy[1]
+            if selected_xy is not None and all(
+                math.isfinite(value) for value in selected_xy
+            ):
+                det.world_x = float(selected_xy[0])
+                det.world_y = float(selected_xy[1])
+                det.world_position_valid = True
 
             # 真实半径 (像素→米)
             det.radius = t["radius"] * alt / max(fx, fy)

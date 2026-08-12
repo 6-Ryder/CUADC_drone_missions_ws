@@ -5,7 +5,7 @@
   1. 订阅 /drone/camera/image_raw
   2. YOLO 推理 → 检出所有 "cylinder" bbox
   3. 每个 bbox 内: Canny 边缘 → 椭圆拟合 → 精确圆心 + 像素半径
-  4. 像素坐标 → 世界坐标 (利用高度 + 相机内参)
+  4. 保留像素坐标; 本节点无位姿输入, World 坐标显式标记为无效
   5. 多帧追踪 (IoU 匹配) → 分配稳定 ID
   6. 发布 CylinderArray 话题
 
@@ -26,6 +26,7 @@ from drone_interfaces.msg import CylinderDetection, CylinderArray
 from cv_bridge import CvBridge
 import numpy as np
 import cv2
+import math
 from typing import List, Optional, Tuple
 import time
 
@@ -490,6 +491,12 @@ class CylinderDetectorNode(Node):
         # 从 CameraInfo 更新内参 (优先级高于 YAML 参数)
         pass  # 使用 YAML 参数作为回退
 
+    def _new_cylinder_array(self) -> CylinderArray:
+        msg = CylinderArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "world"
+        return msg
+
     def _image_cb(self, msg: Image):
         """图像回调: YOLO 检测 → OpenCV 精修 → 发布."""
         if not self._initialized:
@@ -542,7 +549,7 @@ class CylinderDetectorNode(Node):
 
         if not refined:
             # 发布空数组
-            self._cyl_pub.publish(CylinderArray())
+            self._cyl_pub.publish(self._new_cylinder_array())
             return
 
         # ---- 多帧追踪 ----
@@ -550,21 +557,12 @@ class CylinderDetectorNode(Node):
         self._tracker.prune()
         active = self._tracker.get_active()
 
-        # ---- 像素 → 世界坐标 ----
+        # ---- 像素半径 → 实际半径 ----
         fx = self.get_parameter("fx").value
         fy = self.get_parameter("fy").value
-        cx = self.get_parameter("cx").value
-        cy = self.get_parameter("cy").value
         alt = max(self._current_altitude, 0.5)
 
-        # 无人机当前世界坐标 (从遥测获取, 这里用占位)
-        # 实际应该从 px4_control 的 telemetry 话题获取
-        drone_ned_x = 0.0  # placeholder
-        drone_ned_y = 0.0
-
-        msg_array = CylinderArray()
-        msg_array.header.stamp = self.get_clock().now().to_msg()
-        msg_array.header.frame_id = "world"
+        msg_array = self._new_cylinder_array()
 
         for t in active:
             det_msg = CylinderDetection()
@@ -572,22 +570,15 @@ class CylinderDetectorNode(Node):
             det_msg.confidence = float(t["confidence"])
             det_msg.center_u = float(t["cx"])
             det_msg.center_v = float(t["cy"])
+            # 此独立节点没有位姿输入，保留像素检测但不伪造 World 坐标。
+            det_msg.world_position_valid = False
+            det_msg.world_x = math.nan
+            det_msg.world_y = math.nan
             # YOLO bbox
             bbox = t.get("bbox")
             if bbox and len(bbox) == 4:
                 det_msg.bbox_x1, det_msg.bbox_y1 = bbox[0], bbox[1]
                 det_msg.bbox_x2, det_msg.bbox_y2 = bbox[2], bbox[3]
-
-            # 像素 → NED (与 pixel_to_world_simple 一致的符号约定).
-            # image_top_faces_forward=True (真机, 画面顶朝机头):
-            #   u+ (像右) → body right → NED east, v+ (像下) → body rear → NED south.
-            # False (gz SITL): v+ → NED north (旧约定, 保持仿真行为不变).
-            v_sign = -1.0 if self.get_parameter("image_top_faces_forward").value else 1.0
-            dx_world = v_sign * (t["cy"] - cy) * alt / fy  # 像素行 → NED north/south
-            dy_world = (t["cx"] - cx) * alt / fx           # 像素列 → NED east
-
-            det_msg.center_x = drone_ned_x + dy_world  # NED east
-            det_msg.center_y = drone_ned_y + dx_world  # NED north
 
             # 真实半径估计
             pixel_radius = t["radius"]

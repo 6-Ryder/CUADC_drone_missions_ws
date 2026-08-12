@@ -2,14 +2,117 @@
 
 from pathlib import Path
 import inspect
+import math
 import threading
 import time
 import unittest
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
 INTERFACE_CMAKE = ROOT / "drone_interfaces" / "CMakeLists.txt"
 MESSAGE = ROOT / "drone_interfaces" / "msg" / "NedPositionSetpoint.msg"
+
+
+class _RecordingPublisher:
+    def __init__(self):
+        self.messages = []
+
+    def publish(self, message):
+        self.messages.append(message)
+
+
+class _Clock:
+    class _Now:
+        nanoseconds = 1_000_000
+
+        @staticmethod
+        def to_msg():
+            from builtin_interfaces.msg import Time
+
+            return Time(sec=0, nanosec=1_000_000)
+
+    @staticmethod
+    def now():
+        return _Clock._Now()
+
+
+def make_lease_enabled_px4_bridge(target_yaw):
+    """Create a PX4 bridge double with a live autonomy lease."""
+    from px4_control.px4_bridge import PX4Bridge
+
+    bridge = PX4Bridge.__new__(PX4Bridge)
+    publisher = _RecordingPublisher()
+    bridge._setpoint_lock = threading.RLock()
+    bridge._autonomy_lease_enabled = True
+    bridge._autonomy_lease_last_seen = time.monotonic()
+    bridge._autonomy_lease_timeout_s = 0.30
+    bridge._autonomy_target_received = True
+    bridge._target_yaw = float(target_yaw)
+    bridge._velocity_mode = True
+    bridge._last_velocity_cmd = (0.0, 0.0, 0.0)
+    bridge._current_setpoint = None
+    bridge._smoothed_yaw = float(target_yaw)
+    bridge._vel_pub = _RecordingPublisher()
+    bridge._trajectory_pub = publisher
+    bridge._offboard_mode_pub = _RecordingPublisher()
+    bridge.get_clock = lambda: _Clock()
+    return bridge, publisher
+
+
+def make_velocity_mode_px4_bridge(target_yaw):
+    """Create a lease-enabled PX4 bridge already in velocity mode."""
+    return make_lease_enabled_px4_bridge(target_yaw)
+
+
+def test_px4_velocity_setpoint_keeps_absolute_task_yaw():
+    """Immediate PX4 velocity setpoints keep the last absolute task yaw."""
+    bridge, publisher = make_lease_enabled_px4_bridge(
+        target_yaw=0.8726646259971648,
+    )
+
+    bridge.publish_velocity_cmd(0.2, -0.1, 0.0)
+
+    setpoint = publisher.messages[-1]
+    assert setpoint.yaw == pytest.approx(0.8726646259971648)
+    assert math.isnan(setpoint.yawspeed)
+
+
+def test_velocity_heartbeat_keeps_yaw_after_position_to_velocity_switch():
+    """PX4 velocity heartbeats retain yaw after a position-mode handoff."""
+    bridge, publisher = make_velocity_mode_px4_bridge(
+        target_yaw=0.8726646259971648,
+    )
+
+    bridge._offboard_heartbeat()
+
+    assert publisher.messages[-1].yaw == pytest.approx(0.8726646259971648)
+    assert math.isnan(publisher.messages[-1].yawspeed)
+
+
+def test_standalone_velocity_relay_keeps_yaw_rate_without_overwriting_task_yaw():
+    """The relay carries yaw rate without replacing its absolute task yaw."""
+    from px4_control.standalone_bridge import StandaloneBridge
+
+    bridge = StandaloneBridge.__new__(StandaloneBridge)
+    publisher = _RecordingPublisher()
+    bridge._shutdown = False
+    bridge._autonomous_output_enabled = True
+    bridge._output_lock = threading.RLock()
+    bridge._velocity_mode = False
+    bridge._target_ned = None
+    bridge._target_yaw = 0.8726646259971648
+    bridge._target_speed = None
+    bridge._vel_target = (0.0, 0.0, 0.0)
+    bridge._vel_pub = publisher
+    bridge._lease_pub = _RecordingPublisher()
+
+    bridge.set_velocity_target(0.2, -0.1, 0.0, yaw_rate=0.3)
+    bridge._heartbeat()
+
+    assert bridge._target_yaw == pytest.approx(0.8726646259971648)
+    assert publisher.messages[-1].angular.z == pytest.approx(0.3)
 
 
 class MissionSetpointContractTest(unittest.TestCase):
@@ -219,20 +322,25 @@ class MissionSetpointContractTest(unittest.TestCase):
 
     def test_recon_coverage_waypoints_keep_a_fixed_heading(self):
         from drone_mission.path_planner import PathPlanner
+        from drone_utils.layout_frame import LayoutFrame
 
         waypoints = PathPlanner(
+            layout_frame=LayoutFrame(50.0),
             sweep_speed=0.8,
             grid_spacing=1.67,
         ).plan_coverage_ned(
-            area_north_min=55.0,
-            area_north_max=60.0,
-            area_east_min=-4.0,
-            area_east_max=4.0,
+            area_forward_min=55.0,
+            area_forward_max=60.0,
+            area_right_min=-4.0,
+            area_right_max=4.0,
             altitude=-2.5,
         )
 
         self.assertTrue(waypoints)
-        self.assertTrue(all(waypoint["yaw"] == 0.0 for waypoint in waypoints))
+        self.assertTrue(all(
+            waypoint["yaw"] == pytest.approx(LayoutFrame(50.0).yaw_rad)
+            for waypoint in waypoints
+        ))
 
 
 if __name__ == "__main__":

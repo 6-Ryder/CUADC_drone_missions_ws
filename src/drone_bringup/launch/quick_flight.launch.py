@@ -58,17 +58,10 @@ def generate_launch_description():
         description="Home 点 World z",
     )
 
-    flight_axis_arg = DeclareLaunchArgument(
-        "flight_axis", default_value="north",
-        description="主飞行轴朝向: 'east' | 'north'",
-    )
-    drop_distance_arg = DeclareLaunchArgument(
-        "drop_distance", default_value="32.5",
-        description="Home → 投放区距离 (m)",
-    )
-    recon_distance_arg = DeclareLaunchArgument(
-        "recon_distance", default_value="57.5",
-        description="Home → 侦察区距离 (m)",
+    layout_heading_arg = DeclareLaunchArgument(
+        "layout_heading_deg",
+        default_value="0.0",
+        description="场地前方绝对方位角: 0=正北, 顺时针为正 (deg)",
     )
     rc_require_arg = DeclareLaunchArgument(
         "rc_require_arm_signal", default_value="true",
@@ -125,11 +118,10 @@ def generate_launch_description():
                 "cx": 320.0,
                 "cy": 240.0,
                 "device": "cuda",
+                "home_x": LaunchConfiguration("home_x"),
+                "home_y": LaunchConfiguration("home_y"),
+                "layout_heading_deg": LaunchConfiguration("layout_heading_deg"),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
-                "coverage_zone_x_min": -4.0,
-                "coverage_zone_x_max": 4.0,
-                "coverage_zone_y_min": 55.0,
-                "coverage_zone_y_max": 60.0,
             },
         ],
     )
@@ -157,9 +149,7 @@ def generate_launch_description():
                 "home_x": LaunchConfiguration("home_x"),
                 "home_y": LaunchConfiguration("home_y"),
                 "home_z": LaunchConfiguration("home_z"),
-                "flight_axis": LaunchConfiguration("flight_axis"),
-                "drop_distance": LaunchConfiguration("drop_distance"),
-                "recon_distance": LaunchConfiguration("recon_distance"),
+                "layout_heading_deg": LaunchConfiguration("layout_heading_deg"),
                 "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
             },
@@ -178,9 +168,7 @@ def generate_launch_description():
         home_x_arg,
         home_y_arg,
         home_z_arg,
-        flight_axis_arg,
-        drop_distance_arg,
-        recon_distance_arg,
+        layout_heading_arg,
         rc_require_arg,
         camera_node,
         px4_bridge_node,

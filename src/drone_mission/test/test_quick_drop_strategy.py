@@ -13,11 +13,13 @@ import time
 import math
 from pathlib import Path
 
+import pytest
 import yaml
 
 from drone_mission.mission_state_machine import MissionFSM
 from drone_mission.states.state_cylinder_search import CylinderSearchState
 from drone_mission.states.state_drop import DropState
+from drone_utils.layout_frame import LayoutFrame
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,13 +49,38 @@ def _bare_fsm():
     """object.__new__ 绕过重量级 __init__, 只提供目标库与 get_param."""
     fsm = object.__new__(MissionFSM)
     fsm._known_cylinders = [
-        {"center_x": 0.0, "center_y": 0.0, "observations": 1},
-        {"center_x": 0.3, "center_y": 0.0, "observations": 1},
+        {
+            "world_position_valid": True,
+            "world_x": 0.0,
+            "world_y": 0.0,
+            "observations": 1,
+        },
+        {
+            "world_position_valid": True,
+            "world_x": 0.3,
+            "world_y": 0.0,
+            "observations": 1,
+        },
     ]
     fsm._known_markers = [
-        {"center_x": 1.0, "center_y": 1.0, "observations": 1},
-        {"center_x": 1.05, "center_y": 1.0, "observations": 1},  # 0.05m 重复 → 去重
-        {"center_x": 3.0, "center_y": 3.0, "observations": 1},
+        {
+            "world_position_valid": True,
+            "world_x": 1.0,
+            "world_y": 1.0,
+            "observations": 1,
+        },
+        {
+            "world_position_valid": True,
+            "world_x": 1.05,
+            "world_y": 1.0,
+            "observations": 1,  # 0.05m 重复 → 去重
+        },
+        {
+            "world_position_valid": True,
+            "world_x": 3.0,
+            "world_y": 3.0,
+            "observations": 1,
+        },
     ]
     params = {"marker_memory_min_observations": 1}
     fsm.get_param = lambda name, default=None: params.get(name, default)
@@ -68,7 +95,7 @@ def test_marker_gate_returns_only_deduplicated_markers():
     targets = fsm.get_known_drop_targets()
 
     assert len(targets) == 2  # 3 个 marker, 1 个 0.05m 重复被去重
-    assert all("center_x" in t for t in targets)
+    assert all("world_x" in t for t in targets)
 
 
 def test_marker_gate_ignores_cylinder_memory_even_when_present():
@@ -78,7 +105,7 @@ def test_marker_gate_ignores_cylinder_memory_even_when_present():
     targets = fsm.get_known_drop_targets()
 
     # 圆筒记忆里有 2 个候选, quick 下仍只返回 markers
-    assert all(t["center_x"] >= 1.0 for t in targets)
+    assert all(t["world_x"] >= 1.0 for t in targets)
 
 
 def test_default_source_prefers_cylinders_then_falls_back_to_markers():
@@ -99,16 +126,30 @@ def test_default_source_prefers_cylinders_then_falls_back_to_markers():
 class _SearchFSM:
     def __init__(self, params):
         self._params = params
+        self.layout_frame = LayoutFrame(float(params.get("layout_heading_deg", 0.0)))
         self._known_cylinders = [
-            {"center_x": 0.0, "center_y": 0.0, "observations": 2},
+            {
+                "world_position_valid": True,
+                "world_x": 0.0,
+                "world_y": 0.0,
+                "observations": 2,
+            },
         ]
         self._known_markers = [
-            {"center_x": 1.0, "center_y": 1.0, "observations": 1},
+            {
+                "world_position_valid": True,
+                "world_x": 1.0,
+                "world_y": 1.0,
+                "observations": 1,
+            },
         ]
         self.set_vision_calls = []
 
     def get_param(self, name, default=None):
         return self._params.get(name, default)
+
+    def zone_bounds(self, _prefix):
+        return (30.0, 35.0, -4.0, 4.0)
 
     def get_cylinders(self):
         return []
@@ -164,15 +205,20 @@ def test_quick_search_enters_requests_marker_only_vision():
         "drop_marker_fallback_delay": 0.0,
     })
     fsm.logger = type("TL", (), {"log_state": staticmethod(lambda *a: None)})()
+    goto_calls = []
     fsm.fc = type("FC", (), {
-        "goto_ned": staticmethod(lambda *a, **kw: None),
+        "goto_ned": staticmethod(lambda *a, **kw: goto_calls.append((a, kw))),
         "altitude_to_ned": staticmethod(lambda a: -a),
     })()
+    fsm.layout_frame = LayoutFrame(50.0)
+    fsm.zone_bounds = lambda _prefix: (30.0, 35.0, -4.0, 4.0)
     fsm.clear_known_cylinders = lambda: None
     state = CylinderSearchState(fsm)
     state.enter()
 
     assert fsm.set_vision_calls == ["marker_only"]
+    north, east, _down = goto_calls[-1][0]
+    assert fsm.layout_frame.ned_to_local(north, east) == pytest.approx((32.5, 0.0))
 
 
 def test_default_search_does_not_request_marker_only():

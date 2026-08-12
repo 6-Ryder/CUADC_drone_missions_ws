@@ -3,7 +3,8 @@
 > 适用范围：`drone_bringup`、`drone_mission`、`px4_control`、`drone_vision`、
 > `drone_servo2` 和 `test_mission`。
 
-> 当前基线：侦察速度 `0.8 m/s`，侦察航点 yaw 固定为 `0.0`，不随弓字形条带旋转。
+> 当前基线：侦察速度 `0.8 m/s`；所有任务航点保持配置的布局航向，
+> 不随弓字形条带交替旋转。
 
 ## 1. 先理解参数是如何生效的
 
@@ -26,12 +27,14 @@
 
 因此必须确认实际启动的 launch 文件。只修改 YAML，不代表 launch 中的覆盖值会改变。
 
-### 1.2 三种运行入口
+### 1.2 完整任务的四个运行入口
 
 | 入口 | 适用任务 | 主要参数来源 |
 |---|---|---|
-| `drone_bringup sitl.launch.py` | 完整 SITL 任务 | 四个运行 YAML，SITL 覆盖 DDS topic 和解锁策略 |
-| `drone_bringup real_flight.launch.py` | 完整真机任务 | 四个运行 YAML，真机覆盖 Home、相机、DDS 和 RC 策略 |
+| `drone_bringup quick_sitl.launch.py` | 快速 SITL 权威基线 | `mission_params_quick_sim.yaml`、quick 视觉/舵机参数，SITL 覆盖 DDS topic 和解锁策略 |
+| `drone_bringup sitl.launch.py` | 主任务 SITL | `mission_params.yaml`、主任务视觉/舵机参数，SITL 覆盖 DDS topic 和解锁策略 |
+| `drone_bringup quick_flight.launch.py` | 快速真机 | `mission_params_quick.yaml`、quick 视觉/舵机参数；真机 Home、相机、DDS 和 RC 策略 |
+| `drone_bringup real_flight.launch.py` | 主任务真机 | `mission_params_real.yaml`、主任务视觉/舵机参数；真机 Home、相机、DDS 和 RC 策略 |
 | `drone_bringup simple_mission.launch.py` | 简单起飞-投放-返航测试 | launch 参数 + `px4_params.yaml`，不使用完整 mission YAML |
 | `test_mission test_forward_recon.launch.py` | 前飞+侦察分阶段测试 | launch 参数，独立于完整 FSM 的任务参数 |
 | `drone_bringup vision_only.launch.py` | 单独视觉调试 | `vision_params.yaml` + 相机 launch 参数 |
@@ -96,7 +99,42 @@ Gazebo World 使用 `x=East, y=North, z=Up`。Home 参数负责两套坐标的�
 
 真机通常把解锁点作为 `(0,0,0)`。修改 Home 后，区域位置、覆盖监控坐标和视觉世界坐标必须一起核对。
 
-### 2.3 DDS 版本
+### 2.3 场地方位与操作命令
+
+`layout_heading_deg` 是唯一的场地方位参数：`0°` 是 NED 北，顺时针为正；任意
+有限输入会归一化到 `[0, 360)`，并在一次任务启动时冻结。局部 `forward` 沿该
+heading，`right` 为面向 forward 的右侧：
+
+```text
+north = forward * cos(h) - right * sin(h)
+east  = forward * sin(h) + right * cos(h)
+```
+
+任务从 Offboard 起飞开始一边爬升一边转向该绝对 yaw；没有 yaw 对齐门、yaw
+超时或额外等待状态。所有位置和速度阶段保持同一任务 yaw，侦察条带不会随
+往返方向反转机头。
+
+```bash
+# Quick authoritative baseline, north
+./scripts/start_quick_simulation.sh layout_heading_deg:=0
+
+# Quick authoritative 50-degree validation
+./scripts/start_quick_simulation.sh layout_heading_deg:=50
+
+# Main-strategy 50-degree regression
+./scripts/start_full_simulation.sh layout_heading_deg:=50
+
+# Real-flight quick/main entry points use the same parameter
+./scripts/start_quick_mission_real.sh layout_heading_deg:=50
+./scripts/start_full_real_mission.sh layout_heading_deg:=50
+```
+
+SITL 使用这个值同时旋转运行时 SDF、Gazebo 初始 yaw 和任务/视觉参数。真机不
+生成 SDF；操作者必须在解锁前物理确认场地前方与 `layout_heading_deg` 一致。
+不要把 quick 的 marker-only、连续投放、简化降落和速度调参复制到主任务，
+也不要把主任务的完整投放、返航或精准降落调参复制到 quick。
+
+### 2.4 DDS 版本
 
 | 场景 | `vehicle_status_topic` |
 |---|---|
@@ -118,9 +156,7 @@ src/drone_mission/config/mission_params.yaml
 | 参数 | 当前值 | 作用与修改建议 |
 |---|---:|---|
 | `sim_mode` | `true` | SITL/真机通信模式。真机由 launch 覆盖为 `false`。 |
-| `flight_axis` | `north` | 主飞行轴，只允许 `north` 或 `east`。 |
-| `drop_distance` | `32.5` m | Home 到投放区中心的距离。 |
-| `recon_distance` | `57.5` m | Home 到侦察区中心的距离。 |
+| `layout_heading_deg` | `0.0` deg | 场地 local forward 轴相对 NED North 的顺时针绝对航向；任务启动后冻结。 |
 | `takeoff_height` | `5.0` m | 起飞和巡航高度。高度参数为正数，内部转换为 NED 负值。 |
 | `waypoint_tolerance` | `0.5` m | 航点到达容差。过小会导致迟迟无法到达，过大会降低路径精度。 |
 | `takeoff_tolerance` | `0.3` m | 起飞高度确认容差。 |
@@ -158,8 +194,8 @@ PX4 的 `MPC_XY_VEL_MAX` 等飞控参数仍可能进一步降低实际速度。
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `area1_north_min/max` | `30.0/35.0` m | 投放区 NED North 边界 |
-| `area1_east_min/max` | `-4.0/4.0` m | 投放区 NED East 边界 |
+| `area1_forward_min/max` | `30.0/35.0` m | 投放区 field-local forward 边界 |
+| `area1_right_min/max` | `-4.0/4.0` m | 投放区 field-local right 边界 |
 | `area1_altitude` | `2.0` m | 低空投放高度 |
 | `area1_search_altitude` | `5.6` m | 搜索和建图高度 |
 
@@ -169,17 +205,17 @@ PX4 的 `MPC_XY_VEL_MAX` 等飞控参数仍可能进一步降低实际速度。
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `area2_north_min/max` | `55.0/60.0` m | 侦察区 NED North 边界 |
-| `area2_east_min/max` | `-4.0/4.0` m | 侦察区 NED East 边界 |
+| `area2_forward_min/max` | `55.0/60.0` m | 侦察区 field-local forward 边界 |
+| `area2_right_min/max` | `-4.0/4.0` m | 侦察区 field-local right 边界 |
 | `area2_altitude` | `2.5` m | 侦察扫描高度 |
 | `grid_spacing` | `1.67` m | 相邻扫描条带间距 |
-| `sweep_margin_north` | `1.0` m | 当前 NED 侦察规划未消费；修改不会改变现行侦察边界。 |
-| `sweep_margin_east` | `0.5` m | 当前 NED 侦察规划未消费；修改不会改变现行侦察边界。 |
+| `sweep_margin_forward` | `1.0` m | 当前 local-frame 侦察规划未消费；修改不会改变现行侦察边界。 |
+| `sweep_margin_right` | `0.5` m | 当前 local-frame 侦察规划未消费；修改不会改变现行侦察边界。 |
 | `recon_require_full_path` | `true` | 是否必须完成全部弓字形航点 |
 
-当前侦察航点 yaw 在 `PathPlanner.plan_coverage_ned()` 中固定为 `0.0`，机头朝 NED North。
-
-这不是 YAML 参数。修改扫描速度或全局速度上限不会改变侦察航向。
+`PathPlanner.plan_coverage_ned()` 为每个侦察航点使用启动时冻结的
+`layout_heading_deg`。机头保持这个绝对任务航向，不随条带方向交替旋转；
+修改扫描速度或全局速度上限不会改变该航向。
 
 `recon_require_full_path=false` 时，覆盖率达标可能提前结束侦察；真机完整覆盖任务建议保持 `true`。
 
@@ -399,15 +435,19 @@ src/drone_vision/config/vision_params.yaml
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `coverage_zone_x_min/max` | `0/8` m | World East 覆盖区域边界。 |
-| `coverage_zone_y_min/max` | `65/70` m | World North 覆盖区域边界。 |
+| `coverage_zone_forward_min/max` | `55/60` m | 侦察区 field-local forward 覆盖边界。 |
+| `coverage_zone_right_min/max` | `-4/4` m | 侦察区 field-local right 覆盖边界。 |
 | `coverage_grid_resolution` | `0.5` m | 覆盖率网格分辨率。 |
 | `coverage_fov_half_angle` | `35°` | 相机视场半角。 |
 | `coverage_complete_ratio` | `0.95` | 覆盖完成比例。 |
 
-这些参数只决定视觉覆盖率监控，不决定实际弓字形航点；实际航点由 mission 的 Area 2 参数决定。
+这些参数只决定视觉覆盖率监控，不决定实际弓字形航点；实际航点由 mission 的
+Area 2 参数决定。视觉先将飞机 World 位置相对 Home 转为 NED，再逆变换到
+`forward/right` 网格，因此 `0°` 与任意 heading 使用等价的局部覆盖序列。
 
-真机 launch 会把覆盖区域覆盖为 `x=-4..4、y=55..60`，必须与真机 Home 和坐标定义一致。
+圆筒和标识物只有在 `world_position_valid=true` 时才提供可导航的
+`world_x/world_y`。该值要求新鲜 6-DoF pose；无 pose 或过期 pose 可保留像素
+检测，但任务不会记忆或导航到世界坐标，也不会使用北向简化投影回退。
 
 ### 5.6 视觉伺服
 
@@ -477,10 +517,12 @@ ros2 launch drone_bringup simple_mission.launch.py \
 | `forward_distance` | `20.0` m | Phase 1 向北直飞距离。 |
 | `transit_speed` | `2.5` m/s | 前飞转场速度。 |
 | `recon_altitude` | `2.5` m | 测试侦察高度。 |
-| `recon_area_half_north` | `2.5` m | 侦察区 North 半宽。 |
-| `recon_area_half_east` | `4.0` m | 侦察区 East 半宽。 |
+| `recon_area_half_forward` | `2.5` m | 侦察区 local forward 半宽。 |
+| `recon_area_half_right` | `4.0` m | 侦察区 local right 半宽。 |
 | `sweep_speed` | `1.2` m/s | 测试扫描速度。 |
 | `grid_spacing` | `1.67` m | 条带间距。 |
+| `sweep_margin_forward` | `0.5` m | 测试规划器 local forward 边距；当前覆盖路径不应用该内缩。 |
+| `sweep_margin_right` | `0.5` m | 测试规划器 local right 边距；当前覆盖路径不应用该内缩。 |
 | `rc_require_arm_signal` | `true` | 真机人工解锁。 |
 | `camera_device` | USB 稳定路径 | 真机 V4L2 设备。 |
 | `vision_params` | `vision_params.yaml` | 视觉参数文件路径。 |
@@ -490,6 +532,7 @@ ros2 launch drone_bringup simple_mission.launch.py \
 ```bash
 ros2 launch test_mission test_forward_recon.launch.py \
   sim_mode:=false sweep_speed:=1.2 recon_altitude:=2.5 \
+  recon_area_half_forward:=2.5 recon_area_half_right:=4.0 \
   rc_require_arm_signal:=true
 ```
 
@@ -524,7 +567,7 @@ sweep_speed: 1.2
 同时检查：
 
 ```text
-mission_params.yaml: area2_north/east_min/max
+mission_params.yaml: area2_forward/right_min/max
 vision_params.yaml: coverage_zone_x/y_min/max
 ```
 
@@ -596,7 +639,7 @@ ros2 param get /px4_bridge max_setpoint_speed_limit
 | 检查项 | 预期 |
 |---|---|
 | 阶段速度 | 侦察 `0.8`、转场 `2.0`、返航 `3.0` 的设定点推进速度 |
-| 侦察 yaw | 所有侦察航点为 `0.0`，不出现条带交替旋转 |
+| 侦察 yaw | 所有侦察航点保持启动时配置的 `layout_heading_deg`，不出现条带交替旋转 |
 | 位置话题 | `/drone/cmd_setpoint_ned` 含 NED、yaw 和 speed |
 | PX4 轨迹 | `/fmu/in/trajectory_setpoint` 位置与 yaw 连续 |
 | 真机 DDS | 使用已验证的 v1 topic |

@@ -5,6 +5,7 @@ from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[3]
 LAUNCHER_PATH = WORKSPACE / "scripts/start_full_real_mission.sh"
+QUICK_LAUNCHER_PATH = WORKSPACE / "scripts/start_quick_mission_real.sh"
 VERIFIER_PATH = WORKSPACE / "scripts/verify_real_flight_ready.sh"
 
 
@@ -14,7 +15,8 @@ def _source(path: Path) -> str:
 
 
 def test_full_real_launcher_owns_one_udp_agent_and_runs_the_mission():
-    """The start script (not the launch) owns the only MicroXRCEAgent.
+    """
+    The start script (not the launch) owns the only MicroXRCEAgent.
 
     test_mission 模式: 脚本先清理旧进程、启动 Agent 并等待 DDS 就绪,
     再由 launch 启动任务节点。Agent 意外退出时脚本停止任务 (等价旧 exit guard).
@@ -65,6 +67,14 @@ def test_full_real_launcher_never_issues_vehicle_or_servo_commands():
         "trigger_drop",
     ):
         assert forbidden not in source
+
+
+def test_real_mission_launchers_forward_arbitrary_launch_arguments():
+    for path in (LAUNCHER_PATH, QUICK_LAUNCHER_PATH):
+        source = _source(path)
+
+        assert 'LAUNCH_ARGS+=("$arg")' in source
+        assert '"${LAUNCH_ARGS[@]}"' in source
 
 
 def test_readiness_verifier_is_bounded_read_only_and_checks_real_interfaces():

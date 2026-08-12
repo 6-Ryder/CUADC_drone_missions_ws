@@ -17,7 +17,8 @@
 #   ./scripts/test_forward_recon.sh \
 #       forward_distance:=25.0 \
 #       recon_altitude:=2.5 \
-#       recon_area_half_north:=5.0
+#       recon_area_half_forward:=5.0 \
+#       recon_area_half_right:=4.0
 # ==============================================================================
 set -eo pipefail
 
@@ -138,8 +139,8 @@ ros2 launch test_mission test_forward_recon.launch.py \
     cruise_altitude:=5.0 \
     transit_speed:=2.0 \
     recon_altitude:=3.0 \
-    recon_area_half_north:=2.5 \
-    recon_area_half_east:=4.0 \
+    recon_area_half_forward:=2.5 \
+    recon_area_half_right:=4.0 \
     sweep_speed:=0.8 \
     grid_spacing:=1.67 \
     "$@" 2>&1 | tee "$LOG_DIR/mission.log"

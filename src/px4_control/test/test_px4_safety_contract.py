@@ -1,8 +1,10 @@
 from pathlib import Path
+import math
 import threading
 
 import px4_control.standalone_bridge as standalone_bridge_module
 from px4_control.standalone_bridge import StandaloneBridge
+from px4_control.flight_controller import FlightController
 from px4_control.px4_bridge import PX4Bridge
 from px4_control.telemetry import Position
 
@@ -174,6 +176,48 @@ def test_standalone_stop_revokes_the_downstream_px4_autonomy_lease(monkeypatch):
     assert len(relay._trajectory_pub.messages) == 1
     assert relay._target_setpoint is None
     assert relay._last_velocity_cmd == (0.0, 0.0, 0.0)
+
+
+def test_relay_flow_preserves_position_yaw_through_velocity_stop_and_hold(monkeypatch):
+    """The live relay path never loses its absolute yaw during velocity holds."""
+    relay = _px4_relay_bridge()
+    node = _Node()
+    node.publisher_callbacks["/drone/cmd/autonomy_lease"] = (
+        relay._autonomy_lease_cb
+    )
+    node.publisher_callbacks["/drone/cmd_setpoint_ned"] = relay._cmd_setpoint_cb
+    node.publisher_callbacks["/drone/cmd_velocity_ned"] = relay._cmd_velocity_cb
+    standalone = StandaloneBridge(node, sim_mode=False)
+    monkeypatch.setattr(standalone_bridge_module.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr("px4_control.px4_bridge.time.monotonic", lambda: 100.0)
+
+    standalone.set_position_target(10.0, -2.0, -3.0, yaw=0.8726646259971648)
+    standalone._heartbeat()
+    relay._offboard_heartbeat()
+    position_setpoint = relay._trajectory_pub.messages[-1]
+    assert position_setpoint.yaw == 0.8726646259971648
+    assert math.isnan(position_setpoint.yawspeed)
+
+    standalone.set_velocity_target(0.2, -0.1, 0.0, yaw_rate=0.3)
+    standalone._heartbeat()
+    relay._offboard_heartbeat()
+    velocity_setpoint = relay._trajectory_pub.messages[-1]
+    assert velocity_setpoint.yaw == 0.8726646259971648
+    assert math.isnan(velocity_setpoint.yawspeed)
+
+    FlightController(standalone).stop_velocity()
+    standalone._heartbeat()
+    relay._offboard_heartbeat()
+    stop_setpoint = relay._trajectory_pub.messages[-1]
+    assert stop_setpoint.yaw == 0.8726646259971648
+    assert math.isnan(stop_setpoint.yawspeed)
+
+    standalone.hold_for_takeover()
+    standalone._heartbeat()
+    relay._offboard_heartbeat()
+    hold_setpoint = relay._trajectory_pub.messages[-1]
+    assert hold_setpoint.yaw == 0.8726646259971648
+    assert math.isnan(hold_setpoint.yawspeed)
 
 
 def test_expired_lease_blocks_vision_servo_from_bypassing_px4_output_gate(monkeypatch):

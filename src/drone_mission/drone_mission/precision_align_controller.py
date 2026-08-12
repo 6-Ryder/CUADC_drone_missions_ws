@@ -112,6 +112,13 @@ class PrecisionAlignController:
     def _field(obj: Any, key: str, default=0.0):
         return getattr(obj, key, obj.get(key, default) if isinstance(obj, dict) else default)
 
+    def _world_xy(self, target: Any) -> Optional[Tuple[float, float]]:
+        if not bool(self._field(target, "world_position_valid", False)):
+            return None
+        wx = float(self._field(target, "world_x", math.nan))
+        wy = float(self._field(target, "world_y", math.nan))
+        return (wx, wy) if math.isfinite(wx) and math.isfinite(wy) else None
+
     def _now(self) -> float:
         return self._fsm.get_clock().now().nanoseconds / 1e9
 
@@ -263,8 +270,7 @@ class PrecisionAlignController:
             smooth_du, smooth_dv, altitude,
         ) if continuous else (0.0, 0.0)
 
-        wx = float(self._field(target, "center_x", 0.0))
-        wy = float(self._field(target, "center_y", 0.0))
+        target_world_xy = self._world_xy(target)
         self._last_status = PrecisionAlignStatus(
             source=source,
             pixel_error=pixel_error,
@@ -275,7 +281,7 @@ class PrecisionAlignController:
             smooth_dy_norm=float(self._smooth_dy),
             stable_count=self._stable_count,
             lost_frames=0,
-            target_world_xy=(wx, wy),
+            target_world_xy=target_world_xy,
             ground_forward_error_m=ground_forward_error_m,
             ground_right_error_m=ground_right_error_m,
             altitude_m=altitude,
@@ -470,16 +476,18 @@ class PrecisionAlignController:
             v = float(self._field(target, "center_v", cy))
             center_ratio = math.hypot(u - cx, v - cy) / diag
 
-            wx = float(self._field(target, "center_x", 0.0))
-            wy = float(self._field(target, "center_y", 0.0))
+            world_xy = self._world_xy(target)
             world_ratio = 0.0
             world_error = None
             if self._target_hint_xy is not None and self._locked_pixel_uv is None:
-                tx, ty = self._target_hint_xy
-                world_error = math.hypot(wx - tx, wy - ty)
-                if world_error > world_gate:
-                    continue
-                world_ratio = min(world_error / max(world_gate, 0.01), 1.0)
+                if world_xy is None:
+                    world_ratio = 1.0
+                else:
+                    tx, ty = self._target_hint_xy
+                    world_error = math.hypot(world_xy[0] - tx, world_xy[1] - ty)
+                    if world_error > world_gate:
+                        continue
+                    world_ratio = min(world_error / max(world_gate, 0.01), 1.0)
 
             continuity_ratio = center_ratio
             if self._locked_pixel_uv is not None:
@@ -513,17 +521,20 @@ class PrecisionAlignController:
         _, selected, source = min(scored, key=lambda item: item[0])
         u = float(self._field(selected, "center_u", cx))
         v = float(self._field(selected, "center_v", cy))
-        wx = float(self._field(selected, "center_x", 0.0))
-        wy = float(self._field(selected, "center_y", 0.0))
+        selected_world_xy = self._world_xy(selected)
 
         if self._locked_pixel_uv is None:
+            world_label = (
+                f"({selected_world_xy[0]:.2f},{selected_world_xy[1]:.2f})"
+                if selected_world_xy is not None else "invalid"
+            )
             self._fsm.get_logger().info(
                 "PREC_ALIGN: 锁定低空精校目标 "
-                f"source={source} pixel=({u:.0f},{v:.0f}) world=({wx:.2f},{wy:.2f})"
+                f"source={source} pixel=({u:.0f},{v:.0f}) world={world_label}"
             )
 
         self._locked_pixel_uv = (u, v)
-        self._locked_world_xy = (wx, wy)
+        self._locked_world_xy = selected_world_xy
         self._locked_source = source
         return selected, source, "tracking"
 
@@ -534,12 +545,16 @@ class PrecisionAlignController:
             return
         self._last_log_time = now
         s = self._last_status
+        world_label = (
+            f"({s.target_world_xy[0]:.2f},{s.target_world_xy[1]:.2f})"
+            if s.target_world_xy is not None else "invalid"
+        )
         self._fsm.get_logger().info(
             "PREC_ALIGN: "
             f"source={s.source} pixel_error={s.pixel_error:.1f}px "
             f"raw=({s.raw_dx_norm:+.4f},{s.raw_dy_norm:+.4f}) "
             f"smooth=({s.smooth_dx_norm:+.4f},{s.smooth_dy_norm:+.4f}) "
-            f"world=({s.target_world_xy[0]:.2f},{s.target_world_xy[1]:.2f}) "
+            f"world={world_label} "
             f"ground=({s.ground_forward_error_m:+.3f},{s.ground_right_error_m:+.3f})m "
             f"alt={s.altitude_m:.2f}m continuous={s.continuous} "
             f"stable={s.stable_count} cmd=({s.command_forward:+.3f},{s.command_right:+.3f})"

@@ -2,7 +2,11 @@ from drone_mission.states.state_recon_patrol import ReconPatrolState
 
 
 class _Planner:
+    def __init__(self):
+        self.calls = []
+
     def plan_coverage_ned(self, **_kwargs):
+        self.calls.append(_kwargs)
         return [
             {"north": 55.0, "east": -4.0, "down": -2.5},
             {"north": 60.0, "east": -4.0, "down": -2.5},
@@ -49,6 +53,9 @@ class _FSM:
     def get_param(self, _name, default):
         return default
 
+    def zone_bounds(self, _prefix):
+        return (55.0, 60.0, -4.0, 4.0)
+
     def get_logger(self):
         return _Logger()
 
@@ -65,6 +72,13 @@ def test_recon_starts_coverage_only_after_reaching_the_first_strip_entry():
     state.enter()
 
     assert fsm.vision_modes == ["coverage_reset"]
+    assert fsm.path_planner.calls == [{
+        "area_forward_min": 55.0,
+        "area_forward_max": 60.0,
+        "area_right_min": -4.0,
+        "area_right_max": 4.0,
+        "altitude": -2.5,
+    }]
 
     for _ in range(8):
         assert state.execute() is None

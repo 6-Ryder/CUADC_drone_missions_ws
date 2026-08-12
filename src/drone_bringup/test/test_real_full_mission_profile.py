@@ -74,6 +74,8 @@ def test_real_profile_preserves_full_mission_and_uses_proven_real_values():
         "search_progress_window",
         "visual_progress_min_improvement",
         "landing_search_progress_window",
+        "precision_align_final_raw_pixel_tolerance",
+        "precision_align_tight_window_height",
     }
     assert "landing_blind_timeout" not in real
     assert real["vehicle_status_topic"] == "/fmu/out/vehicle_status_v1"
@@ -101,7 +103,7 @@ def test_real_profile_preserves_full_mission_and_uses_proven_real_values():
     assert real["landing_descent_fast"] == 0.4
     assert real["landing_descent_medium"] == 0.25
     assert real["landing_descent_slow"] == 0.12
-    assert real["vision_loss_timeout"] == 3.0
+    assert real["vision_loss_timeout"] == 5.0
 
     assert real["camera_fx"] == 400.0
     assert real["camera_fy"] == 400.0
@@ -151,8 +153,7 @@ def test_real_launch_loads_profile_without_mission_value_duplication():
         "home_x",
         "home_y",
         "home_z",
-        "flight_axis",
-        "drop_distance",
-        "recon_distance",
+        "layout_heading_deg",
         "rc_require_arm_signal",
+        "image_top_faces_forward",
     }
