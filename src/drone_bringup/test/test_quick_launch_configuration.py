@@ -10,9 +10,19 @@
 import ast
 from pathlib import Path
 
+import yaml
+
 
 WORKSPACE = Path(__file__).resolve().parents[3]
 LAUNCH_DIR = WORKSPACE / "src/drone_bringup/launch"
+MISSION_CONFIG = WORKSPACE / "src/drone_mission/config"
+DOCS_DIR = WORKSPACE / "docs"
+FIELD_README = WORKSPACE / "field/README.md"
+
+
+def _mission_params(filename):
+    document = yaml.safe_load((MISSION_CONFIG / filename).read_text(encoding="utf-8"))
+    return document["/mission_state_machine"]["ros__parameters"]
 
 
 def _param_files(launch_file):
@@ -78,3 +88,39 @@ def test_quick_flight_has_no_status_topic_override():
     text = _launch_text("quick_flight.launch.py")
 
     assert "vehicle_status_topic" not in text
+
+
+def test_active_docs_have_no_legacy_direction_parameters():
+    """Operator-facing documents use only the field-local coordinate contract."""
+    active_docs = [
+        DOCS_DIR / "ARCHITECTURE.md",
+        DOCS_DIR / "CODE_READING_GUIDE.md",
+        DOCS_DIR / "Debug/PARAMETER_USAGE_GUIDE.md",
+        FIELD_README,
+    ]
+    for path in active_docs:
+        text = path.read_text(encoding="utf-8")
+        assert "flight_axis" not in text
+        assert "area1_north_min" not in text
+        assert "coverage_zone_x_min" not in text
+
+
+def test_quick_profile_keeps_authoritative_behavior_values():
+    """Quick SITL stays the authoritative fast marker/drop/landing strategy."""
+    quick = _mission_params("mission_params_quick_sim.yaml")
+
+    assert quick["quick_drop_mode"] is True
+    assert quick["drop_target_source"] == "marker"
+    assert quick["landing_simple_mode"] is True
+    assert quick["transit_speed"] == 3.5
+    assert quick["return_speed"] == 4.5
+
+
+def test_main_sitl_profile_keeps_its_distinct_full_mission_tuning():
+    """Main SITL must not inherit quick-only modes or speed tuning."""
+    main = _mission_params("mission_params.yaml")
+
+    assert "quick_drop_mode" not in main
+    assert "landing_simple_mode" not in main
+    assert main["transit_speed"] == 2.5
+    assert main["return_speed"] == 3.8

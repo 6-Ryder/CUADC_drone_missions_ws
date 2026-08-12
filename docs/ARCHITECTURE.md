@@ -67,8 +67,8 @@ drone_mission     ← 核心任务调度
     └── simple_mission.py         — Smoke test (非完整 FSM)
 
 drone_bringup     ← Launch 文件
-    ├── sitl.launch.py       — SITL: px4_bridge + vision + servo + mission
-    └── real_flight.launch.py — 真机: +V4L2 camera + Jetson 参数 (Agent 由启动脚本持有)
+    ├── quick_sitl.launch.py / sitl.launch.py — 快速/主任务 SITL
+    └── quick_flight.launch.py / real_flight.launch.py — 快速/主任务真机
 
 test_mission      ← 分阶段真机测试 (test_forward_recon: 直飞20m+侦察扫描)
 drone_utils       ← 共享工具 (TaskLogger, Watchdog, EmergencyHandler, ProgressMonitor)
@@ -113,8 +113,8 @@ px4_msgs          ← PX4 DDS 消息定义 (v1/v4 隔离)
 | 目录 | 内容 |
 |---|---|
 | `docs/` | ARCHITECTURE, CODE_READING_GUIDE, DEPLOYMENT, RTK 指南, WORKLOG |
-| `scripts/` | start_full_simulation.sh, start_full_real_mission.sh, sitl_env.sh, debug_vision.sh |
-| `field/` | Gazebo 场景 (drone_field.sdf, 70m×8m 北向) |
+| `scripts/` | quick/main 的 SITL 与真机启动脚本、sitl_env.sh、debug_vision.sh |
+| `field/` | Gazebo 场景模板和按 `layout_heading_deg` 生成的运行时场地 |
 | `real_flight_logs/` | 真机飞行日志 (按日期) + 飞控参数修改记录 |
 | `log/` | SITL 仿真日志 (209 个子目录) |
 | `controller_params_v3.params` | 37KB PX4 控制器参数文件 |
@@ -127,7 +127,7 @@ px4_msgs          ← PX4 DDS 消息定义 (v1/v4 隔离)
 
 1. 任务由 `drone_mission` 的单一 FSM 编排，飞控、视觉和舵机通过 ROS 2 接口协作。
 2. 飞行指令使用 PX4 NED：`x=north`、`y=east`、`z=down`；向上高度对应负 z。
-3. 当前场地沿北向布置，SITL Home World 为 `(4,10,0)`，真机 Home 为解锁点 `(0,0,0)`。
+3. `layout_heading_deg` 是唯一的场地方位：`0°` 为 NED 北、顺时针为正；任务启动时冻结。SITL Home World 为 `(4,10,0)`，真机 Home 为解锁点 `(0,0,0)`。
 4. 精准降落必须使用视觉 H 对心；视觉丢失或盲降超时进入错误处理，不自动改用 PX4 LAND。
 5. 任务结束停止 FSM 控制定时器；视觉在进入侦察阶段释放投放模型，避免无用显存和句柄继续占用。
 
@@ -140,7 +140,7 @@ px4_msgs          ← PX4 DDS 消息定义 (v1/v4 隔离)
 | `drone_vision` | 相机、ONNX 推理、目标精修、覆盖监控、视觉伺服 | `vision_pipeline.py` 及检测器/控制器 |
 | `drone_servo2` | 多位置投放控制 | C++ `servo_controller.cpp`，SITL Mock 或 Jetson PX4 执行器 |
 | `drone_mission` | 任务状态机和策略 | `mission_state_machine.py`、`states/`、`path_planner.py` |
-| `drone_bringup` | 启动组合 | `sitl.launch.py`、`real_flight.launch.py` |
+| `drone_bringup` | 快速/主任务 × SITL/真机启动组合 | `quick_sitl.launch.py`、`sitl.launch.py`、`quick_flight.launch.py`、`real_flight.launch.py` |
 | `test_mission` | 分阶段真机测试 | `test_forward_recon` 等测试节点 |
 
 ## 3. 运行拓扑
@@ -179,15 +179,52 @@ World x = home_x + NED east
 World y = home_y + NED north
 ```
 
-SITL 默认 Home 为 `(4,10)`。因此侦察区 NED `north=55..60, east=-4..4` 对应 World `x=0..8, y=65..70`；投放区 NED `north=30..35, east=-4..4` 对应 World `x=0..8, y=40..45`。
+`LayoutFrame` 以 Home 为原点定义场地局部坐标：`forward` 指向
+`layout_heading_deg`，`right` 是面对 forward 时的右侧。设 `h` 为 heading 的弧度：
+
+```text
+north = forward * cos(h) - right * sin(h)
+east  = forward * sin(h) + right * cos(h)
+```
+
+反变换用于将 World 目标和飞机位置送回局部区域判定。SITL 默认 Home 为
+`(4,10)`；在 `0°` 时，侦察区 local `forward=55..60, right=-4..4` 对应
+World `x=0..8, y=65..70`，投放区 local `forward=30..35, right=-4..4` 对应
+World `x=0..8, y=40..45`。非零 heading 时不得把这些 World 范围当作固定边界。
 
 ### 4.2 关键区域
 
-| 区域 | NED 范围 | 高度 |
+| 区域 | field-local 范围 | 高度 |
 |---|---|---|
-| 投放区 | north `30..35`，east `-4..4` | 搜索 5.6 m，投放低空 2.8 m 精校后降至 1.5 m |
-| 侦察区 | north `55..60`，east `-4..4` | 2.5 m |
+| 投放区 | forward `30..35`，right `-4..4` | 搜索 5.6 m，投放低空 2.8 m 精校后降至 1.5 m |
+| 侦察区 | forward `55..60`，right `-4..4` | 2.5 m |
 | H 起降点 | Home | 搜索 5 m，稳定对心后 1.5 m 盲降 |
+
+### 4.3 方位启动与策略边界
+
+以下命令是完整任务的操作入口；同一个 `layout_heading_deg` 同时传给任务、
+视觉和 SITL 运行时场地。快速策略是方向改造的权威基线，但不会替换主任务的
+投放、侦察、返航和精准降落策略。
+
+```bash
+# Quick authoritative baseline, north
+./scripts/start_quick_simulation.sh layout_heading_deg:=0
+
+# Quick authoritative 50-degree validation
+./scripts/start_quick_simulation.sh layout_heading_deg:=50
+
+# Main-strategy 50-degree regression
+./scripts/start_full_simulation.sh layout_heading_deg:=50
+
+# Real-flight quick/main entry points use the same parameter
+./scripts/start_quick_mission_real.sh layout_heading_deg:=50
+./scripts/start_full_real_mission.sh layout_heading_deg:=50
+```
+
+起飞进入 Offboard 后会在既有爬升过程中转向目标 heading；没有额外的 yaw
+对准状态、yaw 容差门或等待超时。位置与速度控制均持续发布同一任务 yaw，
+侦察条带只旋转位置，不随往返方向转机头。真机不生成 SDF；操作者必须在解锁
+前确认实体场地朝向与启动参数一致。
 
 ## 5. 任务 FSM
 

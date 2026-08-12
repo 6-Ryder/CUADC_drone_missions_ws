@@ -23,11 +23,12 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import LaunchConfiguration
+
 
 def generate_launch_description():
     """生成 SITL 全系统启动配置."""
-    
     home_x_args = DeclareLaunchArgument(
         "home_x",
         default_value="4.0",
@@ -46,20 +47,10 @@ def generate_launch_description():
         description="Home position Z coordinate (meters, world frame)",
     )
 
-    flight_axis_arg = DeclareLaunchArgument(
-        "flight_axis",
-        default_value="north",
-        description="主飞行轴朝向: 'east' | 'north'",
-    )
-    drop_distance_arg = DeclareLaunchArgument(
-        "drop_distance",
-        default_value="32.5",
-        description="Home → 投放区距离 (m)",
-    )
-    recon_distance_arg = DeclareLaunchArgument(
-        "recon_distance",
-        default_value="57.5",
-        description="Home → 侦察区距离 (m)",
+    layout_heading_arg = DeclareLaunchArgument(
+        "layout_heading_deg",
+        default_value="0.0",
+        description="场地前方绝对方位角: 0=正北, 顺时针为正 (deg)",
     )
     vehicle_status_topic_arg = DeclareLaunchArgument(
         "vehicle_status_topic",
@@ -106,6 +97,11 @@ def generate_launch_description():
         name="vision_pipeline",
         output="screen",
         parameters=[vision_param_file, {
+            "home_x": LaunchConfiguration("home_x"),
+            "home_y": LaunchConfiguration("home_y"),
+            "layout_heading_deg": ParameterValue(
+                LaunchConfiguration("layout_heading_deg"), value_type=float,
+            ),
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
         }],
         arguments=[
@@ -139,9 +135,9 @@ def generate_launch_description():
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
             "home_z": LaunchConfiguration("home_z"),
-            "flight_axis": LaunchConfiguration("flight_axis"),
-            "drop_distance": LaunchConfiguration("drop_distance"),
-            "recon_distance": LaunchConfiguration("recon_distance"),
+            "layout_heading_deg": ParameterValue(
+                LaunchConfiguration("layout_heading_deg"), value_type=float,
+            ),
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
@@ -175,9 +171,7 @@ def generate_launch_description():
         home_x_args,
         home_y_args,
         home_z_args,
-        flight_axis_arg,
-        drop_distance_arg,
-        recon_distance_arg,
+        layout_heading_arg,
         vehicle_status_topic_arg,
         px4_bridge_node,
         vision_delayed,

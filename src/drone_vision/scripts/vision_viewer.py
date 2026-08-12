@@ -139,7 +139,13 @@ class VisionViewer(Node):
             r_px = max(0, min(bbox_width, bbox_height) // 2)
             if r_px > 2:
                 cv2.circle(frame, (u, v), r_px, (0, 255, 255), 2)
-            label = f"CYL#{c.id} r={c.radius:.2f}m {c.confidence:.2f}"
+            world_label = (
+                f" world=({c.world_x:.2f},{c.world_y:.2f})"
+                if c.world_position_valid else " world=invalid"
+            )
+            label = (
+                f"CYL#{c.id} r={c.radius:.2f}m {c.confidence:.2f}{world_label}"
+            )
             label_x = max(0, c.bbox_x1)
             label_y = max(18, c.bbox_y1 - 6)
             cv2.putText(frame, label, (label_x, label_y),
@@ -152,7 +158,11 @@ class VisionViewer(Node):
                               (m.bbox_x2, m.bbox_y2), (0, 165, 255), 2)
             mu, mv = int(m.center_u), int(m.center_v)
             cv2.circle(frame, (mu, mv), 6, (0, 165, 255), -1)
-            label = f"MARKER {m.confidence:.2f}"
+            world_label = (
+                f" world=({m.world_x:.2f},{m.world_y:.2f})"
+                if m.world_position_valid else " world=invalid"
+            )
+            label = f"MARKER {m.confidence:.2f}{world_label}"
             label_x = max(0, m.bbox_x1)
             label_y = max(18, m.bbox_y1 - 6)
             cv2.putText(frame, label, (label_x, label_y),

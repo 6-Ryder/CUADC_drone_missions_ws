@@ -4,6 +4,7 @@ from pathlib import Path
 from drone_mission.mission_state_machine import MissionFSM
 from drone_mission.states.state_drop import DropState
 from drone_mission.states.state_init import InitState
+from drone_utils.layout_frame import LayoutFrame
 
 
 class _Context:
@@ -131,6 +132,7 @@ class _FailedMissionContext:
     _drop_success_count = 0
     _drop_count = 0
     _mission_failed = True
+    layout_frame = LayoutFrame(0.0)
 
     def __init__(self):
         self._task_logger = _SummaryLogger()

@@ -53,7 +53,7 @@ class DropState:
         self._descent_progress: Optional[ProgressMonitor] = None
         self._ascend_progress: Optional[ProgressMonitor] = None
         self._alignment_progress: Optional[ProgressMonitor] = None
-        # 快速模式边伺服边下降: 下降中像素 P 控制水平对心, 到位后停速度悬停
+        # 快速模式边伺服边下降: 连续精校模式会把同一个目标锁保持至投放许可。
         self._servo_descend_active: bool = False
 
     # ---- 子状态切换 ----
@@ -173,13 +173,21 @@ class DropState:
         # 快速模式: 边伺服边下降 — 到位前每 tick 像素 P 控制水平 + 垂直下降
         if self._servo_descend_active:
             if not descent_ready:
-                self._servo_descend_tick(pos.down)
+                if self._continuous_drop_servo_enabled():
+                    self._continuous_servo_descend_tick(pos.down)
+                else:
+                    self._servo_descend_tick(pos.down)
                 return None
             self._servo_descend_active = False
-            self._fsm.fc.stop_velocity()
-            self._fsm.get_logger().info(
-                "DESCEND: 边伺服边下降到位, 悬停复查对心"
-            )
+            if self._continuous_drop_servo_enabled():
+                self._fsm.get_logger().info(
+                    "DESCEND: 连续地面误差伺服到达投放高度, 保持目标锁进入投放确认"
+                )
+            else:
+                self._fsm.fc.stop_velocity()
+                self._fsm.get_logger().info(
+                    "DESCEND: 边伺服边下降到位, 悬停复查对心"
+                )
 
         if not descent_ready and self._descent_progress is not None:
             now = time.monotonic()
@@ -281,7 +289,10 @@ class DropState:
                 self._takeover("DESCEND: precision alignment retry exhausted")
                 return None
 
-            if self._nudge_to_visible_drop_target(drop_h):
+            if self._nudge_to_visible_drop_target(
+                drop_h,
+                altitude_m=self._fsm.fc.ned_to_altitude(pos.down),
+            ):
                 return None
             if self._precision_align_failed:
                 self._precision_align_failed = False
@@ -561,12 +572,22 @@ class DropState:
             self._last_descend_log_time = now
             self._fsm.get_logger().info(message)
 
-    def _nudge_to_visible_drop_target(self, drop_h: float) -> bool:
+    def _nudge_to_visible_drop_target(
+        self,
+        drop_h: float,
+        *,
+        altitude_m: Optional[float] = None,
+        descent_speed: float = 0.0,
+        allow_release: bool = True,
+    ) -> bool:
         if self._precision_enabled():
             result = self._precision_aligner.step(
                 markers=self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else [],
                 cylinders=self._fsm.get_cylinders(),
                 drop_height=drop_h,
+                altitude_m=altitude_m,
+                descent_speed=descent_speed,
+                allow_release=allow_release,
             )
             if result == PrecisionAlignResult.CONVERGED:
                 return True
@@ -577,6 +598,27 @@ class DropState:
                 return False
             return True
         return self._visual_aligner.command_alignment(drop_h)
+
+    def _continuous_drop_servo_enabled(self) -> bool:
+        return (
+            bool(self._fsm.get_param("quick_drop_mode", False))
+            and self._precision_enabled()
+            and bool(self._fsm.get_param("precision_align_continuous_enable", False))
+        )
+
+    def _continuous_servo_descend_tick(self, down: float) -> None:
+        """Keep one ground-error controller active during the full quick descent."""
+        altitude = float(self._fsm.fc.ned_to_altitude(down))
+        if altitude > 3.0:
+            descent = float(self._fsm.get_param("drop_servo_descend_fast", 0.5))
+        else:
+            descent = float(self._fsm.get_param("drop_servo_descend_slow", 0.3))
+        self._nudge_to_visible_drop_target(
+            self._active_drop_height(),
+            altitude_m=altitude,
+            descent_speed=descent,
+            allow_release=False,
+        )
 
     def _drop_target_is_centered(self) -> bool:
         """投放许可: release_ready 锁存 + 当前帧像素误差仍在阈值内."""

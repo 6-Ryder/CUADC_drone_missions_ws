@@ -1,3 +1,5 @@
+import math
+
 from drone_mission.precision_align_controller import PrecisionAlignController
 
 
@@ -111,8 +113,9 @@ def test_default_image_y_sign_matches_cuadc_for_target_above_center():
             "confidence": 0.9,
             "center_u": 640.0,
             "center_v": 345.0,
-            "center_x": 41.7,
-            "center_y": 5.5,
+            "world_position_valid": True,
+            "world_x": 41.7,
+            "world_y": 5.5,
         }],
         drop_height=2.0,
     )
@@ -121,6 +124,28 @@ def test_default_image_y_sign_matches_cuadc_for_target_above_center():
     assert forward > 0.0
     assert abs(right) < 1e-9
     assert down == 0.0
+
+
+def test_pixel_only_precision_servo_does_not_claim_invalid_world_position():
+    fsm = _Fsm()
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+
+    controller.step(
+        markers=[],
+        cylinders=[{
+            "confidence": 0.9,
+            "center_u": 680.0,
+            "center_v": 480.0,
+            "world_position_valid": False,
+            "world_x": math.nan,
+            "world_y": math.nan,
+        }],
+        drop_height=2.0,
+    )
+
+    assert fsm.fc.body_commands
+    assert controller.last_status.target_world_xy is None
 
 
 def test_image_y_sign_can_be_overridden_for_other_camera_mounts():
@@ -134,8 +159,9 @@ def test_image_y_sign_can_be_overridden_for_other_camera_mounts():
             "confidence": 0.9,
             "center_u": 640.0,
             "center_v": 345.0,
-            "center_x": 41.7,
-            "center_y": 5.5,
+            "world_position_valid": True,
+            "world_x": 41.7,
+            "world_y": 5.5,
         }],
         drop_height=2.0,
     )
@@ -160,8 +186,9 @@ def test_locked_target_rejects_world_jump_even_when_new_marker_is_near_center():
             "confidence": 0.9,
             "center_u": 808.0,
             "center_v": 385.0,
-            "center_x": 43.03,
-            "center_y": 2.15,
+            "world_position_valid": True,
+            "world_x": 43.03,
+            "world_y": 2.15,
         }],
         drop_height=2.0,
     )
@@ -174,8 +201,9 @@ def test_locked_target_rejects_world_jump_even_when_new_marker_is_near_center():
             "confidence": 0.9,
             "center_u": 1180.0,
             "center_v": 850.0,
-            "center_x": 44.4,
-            "center_y": 4.1,
+            "world_position_valid": True,
+            "world_x": 44.4,
+            "world_y": 4.1,
         }],
         drop_height=2.0,
     )
@@ -188,8 +216,9 @@ def test_locked_target_rejects_world_jump_even_when_new_marker_is_near_center():
             "confidence": 0.9,
             "center_u": 1180.0,
             "center_v": 850.0,
-            "center_x": 44.4,
-            "center_y": 4.1,
+            "world_position_valid": True,
+            "world_x": 44.4,
+            "world_y": 4.1,
         }],
         drop_height=2.0,
     )
@@ -214,8 +243,9 @@ def test_cylinder_precision_does_not_fallback_to_marker():
             "confidence": 0.9,
             "center_u": 808.0,
             "center_v": 385.0,
-            "center_x": 43.03,
-            "center_y": 2.15,
+            "world_position_valid": True,
+            "world_x": 43.03,
+            "world_y": 2.15,
         }],
         cylinders=[],
         drop_height=2.0,
@@ -244,8 +274,9 @@ def test_release_requires_raw_pixel_error_not_just_smoothed_error():
                 "confidence": 0.9,
                 "center_u": 640.0,
                 "center_v": 480.0,
-                "center_x": 42.3,
-                "center_y": 5.5,
+                "world_position_valid": True,
+                "world_x": 42.3,
+                "world_y": 5.5,
             }],
             drop_height=2.0,
         )
@@ -257,8 +288,9 @@ def test_release_requires_raw_pixel_error_not_just_smoothed_error():
             "confidence": 0.9,
             "center_u": 698.0,
             "center_v": 480.0,
-            "center_x": 42.3,
-            "center_y": 5.5,
+            "world_position_valid": True,
+            "world_x": 42.3,
+            "world_y": 5.5,
         }],
         drop_height=2.0,
     )
@@ -282,8 +314,9 @@ def test_release_happens_only_after_stable_frames_and_brake_recheck():
         "confidence": 0.9,
         "center_u": 642.0,
         "center_v": 482.0,
-        "center_x": 42.3,
-        "center_y": 5.5,
+        "world_position_valid": True,
+        "world_x": 42.3,
+        "world_y": 5.5,
     }]
 
     assert controller.step([], target, 2.0).value == "continue"
@@ -317,8 +350,9 @@ def test_fine_alignment_uses_low_speed_cap():
             "confidence": 0.9,
             "center_u": 690.0,
             "center_v": 500.0,
-            "center_x": 42.3,
-            "center_y": 5.5,
+            "world_position_valid": True,
+            "world_x": 42.3,
+            "world_y": 5.5,
         }],
         drop_height=2.0,
     )
@@ -327,13 +361,101 @@ def test_fine_alignment_uses_low_speed_cap():
     assert (forward ** 2 + right ** 2) ** 0.5 <= 0.0200001
 
 
+def test_ground_error_is_height_invariant_for_same_physical_offset():
+    controller = PrecisionAlignController(_Fsm({
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+    }))
+
+    forward_high, right_high = controller._ground_error_m(40.0, 0.0, 2.0)
+    forward_low, right_low = controller._ground_error_m(80.0, 0.0, 1.0)
+
+    assert forward_high == forward_low == 0.0
+    assert right_high == right_low == 0.20
+
+
+def test_continuous_step_keeps_horizontal_servo_and_descent_in_one_command():
+    fsm = _Fsm({
+        "precision_align_continuous_enable": True,
+        "precision_align_ground_kp": 0.40,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "precision_align_max_speed": 1.0,
+        "precision_align_raw_pixel_tolerance": 6.0,
+        "precision_align_smooth_pixel_tolerance": 5.0,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+
+    controller.step(
+        markers=[],
+        cylinders=[{
+            "confidence": 0.9,
+            "center_u": 680.0,
+            "center_v": 480.0,
+            "world_position_valid": True,
+            "world_x": 42.3,
+            "world_y": 5.5,
+        }],
+        drop_height=2.4,
+        altitude_m=2.4,
+        descent_speed=0.28,
+        allow_release=False,
+    )
+
+    forward, right, down = fsm.fc.body_commands[-1]
+    assert forward == 0.0
+    assert right == 0.096
+    assert down == 0.28
+    assert fsm.fc.stop_count == 0
+
+
+def test_continuous_descent_keeps_correcting_inside_release_pixel_window():
+    """下降阶段不能因投放容差而暂停横向伺服。"""
+    fsm = _Fsm({
+        "precision_align_continuous_enable": True,
+        "precision_align_ground_kp": 0.40,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "precision_align_max_speed": 1.0,
+        "precision_align_raw_pixel_tolerance": 80.0,
+        "precision_align_smooth_pixel_tolerance": 80.0,
+        "precision_align_threshold_norm_x": 0.10,
+        "precision_align_threshold_norm_y": 0.10,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+
+    controller.step(
+        markers=[],
+        cylinders=[{
+            "confidence": 0.9,
+            "center_u": 680.0,  # 40 px: 在投放容差内，但仍有 0.24 m 地面偏差
+            "center_v": 480.0,
+            "world_position_valid": True,
+            "world_x": 42.3,
+            "world_y": 5.5,
+        }],
+        drop_height=2.4,
+        altitude_m=2.4,
+        descent_speed=0.28,
+        allow_release=False,
+    )
+
+    forward, right, down = fsm.fc.body_commands[-1]
+    assert forward == 0.0
+    assert right == 0.096
+    assert down == 0.28
+
+
 def _window_target(center_u=640.0, center_v=480.0):
     return [{
         "confidence": 0.9,
         "center_u": center_u,
         "center_v": center_v,
-        "center_x": 42.3,
-        "center_y": 5.5,
+        "world_position_valid": True,
+        "world_x": 42.3,
+        "world_y": 5.5,
     }]
 
 

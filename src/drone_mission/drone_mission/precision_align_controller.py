@@ -34,6 +34,10 @@ class PrecisionAlignStatus:
     target_world_xy: Optional[Tuple[float, float]] = None
     command_forward: float = 0.0
     command_right: float = 0.0
+    ground_forward_error_m: float = 0.0
+    ground_right_error_m: float = 0.0
+    altitude_m: float = 0.0
+    continuous: bool = False
     release_ready: bool = False
     reason: str = ""
 
@@ -108,6 +112,13 @@ class PrecisionAlignController:
     def _field(obj: Any, key: str, default=0.0):
         return getattr(obj, key, obj.get(key, default) if isinstance(obj, dict) else default)
 
+    def _world_xy(self, target: Any) -> Optional[Tuple[float, float]]:
+        if not bool(self._field(target, "world_position_valid", False)):
+            return None
+        wx = float(self._field(target, "world_x", math.nan))
+        wy = float(self._field(target, "world_y", math.nan))
+        return (wx, wy) if math.isfinite(wx) and math.isfinite(wy) else None
+
     def _now(self) -> float:
         return self._fsm.get_clock().now().nanoseconds / 1e9
 
@@ -138,26 +149,63 @@ class PrecisionAlignController:
             return float(self._param("precision_align_final_raw_pixel_tolerance", 30.0))
         return float(self._param("precision_align_raw_pixel_tolerance", 9.0))
 
-    def step(self, markers: list, cylinders: list, drop_height: float) -> PrecisionAlignResult:
+    def _ground_error_m(
+        self, du: float, dv: float, altitude_m: float,
+    ) -> Tuple[float, float]:
+        """Return signed (forward, right) target error in metres.
+
+        Pixel offsets grow as the aircraft descends.  Converting them with
+        the current altitude keeps the physical P-controller gain constant
+        throughout quick drop descent.
+        """
+        fx = max(float(self._param("camera_fx", 400.0)), 1.0)
+        fy = max(float(self._param("camera_fy", 400.0)), 1.0)
+        altitude = max(float(altitude_m), 0.05)
+        y_to_forward_sign = float(
+            self._param("precision_align_image_y_to_forward_sign", -1.0)
+        )
+        return (
+            y_to_forward_sign * float(dv) * altitude / fy,
+            float(du) * altitude / fx,
+        )
+
+    def step(
+        self,
+        markers: list,
+        cylinders: list,
+        drop_height: float,
+        *,
+        altitude_m: Optional[float] = None,
+        descent_speed: float = 0.0,
+        allow_release: bool = True,
+    ) -> PrecisionAlignResult:
         """Run one alignment tick."""
         now = self._now()
+        continuous = (
+            bool(self._param("precision_align_continuous_enable", False))
+            and altitude_m is not None
+        )
+        altitude = float(altitude_m) if altitude_m is not None else 0.0
 
-        if now < self._active_until:
+        if not continuous and now < self._active_until:
             self._fsm.fc.set_velocity_body(self._last_forward, self._last_right, 0.0)
             return PrecisionAlignResult.CONTINUE
 
-        if self._active_until > 0.0:
+        if not continuous and self._active_until > 0.0:
             self._fsm.fc.stop_velocity()
             self._active_until = 0.0
             self._hover_until = now + float(self._param("precision_align_hover_s", 0.04))
             return PrecisionAlignResult.CONTINUE
 
-        if now < self._hover_until:
+        if not continuous and now < self._hover_until:
             self._fsm.fc.stop_velocity()
             return PrecisionAlignResult.CONTINUE
 
         if now < self._brake_until:
-            self._fsm.fc.stop_velocity()
+            if continuous:
+                self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            else:
+                self._fsm.fc.stop_velocity()
             return PrecisionAlignResult.CONTINUE
 
         target, source, reason = self._choose_target(markers, cylinders)
@@ -208,13 +256,21 @@ class PrecisionAlignController:
         smooth_pixel_error = math.hypot(self._smooth_dx * width, self._smooth_dy * height)
         raw_tol = self._raw_tolerance(drop_height)
         aligned = self._is_precise(pixel_error, smooth_pixel_error, raw_dx, raw_dy, raw_tol)
-        self._stable_count = self._stable_count + 1 if aligned else 0
-        if not aligned:
+        if allow_release:
+            self._stable_count = self._stable_count + 1 if aligned else 0
+        else:
+            self._stable_count = 0
+        if not aligned or not allow_release:
             self._brake_until = 0.0
             self._release_ready = False
 
-        wx = float(self._field(target, "center_x", 0.0))
-        wy = float(self._field(target, "center_y", 0.0))
+        smooth_du = float(self._smooth_dx) * width
+        smooth_dv = float(self._smooth_dy) * height
+        ground_forward_error_m, ground_right_error_m = self._ground_error_m(
+            smooth_du, smooth_dv, altitude,
+        ) if continuous else (0.0, 0.0)
+
+        target_world_xy = self._world_xy(target)
         self._last_status = PrecisionAlignStatus(
             source=source,
             pixel_error=pixel_error,
@@ -225,13 +281,17 @@ class PrecisionAlignController:
             smooth_dy_norm=float(self._smooth_dy),
             stable_count=self._stable_count,
             lost_frames=0,
-            target_world_xy=(wx, wy),
+            target_world_xy=target_world_xy,
+            ground_forward_error_m=ground_forward_error_m,
+            ground_right_error_m=ground_right_error_m,
+            altitude_m=altitude,
+            continuous=continuous,
             release_ready=False,
             reason=reason,
         )
 
         stable_frames = int(self._param("precision_align_stable_frames", 5))
-        if self._stable_count >= stable_frames:
+        if allow_release and self._stable_count >= stable_frames:
             self._fsm.fc.stop_velocity()
             if not self._release_ready and self._brake_until <= 0.0:
                 brake_s = float(self._param("precision_align_final_brake_s", 0.5))
@@ -259,23 +319,55 @@ class PrecisionAlignController:
             self._maybe_log_tracking()
             return PrecisionAlignResult.CONTINUE
 
+        # The release tolerance is deliberately not a descent deadband.  A
+        # 40 px offset can be acceptable at the release height yet represent a
+        # much larger ground offset higher up, so keep horizontal correction
+        # active until the height handoff.
+        if continuous and not allow_release:
+            ground_kp = float(self._param("precision_align_ground_kp", 0.40))
+            forward = ground_kp * ground_forward_error_m
+            right = ground_kp * ground_right_error_m
+            forward, right = self._limit_vector(
+                forward, right, pixel_error, raw_tol, continuous=True,
+            )
+            self._last_forward = forward
+            self._last_right = right
+            self._last_status.command_forward = forward
+            self._last_status.command_right = right
+            self._last_status.reason = "descending_tracking"
+            self._maybe_log_tracking()
+            self._fsm.fc.set_velocity_body(forward, right, descent_speed)
+            return PrecisionAlignResult.CONTINUE
+
         if aligned:
             self._fsm.fc.stop_velocity()
             self._last_status.reason = "collecting_stable_frames"
             return PrecisionAlignResult.CONTINUE
 
-        gain = float(self._param("precision_align_gain", 1.25))
-        x_to_right_sign = float(self._param("precision_align_image_x_to_right_sign", 1.0))
-        y_to_forward_sign = float(self._param("precision_align_image_y_to_forward_sign", -1.0))
-        forward = y_to_forward_sign * gain * float(self._smooth_dy)
-        right = x_to_right_sign * gain * float(self._smooth_dx)
-        forward, right = self._limit_vector(forward, right, pixel_error, raw_tol)
+        if continuous:
+            ground_kp = float(self._param("precision_align_ground_kp", 0.40))
+            forward = ground_kp * ground_forward_error_m
+            right = ground_kp * ground_right_error_m
+            forward, right = self._limit_vector(
+                forward, right, pixel_error, raw_tol, continuous=True,
+            )
+        else:
+            gain = float(self._param("precision_align_gain", 1.25))
+            x_to_right_sign = float(self._param("precision_align_image_x_to_right_sign", 1.0))
+            y_to_forward_sign = float(self._param("precision_align_image_y_to_forward_sign", -1.0))
+            forward = y_to_forward_sign * gain * float(self._smooth_dy)
+            right = x_to_right_sign * gain * float(self._smooth_dx)
+            forward, right = self._limit_vector(forward, right, pixel_error, raw_tol)
 
         self._last_forward = forward
         self._last_right = right
         self._last_status.command_forward = forward
         self._last_status.command_right = right
         self._maybe_log_tracking()
+
+        if continuous:
+            self._fsm.fc.set_velocity_body(forward, right, descent_speed)
+            return PrecisionAlignResult.CONTINUE
 
         if pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
             step_s = float(self._param("precision_align_fine_step_s", 0.12))
@@ -309,8 +401,11 @@ class PrecisionAlignController:
         right: float,
         pixel_error: float,
         raw_tol: float,
+        continuous: bool = False,
     ) -> Tuple[float, float]:
-        if pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
+        if continuous:
+            max_speed = float(self._param("precision_align_max_speed", 0.25))
+        elif pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
             max_speed = float(self._param("precision_align_fine_max_speed", 0.065))
         else:
             max_speed = float(self._param("precision_align_max_speed", 0.25))
@@ -381,16 +476,18 @@ class PrecisionAlignController:
             v = float(self._field(target, "center_v", cy))
             center_ratio = math.hypot(u - cx, v - cy) / diag
 
-            wx = float(self._field(target, "center_x", 0.0))
-            wy = float(self._field(target, "center_y", 0.0))
+            world_xy = self._world_xy(target)
             world_ratio = 0.0
             world_error = None
             if self._target_hint_xy is not None and self._locked_pixel_uv is None:
-                tx, ty = self._target_hint_xy
-                world_error = math.hypot(wx - tx, wy - ty)
-                if world_error > world_gate:
-                    continue
-                world_ratio = min(world_error / max(world_gate, 0.01), 1.0)
+                if world_xy is None:
+                    world_ratio = 1.0
+                else:
+                    tx, ty = self._target_hint_xy
+                    world_error = math.hypot(world_xy[0] - tx, world_xy[1] - ty)
+                    if world_error > world_gate:
+                        continue
+                    world_ratio = min(world_error / max(world_gate, 0.01), 1.0)
 
             continuity_ratio = center_ratio
             if self._locked_pixel_uv is not None:
@@ -424,17 +521,20 @@ class PrecisionAlignController:
         _, selected, source = min(scored, key=lambda item: item[0])
         u = float(self._field(selected, "center_u", cx))
         v = float(self._field(selected, "center_v", cy))
-        wx = float(self._field(selected, "center_x", 0.0))
-        wy = float(self._field(selected, "center_y", 0.0))
+        selected_world_xy = self._world_xy(selected)
 
         if self._locked_pixel_uv is None:
+            world_label = (
+                f"({selected_world_xy[0]:.2f},{selected_world_xy[1]:.2f})"
+                if selected_world_xy is not None else "invalid"
+            )
             self._fsm.get_logger().info(
                 "PREC_ALIGN: 锁定低空精校目标 "
-                f"source={source} pixel=({u:.0f},{v:.0f}) world=({wx:.2f},{wy:.2f})"
+                f"source={source} pixel=({u:.0f},{v:.0f}) world={world_label}"
             )
 
         self._locked_pixel_uv = (u, v)
-        self._locked_world_xy = (wx, wy)
+        self._locked_world_xy = selected_world_xy
         self._locked_source = source
         return selected, source, "tracking"
 
@@ -445,12 +545,18 @@ class PrecisionAlignController:
             return
         self._last_log_time = now
         s = self._last_status
+        world_label = (
+            f"({s.target_world_xy[0]:.2f},{s.target_world_xy[1]:.2f})"
+            if s.target_world_xy is not None else "invalid"
+        )
         self._fsm.get_logger().info(
             "PREC_ALIGN: "
             f"source={s.source} pixel_error={s.pixel_error:.1f}px "
             f"raw=({s.raw_dx_norm:+.4f},{s.raw_dy_norm:+.4f}) "
             f"smooth=({s.smooth_dx_norm:+.4f},{s.smooth_dy_norm:+.4f}) "
-            f"world=({s.target_world_xy[0]:.2f},{s.target_world_xy[1]:.2f}) "
+            f"world={world_label} "
+            f"ground=({s.ground_forward_error_m:+.3f},{s.ground_right_error_m:+.3f})m "
+            f"alt={s.altitude_m:.2f}m continuous={s.continuous} "
             f"stable={s.stable_count} cmd=({s.command_forward:+.3f},{s.command_right:+.3f})"
         )
 

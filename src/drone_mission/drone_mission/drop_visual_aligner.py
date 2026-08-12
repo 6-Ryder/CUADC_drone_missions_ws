@@ -111,6 +111,13 @@ class DropVisualAligner:
             return None
         return selected_positions[-1]
 
+    def _world_xy(self, target: Any) -> Optional[Tuple[float, float]]:
+        if not bool(self._field(target, "world_position_valid", False)):
+            return None
+        wx = float(self._field(target, "world_x", math.nan))
+        wy = float(self._field(target, "world_y", math.nan))
+        return (wx, wy) if math.isfinite(wx) and math.isfinite(wy) else None
+
     def _current_targets(self) -> Tuple[list, str]:
         # 低空 (2m) marker 检测比 cylinder 稳定得多 — 优先用 marker
         markers = self._fsm.get_markers() if hasattr(self._fsm, "get_markers") else []
@@ -149,18 +156,23 @@ class DropVisualAligner:
             conf = float(self._field(target, "confidence", 0.0))
             if conf < 0.25:
                 continue
-            wx = float(self._field(target, "center_x", 0.0))
-            wy = float(self._field(target, "center_y", 0.0))
+            world_xy = self._world_xy(target)
 
             # 已锁定目标 → 只接受同一物理 marker (世界坐标在容差内)
             if self._locked_target_xy is not None:
+                if world_xy is None:
+                    continue
+                wx, wy = world_xy
                 lx, ly = self._locked_target_xy
                 if math.hypot(wx - lx, wy - ly) > lock_tolerance:
                     continue
 
-            world_error = math.hypot(wx - tx, wy - ty)
             du, dv = self._pixel_delta(target)
             pixel_error = math.hypot(du, dv)
+            world_error = (
+                math.hypot(world_xy[0] - tx, world_xy[1] - ty)
+                if world_xy is not None else float("inf")
+            )
 
             pixel_gate = float(
                 self._fsm.get_param("drop_align_pixel_tolerance", 35.0)
@@ -185,12 +197,16 @@ class DropVisualAligner:
 
         # 第一次选到目标 → 锁定
         if self._locked_target_xy is None:
-            wx = float(self._field(best, "center_x", 0.0))
-            wy = float(self._field(best, "center_y", 0.0))
-            self._locked_target_xy = (wx, wy)
-            self._fsm.get_logger().info(
-                f"DESCEND_ALIGN: 锁定目标 world=({wx:.2f},{wy:.2f}) src={source}"
-            )
+            best_world_xy = self._world_xy(best)
+            if best_world_xy is not None:
+                self._locked_target_xy = best_world_xy
+                self._fsm.get_logger().info(
+                    "DESCEND_ALIGN: 锁定目标 "
+                    f"world=({best_world_xy[0]:.2f},{best_world_xy[1]:.2f}) "
+                    f"src={source}"
+                )
+
+        selected_world_xy = self._world_xy(best)
 
         return best, VisualAlignStatus(
             source=source,
@@ -198,8 +214,7 @@ class DropVisualAligner:
             pixel_du=best_du,
             pixel_dv=best_dv,
             world_error_to_memory=best_world,
-            target_world_xy=(float(self._field(best, "center_x", tx)),
-                             float(self._field(best, "center_y", ty))),
+            target_world_xy=selected_world_xy,
             stable_count=self._stable_count,
         )
 
@@ -274,7 +289,7 @@ class DropVisualAligner:
         """主入口. 返回是否发送了 setpoint."""
         target, status = self._choose_target()
         self._last_status = status
-        if target is None or status.target_world_xy is None:
+        if target is None:
             return False
 
         if self._phase == ServoPhase.BRAKING:

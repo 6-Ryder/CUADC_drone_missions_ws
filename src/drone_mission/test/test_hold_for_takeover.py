@@ -4,6 +4,7 @@ import importlib.util
 
 from drone_mission.mission_state_machine import MissionFSM, MissionState
 from drone_mission.states.state_init import InitState
+from drone_utils.layout_frame import LayoutFrame
 
 
 class _Logger:
@@ -157,6 +158,7 @@ class _CompletionFSM:
         self._drop_success_count = 2
         self._drop_count = 2
         self._recon_path_completed = True
+        self.layout_frame = LayoutFrame(0.0)
         self._task_logger = _TaskLogger()
         self._logger = _Logger()
 

@@ -9,5 +9,6 @@ from drone_utils.config_loader import load_config
 from drone_utils.logger import TaskLogger
 from drone_utils.watchdog import Watchdog
 from drone_utils.emergency import EmergencyHandler
+from drone_utils.layout_frame import LayoutFrame
 
-__all__ = ["load_config", "TaskLogger", "Watchdog", "EmergencyHandler"]
+__all__ = ["load_config", "TaskLogger", "Watchdog", "EmergencyHandler", "LayoutFrame"]

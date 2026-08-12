@@ -63,13 +63,13 @@ def generate_launch_description():
         "recon_altitude", default_value="2.5",
         description="Phase 2: 侦察扫描高度 (m)",
     )
-    recon_half_north_arg = DeclareLaunchArgument(
-        "recon_area_half_north", default_value="2.5",
-        description="侦察区 north 半宽 (m), 对齐主任务 Area2 5m",
+    recon_half_forward_arg = DeclareLaunchArgument(
+        "recon_area_half_forward", default_value="2.5",
+        description="侦察区 local forward 半宽 (m), 对齐主任务 Area2 5m",
     )
-    recon_half_east_arg = DeclareLaunchArgument(
-        "recon_area_half_east", default_value="4.0",
-        description="侦察区 east 半宽 (m), 对齐主任务 Area2 8m",
+    recon_half_right_arg = DeclareLaunchArgument(
+        "recon_area_half_right", default_value="4.0",
+        description="侦察区 local right 半宽 (m), 对齐主任务 Area2 8m",
     )
     sweep_speed_arg = DeclareLaunchArgument(
         "sweep_speed", default_value="1.2",
@@ -78,6 +78,14 @@ def generate_launch_description():
     grid_spacing_arg = DeclareLaunchArgument(
         "grid_spacing", default_value="1.67",
         description="弓字形条带间距 (m), 对齐 PathPlanner 默认",
+    )
+    sweep_margin_forward_arg = DeclareLaunchArgument(
+        "sweep_margin_forward", default_value="0.5",
+        description="规划器 local forward 边距 (m)",
+    )
+    sweep_margin_right_arg = DeclareLaunchArgument(
+        "sweep_margin_right", default_value="0.5",
+        description="规划器 local right 边距 (m)",
     )
     rc_require_arg = DeclareLaunchArgument(
         "rc_require_arm_signal", default_value="true",
@@ -172,10 +180,12 @@ def generate_launch_description():
             "forward_distance": LaunchConfiguration("forward_distance"),
             "transit_speed": LaunchConfiguration("transit_speed"),
             "recon_altitude": LaunchConfiguration("recon_altitude"),
-            "recon_area_half_north": LaunchConfiguration("recon_area_half_north"),
-            "recon_area_half_east": LaunchConfiguration("recon_area_half_east"),
+            "recon_area_half_forward": LaunchConfiguration("recon_area_half_forward"),
+            "recon_area_half_right": LaunchConfiguration("recon_area_half_right"),
             "sweep_speed": LaunchConfiguration("sweep_speed"),
             "grid_spacing": LaunchConfiguration("grid_spacing"),
+            "sweep_margin_forward": LaunchConfiguration("sweep_margin_forward"),
+            "sweep_margin_right": LaunchConfiguration("sweep_margin_right"),
             "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
             "return_altitude": LaunchConfiguration("return_altitude"),
             "camera_cx": 320.0,
@@ -204,10 +214,12 @@ def generate_launch_description():
         forward_distance_arg,
         transit_speed_arg,
         recon_altitude_arg,
-        recon_half_north_arg,
-        recon_half_east_arg,
+        recon_half_forward_arg,
+        recon_half_right_arg,
         sweep_speed_arg,
         grid_spacing_arg,
+        sweep_margin_forward_arg,
+        sweep_margin_right_arg,
         rc_require_arg,
         return_altitude_arg,
         vision_params_arg,

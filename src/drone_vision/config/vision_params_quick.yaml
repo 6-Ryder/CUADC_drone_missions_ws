@@ -1,0 +1,9 @@
+/vision_pipeline:
+  ros__parameters:
+    # 快速策略专用：YOLO 建锁/低频守护，OpenCV 跟踪圆形落区中心。
+    landing_circle_track_enable: true
+    landing_circle_tracker_roi_padding_px: 48
+    landing_circle_tracker_min_edge_margin_px: 12.0
+    landing_circle_tracker_max_center_jump_px: 80.0
+    landing_circle_tracker_max_radius_change_ratio: 0.35
+    landing_yolo_guard_rate_hz: 2.0

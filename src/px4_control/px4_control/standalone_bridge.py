@@ -150,6 +150,7 @@ class StandaloneBridge:
         self._target_speed: Optional[float] = None
         self._velocity_mode: bool = False
         self._vel_target: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self._vel_yaw_rate: float = 0.0
 
         # ---- 指令限流: 防止 DDS 丢包/节点重启时以 20Hz 轰炸飞控 ----
         self._last_arm_cmd_time: float = 0.0
@@ -211,6 +212,7 @@ class StandaloneBridge:
                 msg.linear.x = float(self._vel_target[0])
                 msg.linear.y = float(self._vel_target[1])
                 msg.linear.z = float(self._vel_target[2])
+                msg.angular.z = float(self._vel_yaw_rate)
                 self._vel_pub.publish(msg)
             elif self._target_ned is not None:
                 msg = NedPositionSetpoint()
@@ -432,6 +434,7 @@ class StandaloneBridge:
             self._target_ned = None
             self._target_speed = None
             self._vel_target = (float(vn), float(ve), float(vd))
+            self._vel_yaw_rate = float(yaw_rate)
 
     def hold_for_takeover(self) -> None:
         """Atomically replace the active target with a zero-velocity hold."""
@@ -442,6 +445,7 @@ class StandaloneBridge:
             self._target_speed = None
             self._velocity_mode = True
             self._vel_target = (0.0, 0.0, 0.0)
+            self._vel_yaw_rate = 0.0
 
     def stop_autonomous_output(self) -> None:
         """Latch setpoint output off and clear every position/velocity target."""
@@ -451,6 +455,7 @@ class StandaloneBridge:
             self._target_speed = None
             self._velocity_mode = False
             self._vel_target = (0.0, 0.0, 0.0)
+            self._vel_yaw_rate = 0.0
             self._publish_autonomy_lease_locked()
 
     def _publish_autonomy_lease_locked(self) -> None:

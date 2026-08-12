@@ -60,9 +60,11 @@ class CylinderApproachState:
         else:
             # 回退: 直接选第一个圆柱
             c = targets[0]
-            cx = c.center_x if hasattr(c, 'center_x') else c.get('center_x', 0)
-            cy = c.center_y if hasattr(c, 'center_y') else c.get('center_y', 0)
-            self._target_world_xy = (cx, cy)
+            self._target_world_xy = self._world_xy(c)
+
+        if self._target_world_xy is None:
+            self._fsm.get_logger().warn("APPROACH: 目标没有有效 World 坐标")
+            return
 
         self._fsm.get_logger().info(
             f"APPROACH: 目标位置 World({self._target_world_xy[0]:.2f}, {self._target_world_xy[1]:.2f})"
@@ -98,44 +100,19 @@ class CylinderApproachState:
     def _field(obj, key: str, default=0.0):
         return getattr(obj, key, obj.get(key, default) if isinstance(obj, dict) else default)
 
+    def _world_xy(self, target) -> Optional[tuple]:
+        if not bool(self._field(target, "world_position_valid", False)):
+            return None
+        wx = float(self._field(target, "world_x", math.nan))
+        wy = float(self._field(target, "world_y", math.nan))
+        return (wx, wy) if math.isfinite(wx) and math.isfinite(wy) else None
+
     def _pixel_error(self, cyl) -> tuple:
         u = float(self._field(cyl, "center_u", 0.0))
         v = float(self._field(cyl, "center_v", 0.0))
         img_cx = float(self._fsm.get_param("camera_cx", 640.0))
         img_cy = float(self._fsm.get_param("camera_cy", 480.0))
         return u - img_cx, v - img_cy
-
-    def _goto_pixel_centered_target(self, cyl, speed: float) -> float:
-        """Move the drone over the detected cylinder and return current pixel error."""
-        from px4_control.telemetry import ned_to_world, world_to_ned
-
-        du, dv = self._pixel_error(cyl)
-        pos = self._fsm.bridge.get_current_position()
-        drone_wx, drone_wy, _ = ned_to_world(pos.north, pos.east, pos.down)
-        alt = max(abs(self._fsm.fc.ned_to_altitude(pos.down)), 0.5)
-        fx = float(self._fsm.get_param("camera_fx", 539.9))
-        fy = float(self._fsm.get_param("camera_fy", 539.9))
-        gain = float(self._fsm.get_param("cylinder_approach_pixel_gain", 0.65))
-        max_step = float(self._fsm.get_param("cylinder_approach_max_step", 0.45))
-        # 方向约定 (image_top_faces_forward=True, 真机画面顶朝机头):
-        #   u+ → 东, v+ → 南 (机尾方向).
-        # 与 landing_servo_y_to_forward_sign=-1 及 pixel_to_world 一致.
-        # False (gz SITL): v+ → 北, 保持旧行为.
-        v_sign = -1.0 if self._fsm.get_param("image_top_faces_forward", True) else 1.0
-        step_x = max(-max_step, min(max_step, gain * du * alt / fx))
-        step_y = max(-max_step, min(max_step, v_sign * gain * dv * alt / fy))
-        target_wx = drone_wx + step_x
-        target_wy = drone_wy + step_y
-
-        if hasattr(self._fsm, "is_in_drop_zone_world"):
-            if not self._fsm.is_in_drop_zone_world(target_wx, target_wy, margin=0.75):
-                # 不让像素伺服把飞机带出投放区, 但仍返回误差用于日志。
-                target_wx, target_wy = self._target_world_xy
-
-        tn, te, _ = world_to_ned(target_wx, target_wy, 0.0)
-        hold_alt = self._fsm.get_param("area1_search_altitude", 5.0)
-        self._fsm.fc.goto_ned(tn, te, self._fsm.fc.altitude_to_ned(hold_alt), speed=speed)
-        return (du * du + dv * dv) ** 0.5
 
     def _find_nearest_cylinder(self, cylinders: list) -> Optional[object]:
         """用位置匹配找最近的圆柱 (不用 ID, 因为 vision 每帧重新分配)."""
@@ -147,8 +124,10 @@ class CylinderApproachState:
         tx, ty = self._target_world_xy
         best, best_dist = None, float('inf')
         for c in targets:
-            cx = c.center_x if hasattr(c, 'center_x') else c.get('center_x', 0)
-            cy = c.center_y if hasattr(c, 'center_y') else c.get('center_y', 0)
+            world_xy = self._world_xy(c)
+            if world_xy is None:
+                continue
+            cx, cy = world_xy
             d = math.hypot(cx - tx, cy - ty)
             if d < best_dist and d < max_dist:
                 best, best_dist = c, d

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from drone_mission.states.state_drop import DropState
 from drone_mission.states.state_precision_land import PrecisionLandState
 from drone_mission.states.state_takeoff import TakeoffState
@@ -139,6 +141,40 @@ def test_takeoff_waits_for_confirmed_offboard(monkeypatch):
     assert fsm.offboard_confirmations == 1
 
 
+def test_takeoff_reports_control_loop_gap_while_climbing(monkeypatch):
+    """A delayed mission callback must leave a diagnostic trace after recovery."""
+    class _RecordingLogger:
+        def __init__(self):
+            self.errors = []
+
+        def info(self, _message):
+            pass
+
+        def warn(self, _message):
+            pass
+
+        def error(self, message):
+            self.errors.append(message)
+
+    fsm = _FSM()
+    logger = _RecordingLogger()
+    fsm.get_logger = lambda: logger
+    fsm.bridge.get_current_position = lambda: type("P", (), {"down": 0.0})()
+    state = TakeoffState(fsm)
+    state._sub_phase = state.SUB_CLIMB
+    state._start_time = 0.0
+    state._last_control_tick_monotonic = 10.0
+    monkeypatch.setattr(
+        "drone_mission.states.state_takeoff.time.monotonic", lambda: 12.0,
+    )
+    monkeypatch.setattr(
+        "drone_mission.states.state_takeoff.time.time", lambda: 2.0,
+    )
+
+    assert state.execute() is None
+    assert any("control-loop gap" in message for message in logger.errors)
+
+
 def test_takeoff_prestreams_a_hold_before_requesting_offboard(monkeypatch):
     fsm = _FSM()
     state = TakeoffState(fsm)
@@ -268,6 +304,80 @@ def test_flight_controller_takeoff_sets_same_target_for_altitude():
     assert bridge._target[0] == 1.0  # north preserved
     assert bridge._target[1] == 2.0  # east preserved
     assert bridge._target[2] == -5.0  # altitude=5 → NED down=-5
+
+
+def test_flight_controller_uses_task_yaw_for_takeoff_loiter_and_default_goto():
+    """Task yaw is used by position commands that do not override it."""
+    from px4_control.flight_controller import FlightController
+
+    class RecordingBridge:
+        def __init__(self):
+            self.position = Position(north=1.0, east=2.0, down=0.0)
+            self.position_calls = []
+            self.offboard = False
+
+        def get_parameter(self, _name):
+            return type("Parameter", (), {"value": 5.0})()
+
+        def is_offboard(self):
+            return self.offboard
+
+        def set_offboard_mode(self):
+            self.offboard = True
+
+        def get_current_position(self):
+            return self.position
+
+        def set_position_target(self, north, east, down, yaw=0.0, speed=None):
+            self.position_calls.append((north, east, down, yaw, speed))
+
+    bridge = RecordingBridge()
+    fc = FlightController(bridge, task_yaw=0.8726646259971648)
+    bridge.offboard = True
+
+    fc.takeoff(5.0)
+    fc.loiter()
+    fc.goto_ned(10.0, 3.0, -5.0)
+
+    assert [call[3] for call in bridge.position_calls] == pytest.approx([
+        0.8726646259971648,
+        0.8726646259971648,
+        0.8726646259971648,
+    ])
+
+
+def test_flight_controller_task_yaw_defaults_validates_and_allows_override():
+    """Task yaw has a safe default and explicit waypoint yaw takes precedence."""
+    from px4_control.flight_controller import FlightController
+
+    class RecordingBridge:
+        def __init__(self):
+            self.position_calls = []
+
+        def get_parameter(self, _name):
+            return type("Parameter", (), {"value": 5.0})()
+
+        def set_position_target(self, *args, **kwargs):
+            self.position_calls.append((args, kwargs))
+
+    bridge = RecordingBridge()
+    default_fc = FlightController(bridge)
+    assert default_fc.task_yaw == 0.0
+
+    fc = FlightController(bridge, task_yaw=0.8726646259971648)
+    assert fc.task_yaw == pytest.approx(0.8726646259971648)
+    fc.goto_world(2.0, 3.0, 4.0)
+    fc.goto_ned(10.0, 3.0, -5.0, yaw=-0.5)
+
+    assert bridge.position_calls[-2] == ((3.0, 2.0, -4.0, 0.8726646259971648), {
+        "speed": 1.0,
+    })
+    assert bridge.position_calls[-1] == ((10.0, 3.0, -5.0, -0.5), {"speed": 1.0})
+
+    with pytest.raises(ValueError, match="task yaw must be finite"):
+        FlightController(bridge, task_yaw=float("nan"))
+    with pytest.raises(ValueError, match="task yaw must be finite"):
+        FlightController(bridge, task_yaw=float("inf"))
 
 
 def test_precision_land_blind_descent_stays_offboard_and_can_trigger_land_detector(

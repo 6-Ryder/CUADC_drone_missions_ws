@@ -26,14 +26,14 @@ PX4 飞控                    drone_servo2 舵机投放
 
 按下面顺序阅读：
 
-1. `scripts/start_full_simulation.sh`：准备场景、清理旧运行、启动 PX4、Gazebo 图像桥和 ROS 2 launch，并建立日志目录。
+1. `scripts/start_quick_simulation.sh` / `scripts/start_full_simulation.sh`：分别启动快速权威策略和主任务策略；两者都从 `layout_heading_deg` 生成运行时场地、PX4 初始 Gazebo yaw 和 ROS launch，并建立日志目录。
 2. `scripts/sitl_env.sh`：加载 ROS 2 和工作区，再把隔离构建的 v4 `px4_msgs` overlay 放到环境前端。
-3. `src/drone_bringup/launch/sitl.launch.py`：组合 `px4_bridge`、`vision_pipeline`、`servo_controller` 和 `mission_fsm`，并覆盖 SITL 的 Home、方向和 v4 状态话题。
+3. `src/drone_bringup/launch/quick_sitl.launch.py` / `sitl.launch.py`：组合相同节点，但分别加载快速与主任务参数；两者都覆盖 SITL 的 Home、`layout_heading_deg` 和 v4 状态话题。
 4. `src/drone_bringup/scripts/gz_camera_bridge.py`：把 Gazebo 图像转换成 `/drone/camera/image_raw` 和相机信息。
 
 ### 2.2 真机启动链
 
-1. `scripts/start_full_real_mission.sh`：清理旧进程、启动唯一 MicroXRCEAgent（UDP `8888`）并等待 DDS 就绪，再调用 `src/drone_bringup/launch/real_flight.launch.py` 启动 V4L2 相机、PX4 bridge、视觉、舵机和完整任务 FSM。
+1. `scripts/start_quick_mission_real.sh` / `scripts/start_full_real_mission.sh`：分别启动快速和主任务真机流程；它们启动唯一 MicroXRCEAgent（UDP `8888`）并等待 DDS 就绪，再调用 `quick_flight.launch.py` / `real_flight.launch.py`。两者接受同一个 `layout_heading_deg`，但真机场地方位必须由操作者实地确认。
 2. `src/drone_vision/drone_vision/camera.py`：读取 V4L2 设备并发布标准 ROS 图像话题。
 3. PX4 通过以太网 UDP 向 Jetson 的 `MicroXRCEAgent udp4 -p 8888` 建立 DDS；相机则独立通过 USB 接入 Jetson。
 4. 真机使用工作区默认 v1 `px4_msgs` 和 `/fmu/out/vehicle_status_v1`；任务逻辑仍与 SITL 共用。
@@ -65,6 +65,10 @@ PX4 飞控                    drone_servo2 舵机投放
 
 这里最容易误解的是：任务 FSM 和 `px4_bridge` 是不同 ROS 2 进程。FSM 通常使用 `StandaloneBridge`，`px4_bridge` 再把 ROS 命令转发给 PX4；不要把两者当作一个类调用链。
 
+第二个关键不变量是任务 yaw：`layout_heading_deg` 在启动时转换为一个绝对 NED
+yaw。起飞、位置航点、视觉速度和接管悬停都保持该 yaw；起飞时与爬升并行转向，
+不设置 yaw 放行门或单独对准状态。
+
 ### 3.3 `drone_vision`：从管线入口向内读
 
 推荐顺序：
@@ -90,6 +94,11 @@ PX4 飞控                    drone_servo2 舵机投放
 ```
 
 进入侦察阶段后由模式服务停止不需要的投放检测并释放模型。阅读性能或显存问题时，应沿 `set_mode → _release_detection_models → engine.close()` 跟踪，而不是只看模型加载函数。
+
+圆筒和标识物的可导航坐标只有一种语义：`world_position_valid=true` 时
+`world_x/world_y` 才是 World 坐标。视觉必须有新鲜 6-DoF pose 才能发布该坐标；
+无有效 pose 时仍可发布像素检测，但任务不得把它记为世界目标，也不能回退到
+“默认朝北”的简化投影。
 
 ### 3.4 `drone_mission`：从状态机向状态实现展开
 
@@ -119,6 +128,10 @@ PX4 飞控                    drone_servo2 舵机投放
 - `precision_align_controller.py`：投放区像素闭环精校；
 - `drop_visual_aligner.py`：旧的梯度探测式对齐实现，主要作为回退/独立实现理解；
 - `simple_mission.py`：简化 smoke test，不是完整任务 FSM。
+
+`LayoutFrame`（`drone_utils/layout_frame.py`）是所有任务几何的唯一入口：局部
+`forward/right` 先转换为 NED，再转换为 World。投放区与侦察区均是旋转后的局部
+矩形，不能以 World 轴对齐外接框替代边界判定。
 
 ## 4. 一次完整任务的调用链
 
@@ -175,6 +188,11 @@ PX4 飞控                    drone_servo2 舵机投放
 ### 第六阶段：再看真机差异
 
 最后阅读 `real_flight.launch.py`、`scripts/sitl_env.sh`、`standalone_bridge.py` 和 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)，专门比较 USB 相机、PX4 Ethernet/UDP DDS、v1/v4 消息、MAIN5 和接地确认，不要把 SITL Adapter 的行为误认为真机实现。
+
+同时比较四个完整入口：`quick_sitl` / `quick_flight` 加载 quick 参数（标识物目标、
+连续投放、简化降落和其独立速度）；`sitl` / `real_flight` 加载主任务参数（完整
+投放、侦察、返航和精准降落）。它们共享坐标、yaw 和视觉 World 坐标契约，不能
+交叉复制调参文件。
 
 ## 7. 阅读时容易混淆的文件
 

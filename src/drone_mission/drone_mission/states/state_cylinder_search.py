@@ -57,18 +57,21 @@ class CylinderSearchState:
         )
 
         # 飞到投放区中心
-        area1_x = (self._fsm.get_param("area1_east_min", -4.0) +
-                   self._fsm.get_param("area1_east_max", 4.0)) / 2
-        area1_y = (self._fsm.get_param("area1_north_min", 30.0) +
-                   self._fsm.get_param("area1_north_max", 35.0)) / 2
+        forward_min, forward_max, right_min, right_max = self._fsm.zone_bounds("area1")
+        center_forward = (forward_min + forward_max) / 2.0
+        center_right = (right_min + right_max) / 2.0
+        center_north, center_east = self._fsm.layout_frame.local_to_ned(
+            center_forward, center_right
+        )
 
         # NED 坐标
         drop_alt = self._fsm.fc.altitude_to_ned(self._fsm.get_param("area1_search_altitude", 5.0))
-        self._fsm.fc.goto_ned(area1_y, area1_x, drop_alt,
+        self._fsm.fc.goto_ned(center_north, center_east, drop_alt,
                               speed=self._fsm.get_param("sweep_speed", 0.8))
 
         self._fsm.get_logger().info(
-            f"CYL_SEARCH: 投放区中心 NED({area1_y:.1f}, {area1_x:.1f}, {drop_alt:.1f})"
+            f"CYL_SEARCH: 投放区中心 NED({center_north:.1f}, "
+            f"{center_east:.1f}, {drop_alt:.1f})"
         )
 
     def execute(self) -> Optional[str]:
@@ -157,17 +160,22 @@ class CylinderSearchState:
     def _start_scan(self):
         """启动投放区慢速扫描."""
         self._scan_phase = 1
-        area1_n_min = self._fsm.get_param("area1_north_min", 30.0)
-        area1_n_max = self._fsm.get_param("area1_north_max", 35.0)
-        area1_e_min = self._fsm.get_param("area1_east_min", -4.0)
-        area1_e_max = self._fsm.get_param("area1_east_max", 4.0)
+        forward_min, forward_max, right_min, right_max = self._fsm.zone_bounds("area1")
         alt = self._fsm.get_param("area1_search_altitude", 5.0)
+        center_forward = (forward_min + forward_max) / 2.0
+        start_north, start_east = self._fsm.layout_frame.local_to_ned(
+            center_forward, right_min
+        )
+        end_north, end_east = self._fsm.layout_frame.local_to_ned(
+            center_forward, right_max
+        )
+        down = self._fsm.fc.altitude_to_ned(alt)
 
-        # 沿 east 方向慢速扫描
+        # 沿 field-local right 方向慢速扫描
         self._scan_waypoints = [
-            {"north": (area1_n_min + area1_n_max) / 2, "east": area1_e_min, "down": self._fsm.fc.altitude_to_ned(alt),
+            {"north": start_north, "east": start_east, "down": down,
              "label": "scan_w"},
-            {"north": (area1_n_min + area1_n_max) / 2, "east": area1_e_max, "down": self._fsm.fc.altitude_to_ned(alt),
+            {"north": end_north, "east": end_east, "down": down,
              "label": "scan_e"},
         ]
         self._scan_wp_idx = 0

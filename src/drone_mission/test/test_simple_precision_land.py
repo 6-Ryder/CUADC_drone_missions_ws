@@ -44,6 +44,8 @@ class _Bridge:
         self._landed = landed
         self._alt = altitude
         self.land_calls = 0
+        self.force_disarm_calls = 0
+        self._armed = True
         self._pos = type("P", (), {"down": -self._alt})()
 
     def is_landed(self):
@@ -51,6 +53,13 @@ class _Bridge:
 
     def land_at_current(self):
         self.land_calls += 1
+
+    def force_disarm(self):
+        self.force_disarm_calls += 1
+        self._armed = False
+
+    def is_armed(self):
+        return self._armed
 
     def get_current_position(self):
         return self._pos
@@ -149,6 +158,9 @@ def test_simple_land_params_declared_with_current_behavior_defaults():
     assert defaults["landing_simple_mode"] is False
     assert defaults["landing_search_timeout"] == 15.0
     assert defaults["landing_simple_blind_timeout"] == 60.0
+    assert defaults["landing_visual_handoff_altitude"] == 0.0
+    assert defaults["landing_visual_handoff_max_ground_error_m"] == 0.20
+    assert defaults["landing_visual_handoff_stable_frames"] == 10
 
 
 def test_simple_land_state_imported_by_fsm():
@@ -204,15 +216,15 @@ def test_vision_loss_timeout_requests_px4_land():
     assert fsm.bridge.land_calls == 1
 
 
-def test_servo_switches_to_blind_at_test_mission_altitude():
+def test_servo_holds_at_blind_altitude_without_visual_alignment():
     fsm = _SimpleFSM(params={"landing_blind_altitude": 0.5})
     fsm.bridge = _Bridge(altitude=0.4)  # 已低于盲降高度
     state = SimplePrecisionLandState(fsm)
     state._phase = state.PHASE_SERVO
 
     state._execute_servo(has_target=False)
-    assert state._phase == state.PHASE_BLIND
-    assert fsm.vision_modes[-1] == "none"  # 切盲降关视觉
+    assert state._phase == state.PHASE_SERVO
+    assert fsm.fc.calls[-1] == (0.0, 0.0, 0.0)
 
 
 def test_blind_timeout_requests_px4_land():
@@ -248,6 +260,117 @@ def test_servo_p_control_uses_test_mission_defaults():
     assert descent == 0.4
 
 
+def test_servo_rejects_low_confidence_target_and_holds_position():
+    """Near-ground low-confidence H detections must not create descent."""
+    fsm = _SimpleFSM({"landing_target_min_confidence": 0.60})
+    fsm._target = {
+        "center_u": 520.0,
+        "center_v": 360.0,
+        "confidence": 0.59,
+    }
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    assert state.execute() is None
+    assert fsm.fc.calls[-1] == (0.0, 0.0, 0.0)
+
+
+def test_servo_rejects_large_target_jump_and_holds_position():
+    """A new H candidate cannot replace a locked target in one frame."""
+    fsm = _SimpleFSM({"landing_target_max_jump_px": 80.0})
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    fsm._target = {"center_u": 320.0, "center_v": 240.0, "confidence": 0.9}
+    assert state.execute() is None
+
+    fsm._target = {"center_u": 440.0, "center_v": 240.0, "confidence": 0.9}
+    assert state.execute() is None
+    assert fsm.fc.calls[-1] == (0.0, 0.0, 0.0)
+
+
+def test_short_reacquire_timeout_requests_px4_land_after_target_loss(monkeypatch):
+    """A locked target lost near ground must hand over to PX4 LAND promptly."""
+    fsm = _SimpleFSM({"landing_target_reacquire_timeout": 1.0})
+    fsm.bridge = _Bridge(altitude=1.2)
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+    state._has_target = True
+    state._vision_lost_start = 10.0
+    monkeypatch.setattr(
+        "drone_mission.states.state_precision_land_simple.time.time", lambda: 11.1,
+    )
+
+    assert state.execute() == "COMPLETE"
+    assert fsm.bridge.land_calls == 1
+
+
+def test_servo_requires_stable_alignment_before_entering_blind_mode():
+    """Reaching blind altitude alone must not bypass visual alignment."""
+    fsm = _SimpleFSM(params={"landing_blind_altitude": 0.5})
+    fsm.bridge = _Bridge(altitude=0.4)
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    assert state.execute() is None
+    assert state._phase == state.PHASE_SERVO
+    assert fsm.fc.calls[-1] == (0.0, 0.0, 0.0)
+
+
+def test_ground_error_latches_vertical_only_descent_at_handoff_altitude():
+    fsm = _SimpleFSM({
+        "landing_visual_handoff_altitude": 1.6,
+        "landing_visual_handoff_max_ground_error_m": 0.20,
+        "landing_visual_handoff_stable_frames": 2,
+        "camera_fx": 540.0,
+        "camera_fy": 540.0,
+        "landing_descent_slow": 0.15,
+    })
+    fsm.bridge = _Bridge(altitude=1.6)
+    fsm._target = {"center_u": 350.0, "center_v": 240.0, "confidence": 0.9}
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    state.execute()
+    state.execute()
+
+    assert state._vertical_only_latched is True
+    assert fsm.fc.calls[-1] == (0.0, 0.0, 0.25)
+
+
+def test_vertical_only_latch_ignores_later_visual_loss_and_never_laterally_chases():
+    fsm = _SimpleFSM({"landing_descent_slow": 0.15})
+    fsm.bridge = _Bridge(altitude=1.4)
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+    state._vertical_only_latched = True
+
+    assert state.execute() is None
+    assert fsm.fc.calls[-1] == (0.0, 0.0, 0.15)
+
+
+def test_simulated_touchdown_after_vertical_handoff_disarms_and_completes():
+    fsm = _SimpleFSM({
+        "sim_mode": True,
+        "landing_touchdown_max_altitude": 0.10,
+        "landing_touchdown_max_horizontal_speed": 0.10,
+        "landing_touchdown_max_vertical_speed": 0.05,
+        "landing_touchdown_hold_time": 2.0,
+    })
+    fsm.bridge = _Bridge(altitude=0.05)
+    fsm.bridge.get_telemetry = lambda: type(
+        "T", (), {"velocity": type("V", (), {"vn": 0.0, "ve": 0.0, "vd": 0.0})()}
+    )()
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+    state._vertical_only_latched = True
+    state._touchdown_candidate_start = time.time() - 3.0
+
+    assert state.execute() is None
+    assert fsm.bridge.force_disarm_calls == 1
+    assert state.execute() == "COMPLETE"
+
+
 # ---------------------------------------------------------------------------
 # 4. quick 参数文件契约 (test_mission 照搬)
 # ---------------------------------------------------------------------------
@@ -265,6 +388,7 @@ def test_quick_params_enable_simple_landing():
         assert p["landing_blind_descent_speed"] == 0.15  # test_mission 值
         assert p["landing_search_timeout"] == 15.0
         assert p["landing_simple_blind_timeout"] == 60.0
+        assert p["landing_target_reacquire_timeout"] == 1.0
 
 
 def test_quick_real_blind_altitude_matches_test_mission():
@@ -282,6 +406,28 @@ def test_quick_sim_blind_altitude_above_h_detection_limit():
 def test_quick_params_vision_loss_timeout_matches_test_mission():
     p = _quick_params("mission_params_quick.yaml")
     assert p["vision_loss_timeout"] == 3.0  # test_mission 默认
+
+
+def test_quick_params_enable_circle_geometry_handoff_only_for_quick_landing():
+    for name in ("mission_params_quick.yaml", "mission_params_quick_sim.yaml"):
+        params = _quick_params(name)
+        assert params["landing_visual_handoff_altitude"] == 1.6
+        assert params["landing_visual_handoff_max_ground_error_m"] == 0.20
+        assert params["landing_visual_handoff_stable_frames"] == 10
+
+    vision_config = ROOT / "drone_vision/config/vision_params_quick.yaml"
+    import yaml
+    vision_params = next(iter(yaml.safe_load(
+        vision_config.read_text(encoding="utf-8")
+    ).values()))["ros__parameters"]
+    assert vision_params["landing_circle_track_enable"] is True
+    assert vision_params["landing_yolo_guard_rate_hz"] == 2.0
+
+    for launch_name in ("quick_sitl.launch.py", "quick_flight.launch.py"):
+        launch_source = (ROOT / "drone_bringup/launch" / launch_name).read_text(
+            encoding="utf-8"
+        )
+        assert "vision_params_quick.yaml" in launch_source
 
 
 def test_base_params_untouched_by_simple_landing():

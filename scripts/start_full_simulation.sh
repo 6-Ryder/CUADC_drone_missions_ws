@@ -50,8 +50,28 @@ if [ ! -d "$(dirname "$PX4_WORLD")" ]; then
     exit 1
 fi
 
-# 工作区场景是唯一来源，避免 PX4 继续加载过期副本。
-cp "$PROJ/field/drone_field.sdf" "$PX4_WORLD"
+# 从原始 ROS launch 参数解析场地朝向；原始参数随后完整转发给 ROS2。
+LAYOUT_HEADING_DEG="0.0"
+for task_arg in "$@"; do
+    case "$task_arg" in
+        layout_heading_deg:=*)
+            LAYOUT_HEADING_DEG="${task_arg#layout_heading_deg:=}"
+            ;;
+    esac
+done
+
+# 每次运行生成独立场地，确保 Gazebo 场地、机体初始 yaw 与 ROS 任务朝向一致。
+RUNTIME_FIELD="$LOG_DIR/drone_field.sdf"
+GAZEBO_YAW_RAD="$(python3 "$PROJ/field/layout_field.py" \
+    "$PROJ/field/drone_field.sdf" "$RUNTIME_FIELD" \
+    --heading-deg "$LAYOUT_HEADING_DEG" --home-x 4.0 --home-y 10.0 \
+    --print-gazebo-yaw-rad)"
+cp "$RUNTIME_FIELD" "$PX4_WORLD"
+printf 'layout_heading_deg=%s\nhome_x=4.0\nhome_y=10.0\nruntime_field=%s\ngazebo_yaw_rad=%s\n' \
+    "$LAYOUT_HEADING_DEG" "$RUNTIME_FIELD" "$GAZEBO_YAW_RAD" \
+    > "$LOG_DIR/layout_heading.log"
+info "场地朝向: ${LAYOUT_HEADING_DEG}° (NED 顺时针); Gazebo yaw: ${GAZEBO_YAW_RAD} rad"
+info "运行时场地: $RUNTIME_FIELD"
 
 # 清理 PX4 持久化参数 (避免旧参数覆盖启动设置)
 rm -f "$PX4_BLD/rootfs/0/parameters.bson" "$PX4_BLD/rootfs/0/parameters_backup.bson"
@@ -113,7 +133,7 @@ step "Step 2/4 — 启动 PX4 SITL + Gazebo (drone_field 世界)"
 cd "$PX4_BLD"
 export PX4_SIM_MODEL="gz_x500_mono_cam_down"
 export PX4_GZ_WORLD="drone_field"
-export PX4_GZ_MODEL_POSE="4,10,0.3,0,0,0"
+export PX4_GZ_MODEL_POSE="4,10,0.3,0,0,$GAZEBO_YAW_RAD"
 export GZ_IP="127.0.0.1"
 export ROS_DOMAIN_ID=0
 export HEADLESS=1
@@ -209,6 +229,7 @@ echo "┌───────────────────────�
 echo "│                    无画面全仿真系统已启动                         │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  场地:      drone_field (70m × 8m)                              │"
+echo "│  场地朝向:  ${LAYOUT_HEADING_DEG}° NED 顺时针                         │"
 echo "│  无人机:    gz_x500 @ H起降点 (4, 10, 0.3)                      │"
 echo "│  飞行方向:  向北 (NED north)                                    │"
 echo "│  投放区:    y=40~45m (3个圆筒: Ø15/Ø20/Ø25cm)                   │"

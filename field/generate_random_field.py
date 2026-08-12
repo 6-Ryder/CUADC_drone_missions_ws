@@ -26,9 +26,9 @@ import numpy as np
 # ----------------------------- 配置区 -----------------------------
 
 DROP_ZONE = {
-    "center": (42.5, 4.0),        # 投放区中心
-    "half_size": (2.5, 4.0),      # 长/宽的一半（x:40~45, y:0~8）
-    "sigma": (1.0, 1.6),          # 正态分布标准差，中心密、边缘疏
+    "center": (4.0, 42.5),        # 投放区中心（World x=east, y=north）
+    "half_size": (4.0, 2.5),      # x:0~8, y:40~45
+    "sigma": (1.6, 1.0),          # 正态分布标准差，中心密、边缘疏
     "min_gap": 1.1,               # 圆筒中心最小间距（m），防止相距过近
     "cylinders": [
         # (外半径, 高度, 网格文件名)
@@ -40,9 +40,9 @@ DROP_ZONE = {
 }
 
 RECON_ZONE = {
-    "center": (67.5, 4.0),        # 侦察区中心
-    "half_size": (2.5, 4.0),      # x:65~70, y:0~8
-    "sigma": (1.0, 1.6),
+    "center": (4.0, 67.5),        # 侦察区中心（World x=east, y=north）
+    "half_size": (4.0, 2.5),      # x:0~8, y:65~70
+    "sigma": (1.6, 1.0),
     "min_gap": 0.60,
     "cylinders": [
         (0.1000, 0.1500, "cyl_r0100_h015.stl"),
@@ -124,7 +124,10 @@ def place_cylinders(zone_cfg):
 
 def indent(text, level=4):
     pad = " " * level
-    return "\n".join(pad + line if line.strip() else line for line in text.splitlines())
+    return "\n".join(
+        pad + line if line.strip() else line
+        for line in text.splitlines()
+    )
 
 
 def drop_zone_xml(cylinders):
@@ -145,7 +148,9 @@ def drop_zone_xml(cylinders):
             <uri>{MESH_PREFIX}/{mesh}</uri>
           </mesh>
         </geometry>
-        <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        <material>
+          <ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse>
+        </material>
       </visual>
     </link>"""
         )
@@ -207,7 +212,9 @@ def recon_zone_xml(cylinders, hazards):
             <uri>{MESH_PREFIX}/{mesh}</uri>
           </mesh>
         </geometry>
-        <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        <material>
+          <ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse>
+        </material>
       </visual>
     </link>"""
         )
@@ -218,7 +225,9 @@ def recon_zone_xml(cylinders, hazards):
     random.shuffle(hazard_assignments)
 
     plate_links = []
-    for plate_i, (cyl_idx, (texture, _label)) in enumerate(hazard_assignments, start=1):
+    for plate_i, (cyl_idx, (texture, _label)) in enumerate(
+        hazard_assignments, start=1
+    ):
         x, y, *_ = cylinders[cyl_idx]
         plate_links.append(
             f"""    <link name="hazard_plate_{plate_i}">
@@ -264,7 +273,9 @@ def recon_zone_xml(cylinders, hazards):
 
 def replace_model_block(text, model_name, new_xml):
     """用正则替换 <model name="..."> ... </model> 块。"""
-    pattern = re.compile(rf'(?s)\s*<model name="{re.escape(model_name)}">.*?</model>')
+    pattern = re.compile(
+        rf'(?s)\s*<model name="{re.escape(model_name)}">.*?</model>'
+    )
     return pattern.sub("\n" + new_xml + "\n", text)
 
 
@@ -283,7 +294,28 @@ def main():
         default=str(script_dir / "drone_field_random.sdf"),
         help="输出 SDF 文件（默认：脚本所在目录的 drone_field_random.sdf）",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="固定 Python 与 NumPy 随机种子",
+    )
+    parser.add_argument(
+        "--heading-deg",
+        type=float,
+        help="绕 Home 旋转任务资产的 NED 航向角（北为 0，顺时针为正）",
+    )
     args = parser.parse_args()
+
+    if args.heading_deg is not None:
+        try:
+            from .layout_field import gazebo_yaw_rad, rotate_layout_sdf
+        except ImportError:
+            from layout_field import gazebo_yaw_rad, rotate_layout_sdf
+        gazebo_yaw_rad(args.heading_deg)
+
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
 
     input_path = Path(args.input)
     output_path = Path(args.output)
@@ -306,7 +338,9 @@ def main():
 
     # 生成侦察区
     recon_cyls = place_cylinders(RECON_ZONE)
-    recon_model, hazard_model = recon_zone_xml(recon_cyls, RECON_ZONE["hazards"])
+    recon_model, hazard_model = recon_zone_xml(
+        recon_cyls, RECON_ZONE["hazards"]
+    )
 
     # 替换原 SDF 中的四个模型块
     text = replace_model_block(text, "drop_cylinders", drop_model)
@@ -315,6 +349,14 @@ def main():
     text = replace_model_block(text, "hazard_plates", hazard_model)
 
     output_path.write_text(text, encoding="utf-8")
+    if args.heading_deg is not None:
+        rotate_layout_sdf(
+            output_path,
+            output_path,
+            args.heading_deg,
+            home_x=4.0,
+            home_y=10.0,
+        )
     print(f"已生成随机场地文件: {output_path.absolute()}")
     print("投放区圆筒位置:")
     for i, (x, y, r, h, _) in enumerate(drop_cyls, start=1):

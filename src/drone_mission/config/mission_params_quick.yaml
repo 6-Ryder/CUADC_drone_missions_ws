@@ -13,10 +13,8 @@
     home_y: 10.0
     home_z: 0.0
 
-    # --- 飞行方向 (PX4 NED 主飞行轴) ---
-    flight_axis: "north"          # "east" | "north" — 主飞行轴朝向
-    drop_distance: 32.5           # Home → 投放区距离 (m, NED 沿 flight_axis)
-    recon_distance: 57.5          # Home → 侦察区距离 (m, NED 沿 flight_axis)
+    # --- 任务布局 (相对 Home 的 local forward/right 坐标系) ---
+    layout_heading_deg: 0.0       # local forward 相对 NED north 的顺时针角度
 
     # --- 任务全局参数 ---
     takeoff_height: 5.0           # 巡航飞行高度 (m, NED z 负值)
@@ -41,26 +39,26 @@
     max_drops: 1                  # 最大投放次数 (需与 servo pwm_positions 长度-1 一致)
 
     # --- Area 1: 投放区 ---
-    # NED: north=[30,35], east=[-4,4] (Home 北 32.5m, 横跨 X:0~8m)
-    area1_north_min: 30.0
-    area1_north_max: 35.0
-    area1_east_min: -4.0
-    area1_east_max: 4.0
+    # local: forward=[30,35], right=[-4,4]
+    area1_forward_min: 30.0
+    area1_forward_max: 35.0
+    area1_right_min: -4.0
+    area1_right_max: 4.0
     area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
     area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
-    # NED: north=[55,60], east=[-4,4] (Home 北 57.5m, 横跨 X:0~8m)
-    area2_north_min: 55.0
-    area2_north_max: 60.0
-    area2_east_min: -4.0
-    area2_east_max: 4.0
+    # local: forward=[55,60], right=[-4,4]
+    area2_forward_min: 55.0
+    area2_forward_max: 60.0
+    area2_right_min: -4.0
+    area2_right_max: 4.0
     area2_altitude: 3.0           # 已实飞侦察扫描高度 (m, NED z 负值)
 
     # --- 弓字形覆盖参数 ---
     grid_spacing: 1.67            # 网格间距 (m), 对齐 PathPlanner 默认值
-    sweep_margin_north: 1.0       # 长边界 (north) 内缩 (m)
-    sweep_margin_east: 0.5        # 段边界 (east) 内缩 (m)
+    sweep_margin_forward: 1.0     # forward 边界内缩 (m)
+    sweep_margin_right: 0.5       # right 边界内缩 (m)
     recon_require_full_path: true # 侦察区必须走完整弓字形路径, 覆盖率仅作监控
 
     # --- 投放策略参数 (quick: 只认蓝底标识, 1 次观测即入库) ---
@@ -97,6 +95,8 @@
     precision_align_image_height: 480.0
     precision_align_alpha: 0.55           # EMA 平滑系数, 兼顾检测抖动和闭环响应
     precision_align_gain: 1.25            # 归一化像素误差 → 机体系速度比例
+    precision_align_continuous_enable: true  # 快速投放: 下降到投放高度不中断同一目标锁
+    precision_align_ground_kp: 0.40       # 地面误差(m) → 水平速度(m/s), 保持跨高度增益一致
     precision_align_max_speed: 0.25       # 粗调水平合速度上限 (m/s)
     precision_align_fine_pixel_error: 90.0 # 进入精调速度限制的像素误差
     precision_align_fine_max_speed: 0.065 # 精调水平合速度上限 (m/s)
@@ -145,17 +145,21 @@
     drop_align_stall_stable_band: 5.0     # 停滞稳定带宽 (px)
     drop_align_stall_duration: 2.0        # 停滞判定时长 (s)
 
-    # --- 精准降落: simple 模式 (landing_simple_mode=true, test_mission 方法) ---
-    # 无对心锁存/备用接地确认, 接地只认 PX4 is_landed; 丢失/超时 → PX4 自主着陆
+    # --- 精准降落: simple 模式 (quick) ---
+    # 仅连续、几何确认的 H 目标可伺服；近地丢失短暂重捕获失败 → PX4 原地 LAND
     landing_simple_mode: true
     landing_search_timeout: 15.0      # simple: H 搜索超时 → PX4 LAND (test_mission 值)
     landing_simple_blind_timeout: 60.0  # simple: 盲降超时 → PX4 LAND (test_mission 值)
+    landing_target_reacquire_timeout: 1.0  # 低空目标失效后最多重捕获 1s
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
     landing_blind_altitude: 0.5   # simple: 伺服降到 0.5m 才切盲降 (test_mission 值)
     landing_blind_align_tolerance_px: 30.0  # 切入盲降前最大像素误差
     landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
     landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
+    landing_visual_handoff_altitude: 1.6  # 圆形几何对心后，开始纯垂直下降高度 (m)
+    landing_visual_handoff_max_ground_error_m: 0.20  # 交接前最大估算地面中心误差 (m)
+    landing_visual_handoff_stable_frames: 10  # 圆心地面误差连续达标帧数
     landing_precision_target: 0.1 # 目标水平精度 (m)
     # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
     landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)

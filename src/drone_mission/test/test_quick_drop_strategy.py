@@ -13,11 +13,13 @@ import time
 import math
 from pathlib import Path
 
+import pytest
 import yaml
 
 from drone_mission.mission_state_machine import MissionFSM
 from drone_mission.states.state_cylinder_search import CylinderSearchState
 from drone_mission.states.state_drop import DropState
+from drone_utils.layout_frame import LayoutFrame
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,13 +49,38 @@ def _bare_fsm():
     """object.__new__ 绕过重量级 __init__, 只提供目标库与 get_param."""
     fsm = object.__new__(MissionFSM)
     fsm._known_cylinders = [
-        {"center_x": 0.0, "center_y": 0.0, "observations": 1},
-        {"center_x": 0.3, "center_y": 0.0, "observations": 1},
+        {
+            "world_position_valid": True,
+            "world_x": 0.0,
+            "world_y": 0.0,
+            "observations": 1,
+        },
+        {
+            "world_position_valid": True,
+            "world_x": 0.3,
+            "world_y": 0.0,
+            "observations": 1,
+        },
     ]
     fsm._known_markers = [
-        {"center_x": 1.0, "center_y": 1.0, "observations": 1},
-        {"center_x": 1.05, "center_y": 1.0, "observations": 1},  # 0.05m 重复 → 去重
-        {"center_x": 3.0, "center_y": 3.0, "observations": 1},
+        {
+            "world_position_valid": True,
+            "world_x": 1.0,
+            "world_y": 1.0,
+            "observations": 1,
+        },
+        {
+            "world_position_valid": True,
+            "world_x": 1.05,
+            "world_y": 1.0,
+            "observations": 1,  # 0.05m 重复 → 去重
+        },
+        {
+            "world_position_valid": True,
+            "world_x": 3.0,
+            "world_y": 3.0,
+            "observations": 1,
+        },
     ]
     params = {"marker_memory_min_observations": 1}
     fsm.get_param = lambda name, default=None: params.get(name, default)
@@ -68,7 +95,7 @@ def test_marker_gate_returns_only_deduplicated_markers():
     targets = fsm.get_known_drop_targets()
 
     assert len(targets) == 2  # 3 个 marker, 1 个 0.05m 重复被去重
-    assert all("center_x" in t for t in targets)
+    assert all("world_x" in t for t in targets)
 
 
 def test_marker_gate_ignores_cylinder_memory_even_when_present():
@@ -78,7 +105,7 @@ def test_marker_gate_ignores_cylinder_memory_even_when_present():
     targets = fsm.get_known_drop_targets()
 
     # 圆筒记忆里有 2 个候选, quick 下仍只返回 markers
-    assert all(t["center_x"] >= 1.0 for t in targets)
+    assert all(t["world_x"] >= 1.0 for t in targets)
 
 
 def test_default_source_prefers_cylinders_then_falls_back_to_markers():
@@ -99,16 +126,30 @@ def test_default_source_prefers_cylinders_then_falls_back_to_markers():
 class _SearchFSM:
     def __init__(self, params):
         self._params = params
+        self.layout_frame = LayoutFrame(float(params.get("layout_heading_deg", 0.0)))
         self._known_cylinders = [
-            {"center_x": 0.0, "center_y": 0.0, "observations": 2},
+            {
+                "world_position_valid": True,
+                "world_x": 0.0,
+                "world_y": 0.0,
+                "observations": 2,
+            },
         ]
         self._known_markers = [
-            {"center_x": 1.0, "center_y": 1.0, "observations": 1},
+            {
+                "world_position_valid": True,
+                "world_x": 1.0,
+                "world_y": 1.0,
+                "observations": 1,
+            },
         ]
         self.set_vision_calls = []
 
     def get_param(self, name, default=None):
         return self._params.get(name, default)
+
+    def zone_bounds(self, _prefix):
+        return (30.0, 35.0, -4.0, 4.0)
 
     def get_cylinders(self):
         return []
@@ -164,15 +205,20 @@ def test_quick_search_enters_requests_marker_only_vision():
         "drop_marker_fallback_delay": 0.0,
     })
     fsm.logger = type("TL", (), {"log_state": staticmethod(lambda *a: None)})()
+    goto_calls = []
     fsm.fc = type("FC", (), {
-        "goto_ned": staticmethod(lambda *a, **kw: None),
+        "goto_ned": staticmethod(lambda *a, **kw: goto_calls.append((a, kw))),
         "altitude_to_ned": staticmethod(lambda a: -a),
     })()
+    fsm.layout_frame = LayoutFrame(50.0)
+    fsm.zone_bounds = lambda _prefix: (30.0, 35.0, -4.0, 4.0)
     fsm.clear_known_cylinders = lambda: None
     state = CylinderSearchState(fsm)
     state.enter()
 
     assert fsm.set_vision_calls == ["marker_only"]
+    north, east, _down = goto_calls[-1][0]
+    assert fsm.layout_frame.ned_to_local(north, east) == pytest.approx((32.5, 0.0))
 
 
 def test_default_search_does_not_request_marker_only():
@@ -511,7 +557,7 @@ def test_servo_descend_tick_lost_hovers():
     assert fsm.fc.calls[0] == (0.0, 0.0, 0.0)  # 丢失悬停等待恢复
 
 
-def test_servo_descend_stops_when_arrived():
+def test_legacy_servo_descend_stops_when_arrived():
     fsm = _servo_fsm({
         "quick_drop_mode": True,
         "drop_descend_height": 2.4,
@@ -530,6 +576,27 @@ def test_servo_descend_stops_when_arrived():
     assert fsm.fc.calls[0] == ("stop",)  # 停速度悬停
 
 
+def test_continuous_servo_descend_handoff_does_not_stop_velocity():
+    fsm = _servo_fsm({
+        "quick_drop_mode": True,
+        "precision_align_continuous_enable": True,
+        "drop_descend_height": 2.4,
+        "precision_align_enable": True,
+        "precision_align_drop_height_tolerance": 0.5,
+        "precision_align_final_descent_enable": False,
+    })
+    fsm.bridge = _ServoBridge(alt=2.0)  # 已到位 (误差 0.4 < 0.5)
+    state = DropState(fsm)
+    state.enter()
+    state._drop_target_is_centered = lambda: True  # 到位且已对心 → 直接投放
+
+    result = state._execute_descend()
+
+    assert result == "EXECUTE_DROP"
+    assert state._servo_descend_active is False
+    assert ("stop",) not in fsm.fc.calls
+
+
 def test_servo_descend_params_declared():
     defaults = _declare_param_defaults(
         ROOT / "drone_mission/drone_mission/mission_state_machine.py"
@@ -544,6 +611,13 @@ def test_quick_params_include_servo_descend_speeds():
         assert p["drop_servo_descend_fast"] > 0.0
         assert p["drop_servo_descend_slow"] > 0.0
         assert p["drop_servo_descend_fast"] > p["drop_servo_descend_slow"]
+
+
+def test_quick_params_enable_continuous_ground_error_drop_servo():
+    for name in ("mission_params_quick.yaml", "mission_params_quick_sim.yaml"):
+        p = _quick_params(name)
+        assert p["precision_align_continuous_enable"] is True
+        assert p["precision_align_ground_kp"] == 0.40
 
 
 def test_base_params_untouched_by_servo_descend():
