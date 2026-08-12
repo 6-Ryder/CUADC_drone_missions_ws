@@ -116,13 +116,12 @@ def generate_launch_description():
                 "fy": 400.0,
                 "cx": 320.0,
                 "cy": 240.0,
-                "device": "cuda",
+                "device": "tensorrt",
                 "home_x": LaunchConfiguration("home_x"),
                 "home_y": LaunchConfiguration("home_y"),
                 "layout_heading_deg": ParameterValue(
                     LaunchConfiguration("layout_heading_deg"), value_type=float,
                 ),
-                "device": "tensorrt",
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
             },
         ],
