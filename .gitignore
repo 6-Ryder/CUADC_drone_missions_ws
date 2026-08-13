@@ -18,6 +18,7 @@ __pycache__/
 *.egg-info/
 tools/
 graphify-out/
+cv_trainer/
 # Compiled extensions
 *.o
 *.so

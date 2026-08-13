@@ -290,6 +290,28 @@ python3 -m pytest src/drone_utils/test src/drone_mission/test src/drone_vision/t
 5. **参数语义变化**：`area*_north/east_*` 从"NED 绝对坐标"→"沿制定方向距离"（h=0 等价，YAML 注释同步更新）
 6. **范围纪律**：条带端点裁剪、平滑提速、GPS 经纬度列为后续项
 
+
+
+#### 计划修改位置（暂不实施）
+
+| 位置 | 计划调整 |
+|---|---|
+| `drone_mission/states/state_takeoff.py` | 进入起飞时锁存当前 yaw；预流与爬升显式保持该 yaw；到达 5 m 后释放给任务 yaw |
+| `px4_control/flight_controller.py` | `loiter()`/`takeoff()` 支持显式 yaw，供起飞阶段传入锁存值 |
+| `px4_control/px4_bridge.py` | 对位置设定点 yaw 增加最大变化率限制；速度模式继续使用任务 yaw |
+| `src/px4_control/config/px4_params.yaml` 及四套 launch | 增加并透传 yaw 变化率参数，默认值需经 ULog/真机验证后确定 |
+| `drone_mission/test/test_flight_safety_contract.py` | 锁定“低于 5 m 不追逐布局 yaw、5 m 后才允许转向”的行为契约 |
+
+#### 验证顺序
+
+1. 先用离线测试验证起飞 setpoint 的 yaw 在 5 m 前保持当前值。
+2. SITL 分别运行 `layout_heading_deg:=0` 和 `layout_heading_deg:=30`，确认任务
+   完成、5 m 前 yaw 不发生目标跳变、5 m 后逐步转向。
+3. 真机只做受控起飞/悬停测试：确认 5 m 高度稳定后再继续任务；飞手保留随时
+   切回手动/悬停的权限。
+4. 从 PX4 ULog 同时检查 `TrajectorySetpoint.yaw`、`VehicleLocalPosition.z`
+   和实际 yaw/yaw rate，确认高度波动与转向解耦后，才恢复完整任务验证。
+
 ---
 
 ## 11. 关键文件
