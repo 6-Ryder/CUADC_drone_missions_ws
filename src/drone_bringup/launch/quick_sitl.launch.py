@@ -99,11 +99,6 @@ def generate_launch_description():
         name="vision_pipeline",
         output="screen",
         parameters=[vision_param_file, vision_quick_param_file, {
-            "home_x": LaunchConfiguration("home_x"),
-            "home_y": LaunchConfiguration("home_y"),
-            "layout_heading_deg": ParameterValue(
-                LaunchConfiguration("layout_heading_deg"), value_type=float,
-            ),
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
         }],
         arguments=[
