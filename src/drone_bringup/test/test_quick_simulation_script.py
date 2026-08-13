@@ -21,3 +21,12 @@ def test_simulation_wrapper_resolves_one_heading_for_field_model_and_launch(
     assert 'PX4_GZ_MODEL_POSE="4,10,0.3,0,0,$GAZEBO_YAW_RAD"' in source
     assert "ros2 launch" in source and '"$@"' in source
     assert 'cp "$PROJ/field/drone_field.sdf" "$PX4_WORLD"' not in source
+
+
+def test_quick_simulation_defaults_to_thirty_degrees_and_forwards_it():
+    source = QUICK_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'LAYOUT_HEADING_DEG="30.0"' in source
+    assert 'HAS_LAYOUT_HEADING=0' in source
+    assert 'HAS_LAYOUT_HEADING=1' in source
+    assert 'set -- "layout_heading_deg:=${LAYOUT_HEADING_DEG}" "$@"' in source
