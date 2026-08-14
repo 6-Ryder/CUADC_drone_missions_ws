@@ -63,6 +63,8 @@ def generate_launch_description():
         "layout_heading_deg",
         default_value="0.0",
         description="场地前方绝对方位角: 0=正北, 顺时针为正 (deg)",
+    )
+    
     layout_heading_arg = DeclareLaunchArgument(
         "layout_heading_deg",
         default_value="0.0",
