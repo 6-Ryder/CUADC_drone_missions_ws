@@ -34,9 +34,11 @@ fi
 source install/setup.bash
 set -u
 
-# 清理旧进程
+# 清理旧进程 (含任务节点 — 遗留的 mission_fsm 会调用 set_mode 串台)
 pkill -f camera_node 2>/dev/null || true
 pkill -f vision_pipeline 2>/dev/null || true
+pkill -f mission_fsm 2>/dev/null || true
+pkill -f px4_bridge 2>/dev/null || true
 fuser -k "$CAM_DEVICE" 2>/dev/null || true
 sleep 1
 
