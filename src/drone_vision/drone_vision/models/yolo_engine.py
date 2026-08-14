@@ -368,20 +368,39 @@ class TensorRTYOLOEngine(ONNXYOLOEngine):
         self._input_name = self._trt_engine.get_tensor_name(0)
         self._output_name = self._trt_engine.get_tensor_name(1)
 
-        # 固定输入/输出缓冲, 推理时仅 memcpy
+        # 固定输入/输出缓冲, 推理时仅 memcpy.
+        # 按引擎实际 dtype 分配缓冲: FP16(2字节/元素) / FP32(4字节/元素).
+        # 之前写死 float32, FP16 输出会被按 4 字节读回 → 数据错位成乱码 → 静默识别不到.
         in_shape = self._trt_engine.get_tensor_shape(self._input_name)
         if -1 in in_shape:
             raise RuntimeError(
                 f"引擎输入含动态维度 {in_shape}, 请用固定 shape 重新导出")
-        self._input_nbytes = int(trt.volume(in_shape)) * 4
+        in_dtype = self._trt_engine.get_tensor_dtype(self._input_name)
+        if in_dtype == trt.float16:
+            self._input_np_dtype = np.float16
+        elif in_dtype == trt.float32:
+            self._input_np_dtype = np.float32
+        else:
+            raise RuntimeError(f"不支持的引擎输入 dtype: {in_dtype}")
+        self._input_nbytes = int(trt.volume(in_shape)) * np.dtype(
+            self._input_np_dtype).itemsize
         self._d_input = cuda.mem_alloc(self._input_nbytes)
+
         out_shape = self._trt_engine.get_tensor_shape(self._output_name)
-        self._output_np = np.empty(out_shape, dtype=np.float32)
+        out_dtype = self._trt_engine.get_tensor_dtype(self._output_name)
+        if out_dtype == trt.float16:
+            self._output_np_dtype = np.float16
+        elif out_dtype == trt.float32:
+            self._output_np_dtype = np.float32
+        else:
+            raise RuntimeError(f"不支持的引擎输出 dtype: {out_dtype}")
+        self._output_np = np.empty(out_shape, dtype=self._output_np_dtype)
         self._d_output = cuda.mem_alloc(self._output_np.nbytes)
 
     def _do_infer(self, image: np.ndarray) -> List[Detection]:
         import pycuda.driver as cuda
-        tensor = np.ascontiguousarray(self._preprocess(image))
+        tensor = np.ascontiguousarray(
+            self._preprocess(image), dtype=self._input_np_dtype)
         if tensor.nbytes != self._input_nbytes:
             raise RuntimeError(
                 f"输入尺寸不匹配: 引擎 {self._input_nbytes}B "
@@ -390,7 +409,11 @@ class TensorRTYOLOEngine(ONNXYOLOEngine):
         self._trt_context.execute_v2(
             bindings=[int(self._d_input), int(self._d_output)])
         cuda.memcpy_dtoh(self._output_np, self._d_output)
-        return self._postprocess(self._output_np, image.shape[:2])
+        # FP16 输出转回 FP32, 再交给与 ONNX 共用的后处理
+        output = self._output_np
+        if output.dtype == np.float16:
+            output = output.astype(np.float32)
+        return self._postprocess(output, image.shape[:2])
 
     def close(self) -> None:
         for buf in ("_d_input", "_d_output"):
