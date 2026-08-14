@@ -34,7 +34,7 @@
       - "cylinder"                         # 0: 白色圆筒
 
     # ---- 投放区蓝色标识模型 (单类, 可选) ----
-    drop_marker_model_path: "drop_marker_new.engine"
+    drop_marker_model_path: "drop_marker_new_new.engine"
     drop_marker_class_names:
       - "drop_zone_marker"                 # 0: 蓝色投放区标识
     drop_marker_refine_enable: true        # YOLO bbox 内 HSV 蓝色分割 → 轮廓矩质心
@@ -47,7 +47,7 @@
     drop_marker_max_scale_ratio: 1.8        # 实测直径/1m理论投影上限
 
     # ---- H 降落标识模型 (单类, 按需在降落阶段加载) ----
-    landing_model_path: "landing_h_yolo.engine"
+    landing_model_path: "H_real_fp16.engine"
     landing_class_names:
       - "landing_H"                        # 0: H 降落标识
 
