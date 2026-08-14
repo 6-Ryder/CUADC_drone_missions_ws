@@ -25,6 +25,7 @@ from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -58,6 +59,10 @@ def generate_launch_description():
         description="Home 点 World z",
     )
 
+    layout_heading_arg = DeclareLaunchArgument(
+        "layout_heading_deg",
+        default_value="0.0",
+        description="场地前方绝对方位角: 0=正北, 顺时针为正 (deg)",
     layout_heading_arg = DeclareLaunchArgument(
         "layout_heading_deg",
         default_value="0.0",
@@ -153,6 +158,9 @@ def generate_launch_description():
                 "layout_heading_deg": ParameterValue(
                     LaunchConfiguration("layout_heading_deg"), value_type=float,
                 ),
+                "layout_heading_deg": ParameterValue(
+                    LaunchConfiguration("layout_heading_deg"), value_type=float,
+                ),
                 "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
             },
@@ -171,6 +179,7 @@ def generate_launch_description():
         home_x_arg,
         home_y_arg,
         home_z_arg,
+        layout_heading_arg,
         layout_heading_arg,
         rc_require_arg,
         camera_node,

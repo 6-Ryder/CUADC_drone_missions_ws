@@ -77,6 +77,16 @@ def test_real_mission_launchers_forward_arbitrary_launch_arguments():
         assert '"${LAUNCH_ARGS[@]}"' in source
 
 
+def test_quick_real_launcher_defaults_to_thirty_degrees_and_allows_override():
+    source = _source(QUICK_LAUNCHER_PATH)
+
+    assert 'LAYOUT_HEADING_DEG="30.0"' in source
+    assert 'layout_heading_deg:=*' in source
+    assert 'LAYOUT_HEADING_DEG="${arg#layout_heading_deg:=}"' in source
+    assert 'HAS_LAYOUT_HEADING=1' in source
+    assert 'LAUNCH_ARGS+=("layout_heading_deg:=${LAYOUT_HEADING_DEG}")' in source
+
+
 def test_readiness_verifier_is_bounded_read_only_and_checks_real_interfaces():
     source = _source(VERIFIER_PATH)
 

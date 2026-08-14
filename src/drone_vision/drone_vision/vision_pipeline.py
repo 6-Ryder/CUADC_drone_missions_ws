@@ -241,11 +241,14 @@ class VisionPipelineNode(Node):
         self.declare_parameter("landing_circle_tracker_max_center_jump_px", 80.0)
         self.declare_parameter("landing_circle_tracker_max_radius_change_ratio", 0.35)
         self.declare_parameter("landing_yolo_guard_rate_hz", 2.0)
-        # 覆盖 — 侦察区 World 坐标 (北向布局: Home X=4,Y=10; Recon NED north=55-60 east=±4)
-        self.declare_parameter("coverage_zone_x_min", 0.0)   # World X = east_min + home_x = -4+4
-        self.declare_parameter("coverage_zone_x_max", 8.0)   # World X = east_max + home_x = 4+4
-        self.declare_parameter("coverage_zone_y_min", 65.0)  # World Y = north_min + home_y = 55+10
-        self.declare_parameter("coverage_zone_y_max", 70.0)  # World Y = north_max + home_y = 60+10
+        # 覆盖 — 侦察区场地局部坐标 (forward/right)
+        self.declare_parameter("coverage_zone_forward_min", 55.0)
+        self.declare_parameter("coverage_zone_forward_max", 60.0)
+        self.declare_parameter("coverage_zone_right_min", -4.0)
+        self.declare_parameter("coverage_zone_right_max", 4.0)
+        self.declare_parameter("home_x", 4.0)
+        self.declare_parameter("home_y", 10.0)
+        self.declare_parameter("layout_heading_deg", 0.0)
         self.declare_parameter("coverage_grid_resolution", 0.5)
         self.declare_parameter("coverage_fov_half_angle", 35.0)
         self.declare_parameter("coverage_complete_ratio", 0.95)

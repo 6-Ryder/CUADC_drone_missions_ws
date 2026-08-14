@@ -6,6 +6,7 @@
 # launch 只启动任务节点。区别仅是 launch 换 quick_flight.launch.py
 # (mission_params_quick.yaml + servo_params_quick.yaml: 单次降高 2.4m +
 # marker_only 视觉 + 放宽对心 + 一次全开双投)。
+# 默认场地方向为北偏东 30°；真机不会生成 SDF，必须确认实体场地方向一致。
 #
 # 用法:
 #   # 现场终端直接运行快速投放全流程
@@ -47,12 +48,23 @@ fail()  { error "$*"; exit 1; }
 
 MODE="mission"
 LAUNCH_ARGS=()
+LAYOUT_HEADING_DEG="30.0"
+HAS_LAYOUT_HEADING=0
 for arg in "$@"; do
   case "$arg" in
     --agent-only) MODE="agent" ;;
+    layout_heading_deg:=*)
+      LAYOUT_HEADING_DEG="${arg#layout_heading_deg:=}"
+      HAS_LAYOUT_HEADING=1
+      LAUNCH_ARGS+=("$arg")
+      ;;
     *) LAUNCH_ARGS+=("$arg") ;;
   esac
 done
+# 未显式传参时，将默认方向一并传给 quick_flight.launch.py。
+if [ "$HAS_LAYOUT_HEADING" -eq 0 ]; then
+  LAUNCH_ARGS+=("layout_heading_deg:=${LAYOUT_HEADING_DEG}")
+fi
 
 mkdir -p "$LOG_DIR/ros"
 export ROS_LOG_DIR="$LOG_DIR/ros"
