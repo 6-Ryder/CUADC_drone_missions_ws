@@ -727,16 +727,6 @@ class VisionPipelineNode(Node):
                 ):
                     marker_dets = self._marker_refiner.refine(image, marker_dets)
                     marker_source = "yolo+blue"
-                expected_diameter = (
-                    (self.get_parameter("fx").value + self.get_parameter("fy").value)
-                    * 0.5 / max(self._current_altitude, 0.5)
-                )
-                marker_dets = self._marker_refiner.filter_by_expected_diameter(
-                    marker_dets,
-                    expected_diameter,
-                    self.get_parameter("drop_marker_min_scale_ratio").value,
-                    self.get_parameter("drop_marker_max_scale_ratio").value,
-                )
 
         # 发布投放区标识检测
         if self._marker_refiner:
