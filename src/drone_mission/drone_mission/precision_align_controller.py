@@ -264,6 +264,12 @@ class PrecisionAlignController:
             self._brake_until = 0.0
             self._release_ready = False
 
+        smooth_du = float(self._smooth_dx) * width
+        smooth_dv = float(self._smooth_dy) * height
+        ground_forward_error_m, ground_right_error_m = self._ground_error_m(
+            smooth_du, smooth_dv, altitude,
+        ) if continuous else (0.0, 0.0)
+
         target_world_xy = self._world_xy(target)
         self._last_status = PrecisionAlignStatus(
             source=source,
@@ -276,6 +282,10 @@ class PrecisionAlignController:
             stable_count=self._stable_count,
             lost_frames=0,
             target_world_xy=target_world_xy,
+            ground_forward_error_m=ground_forward_error_m,
+            ground_right_error_m=ground_right_error_m,
+            altitude_m=altitude,
+            continuous=continuous,
             release_ready=False,
             reason=reason,
         )
@@ -545,6 +555,8 @@ class PrecisionAlignController:
             f"raw=({s.raw_dx_norm:+.4f},{s.raw_dy_norm:+.4f}) "
             f"smooth=({s.smooth_dx_norm:+.4f},{s.smooth_dy_norm:+.4f}) "
             f"world={world_label} "
+            f"ground=({s.ground_forward_error_m:+.3f},{s.ground_right_error_m:+.3f})m "
+            f"alt={s.altitude_m:.2f}m continuous={s.continuous} "
             f"stable={s.stable_count} cmd=({s.command_forward:+.3f},{s.command_right:+.3f})"
         )
 
