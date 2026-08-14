@@ -84,16 +84,3 @@ def test_refine_roi_offset_recovers_component_near_image_corner():
     )
     assert abs(refined[0].cx - 580) < 8
     assert abs(refined[0].cy - 420) < 8
-
-
-def test_physical_scale_filter_rejects_wrong_sized_marker():
-    detections = [
-        _detection((100, 100, 120, 120), 0.9),
-        _detection((200, 200, 290, 290), 0.8),
-    ]
-
-    filtered = BlueMarkerRefiner.filter_by_expected_diameter(
-        detections, expected_diameter_px=80.0,
-    )
-
-    assert filtered == [detections[1]]

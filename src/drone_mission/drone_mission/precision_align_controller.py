@@ -466,7 +466,6 @@ class PrecisionAlignController:
 
         cx, cy, width, height = self._camera_geometry()
         diag = max(math.hypot(width, height), 1.0)
-        world_gate = float(self._param("precision_align_target_world_gate", 1.5))
         jump_gate = float(self._param("precision_align_max_jump_diag_ratio", 0.45))
         center_reject = float(self._param("precision_align_reject_center_ratio", 0.28))
 
@@ -475,19 +474,6 @@ class PrecisionAlignController:
             u = float(self._field(target, "center_u", cx))
             v = float(self._field(target, "center_v", cy))
             center_ratio = math.hypot(u - cx, v - cy) / diag
-
-            world_xy = self._world_xy(target)
-            world_ratio = 0.0
-            world_error = None
-            if self._target_hint_xy is not None and self._locked_pixel_uv is None:
-                if world_xy is None:
-                    world_ratio = 1.0
-                else:
-                    tx, ty = self._target_hint_xy
-                    world_error = math.hypot(world_xy[0] - tx, world_xy[1] - ty)
-                    if world_error > world_gate:
-                        continue
-                    world_ratio = min(world_error / max(world_gate, 0.01), 1.0)
 
             continuity_ratio = center_ratio
             if self._locked_pixel_uv is not None:
@@ -502,15 +488,14 @@ class PrecisionAlignController:
             # 评分权重设计原则 (越小越好):
             #   0.68 continuity_ratio  — 主项: 同一目标的帧间像素位移, 防止锁定跳变
             #   0.32 center_ratio       — 辅项: 距画面中心的归一化距离, 倾向选居中的目标
-            #   0.08 world_ratio        — 弱项: 距预期 World 位置的距离, 仅在未锁定时生效
             #  -0.04 confidence         — 微调: 轻微偏好高置信度 (负权重→置信度越高 score 越低)
             #
             # continuity_ratio 占主导 (~65%) 确保锁定的目标不会被画面边缘的新目标"抢走".
-            # world_ratio 权重很小 (~7%) 因为 World 坐标在高空时噪声大, 仅作弱先验.
+            # 注意: 记忆世界坐标 (target_hint) 不再参与评分/过滤 — 对心伺服一切以
+            # 视觉像素为准, 搜索期记忆点与下降期投影偏差不应拒绝高置信度目标.
             score = (
                 0.68 * continuity_ratio
                 + 0.32 * center_ratio
-                + 0.08 * world_ratio
                 - 0.04 * float(self._field(target, "confidence", 0.0))
             )
             scored.append((score, target, source))
