@@ -35,6 +35,13 @@ class BlueMarkerRefiner:
         self.min_circularity = min_circularity
         self.min_component_diameter = min_component_diameter
 
+    def set_thresholds(
+        self, min_blue_ratio: float, min_circularity: float,
+    ) -> None:
+        """运行时切换蓝验证门槛 (B1: 低空下降段放宽, 防运动模糊误杀)."""
+        self.min_detection_blue_ratio = min_blue_ratio
+        self.min_circularity = min_circularity
+
     @staticmethod
     def _blue_mask(image: np.ndarray) -> np.ndarray:
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)

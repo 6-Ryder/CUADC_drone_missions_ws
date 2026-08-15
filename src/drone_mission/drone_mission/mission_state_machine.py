@@ -384,6 +384,8 @@ class MissionFSM(Node):
         self.declare_parameter("drop_align_stall_stable_band", 5.0)
         self.declare_parameter("drop_align_stall_duration", 2.0)
         self.declare_parameter("precision_align_fallback_max_pixel_error", 0.0)  # 0=禁用兜底
+        # A 方案: 下降全程曾对心 (最佳地面误差 ≤ 阈值) 兜底投放, 0=禁用
+        self.declare_parameter("precision_align_fallback_max_ground_error", 0.4)
         self.declare_parameter("drop_descend_speed", 0.5)
         # 降落区 simple 模式 (landing_simple_mode 默认关闭 = 主任务逻辑)
         self.declare_parameter("landing_simple_mode", False)

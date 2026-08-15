@@ -45,6 +45,8 @@ class DropState:
         self._precision_aligner = PrecisionAlignController(fsm)
         self._descend_retry_count: int = 0
         self._descend_best_pixel_error: float = float("inf")
+        # A 方案: 下降全程最佳地面误差 (曾对心的物理证据, 跨重试保留)
+        self._descend_best_ground_error: float = float("inf")
         self._precision_align_failed: bool = False
         self._final_descent_started: bool = False
         self._descent_ready_latched: bool = False
@@ -78,6 +80,7 @@ class DropState:
         self._last_descend_log_time = 0.0
         self._descend_retry_count = 0
         self._descend_best_pixel_error = float("inf")
+        self._descend_best_ground_error = float("inf")
         self._precision_align_failed = False
         self._final_descent_started = False
         self._descent_ready_latched = False
@@ -169,6 +172,16 @@ class DropState:
         status = self._current_align_status()
         if status.pixel_error < self._descend_best_pixel_error:
             self._descend_best_pixel_error = status.pixel_error
+        # A 方案: 连续伺服模式下跟踪全程最佳地面误差 (物理对心证据).
+        # 仅 PrecisionAlignStatus 提供地面误差字段, legacy VisualAlignStatus 没有.
+        if self._precision_enabled():
+            p_status = self._precision_aligner.last_status
+            if p_status.continuous:
+                ground_err = math.hypot(
+                    p_status.ground_forward_error_m, p_status.ground_right_error_m
+                )
+                if ground_err < self._descend_best_ground_error:
+                    self._descend_best_ground_error = ground_err
 
         height_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
         descent_ready = self._check_descent_ready(height_error)
@@ -300,6 +313,12 @@ class DropState:
             if self._precision_align_failed:
                 self._precision_align_failed = False
                 self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
+                if self._ground_error_fallback_allow_drop():
+                    self._fsm.get_logger().warn(
+                        "DESCEND: 目标丢失但下降全程曾对心, 直接投放 "
+                        f"best_ground_error={self._descend_best_ground_error:.3f}m"
+                    )
+                    return "EXECUTE_DROP"
                 self._takeover("DESCEND: precision alignment target lost after retry")
                 return None
             self._warn_descend_throttled("DESCEND: 低空精校未取得可用目标, 继续等待复查")
@@ -316,6 +335,12 @@ class DropState:
             if self._precision_align_failed:
                 self._precision_align_failed = False
                 self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
+                if self._ground_error_fallback_allow_drop():
+                    self._fsm.get_logger().warn(
+                        "DESCEND: 目标丢失但下降全程曾对心, 直接投放 "
+                        f"best_ground_error={self._descend_best_ground_error:.3f}m"
+                    )
+                    return "EXECUTE_DROP"
                 self._takeover("DESCEND: precision alignment target lost after retry")
                 return None
             self._warn_descend_throttled("DESCEND: 到达投放高度但目标未居中/不可见, 继续等待复查")
@@ -740,17 +765,35 @@ class DropState:
         )
 
     def _quick_fallback_allow_drop(self, status) -> bool:
-        """quick 模式超时兜底: 像素误差有限且 ≤ 门限才允许直接投放, 不做盲投."""
+        """quick 模式超时兜底: 像素误差有限且 ≤ 门限, 或曾对心 (A 方案)."""
         if not self._fsm.get_param("quick_drop_mode", False):
             return False
         limit = float(self._fsm.get_param(
             "precision_align_fallback_max_pixel_error", 0.0
         ))
+        if (
+            limit > 0.0
+            and math.isfinite(status.pixel_error)
+            and status.pixel_error <= limit
+        ):
+            return True
+        # TARGET_LOST 走 _nudge_to_visible_drop_target 另一分支, 不会到这里;
+        # A 方案: 曾对心地面误差证据兜底, 不依赖当前像素有效性
+        return self._ground_error_fallback_allow_drop()
+
+    def _ground_error_fallback_allow_drop(self) -> bool:
+        """A 方案: 曾对心 (下降全程最佳地面误差 ≤ 阈值) 即允许投放."""
+        if not self._fsm.get_param("quick_drop_mode", False):
+            return False
+        limit = float(self._fsm.get_param(
+            "precision_align_fallback_max_ground_error", 0.4
+        ))
         if limit <= 0.0:
             return False
-        # TARGET_LOST 走 _nudge_to_visible_drop_target 另一分支, 不会到这里;
-        # 兜底仍要求有限像素误差, 丢失时 pixel_error=NaN 自然被拒
-        return math.isfinite(status.pixel_error) and status.pixel_error <= limit
+        return (
+            math.isfinite(self._descend_best_ground_error)
+            and self._descend_best_ground_error <= limit
+        )
 
     def _command_descend_target(self, drop_height: float) -> None:
         pos = self._fsm.bridge.get_current_position()

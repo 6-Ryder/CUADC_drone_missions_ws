@@ -128,6 +128,7 @@
     precision_align_final_drop_height: 1.5      # 未使用 (final_descent 关闭)
     precision_align_final_descent_speed: 0.25   # 未使用 (final_descent 关闭)
     precision_align_fallback_max_pixel_error: 60.0 # quick 兜底: 超时重试耗尽后像素 ≤60px 才直接投
+    precision_align_fallback_max_ground_error: 0.4 # A 方案: 曾对心 (地面误差≤0.4m) 兜底投放, 0=禁用
     precision_align_log_interval: 0.75
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
     cylinder_approach_slow_speed: 0.18   # 接近对心后慢速微调 (quick 提速至 0.18, 真机保守档)

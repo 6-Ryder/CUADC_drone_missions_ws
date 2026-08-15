@@ -206,6 +206,10 @@ class VisionPipelineNode(Node):
         self.declare_parameter("drop_marker_min_area", 80)
         self.declare_parameter("drop_marker_min_aspect_ratio", 0.4)
         self.declare_parameter("drop_marker_min_circularity", 0.35)
+        # B1: 低空下降段放宽门槛 (运动模糊误杀 → 目标断裂)
+        self.declare_parameter("drop_marker_descend_min_blue_ratio", 0.3)
+        self.declare_parameter("drop_marker_descend_min_circularity", 0.25)
+        self.declare_parameter("drop_marker_descend_alt_threshold", 4.5)
         self.declare_parameter("drop_marker_min_diameter", 30)
         self.declare_parameter("drop_marker_min_scale_ratio", 0.45)
         self.declare_parameter("drop_marker_max_scale_ratio", 1.8)
@@ -322,6 +326,7 @@ class VisionPipelineNode(Node):
                 "drop_marker_min_diameter"
             ).value,
         )
+        self._marker_refine_thresholds_applied: Optional[tuple[float, float]] = None
         self._landing_refiner = LandingPadRefiner(
             adaptive_thresh_block=self.get_parameter("landing_adaptive_thresh_block").value,
             circle_min_area=self.get_parameter("landing_circle_min_area").value,
@@ -663,6 +668,33 @@ class VisionPipelineNode(Node):
         max_age = float(self.get_parameter("vision_pose_max_age_s").value)
         return 0.0 <= now - self._last_pose_monotonic <= max_age
 
+    def _apply_marker_refine_thresholds(self) -> None:
+        """B1: 低空下降段放宽蓝验证门槛, 避免运动模糊误杀致目标断裂.
+
+        触发条件: 0 < 高度 < drop_marker_descend_alt_threshold (默认 4.5m).
+        8/14 晚卡死架次丢失高度 3.15-3.75m, 阈值须覆盖该区间.
+        """
+        alt = self._current_altitude
+        descend_thr = float(self.get_parameter(
+            "drop_marker_descend_alt_threshold").value)
+        relaxed = 0.0 < alt < descend_thr
+        blue_ratio = float(self.get_parameter(
+            "drop_marker_descend_min_blue_ratio" if relaxed
+            else "drop_marker_min_blue_ratio").value)
+        circularity = float(self.get_parameter(
+            "drop_marker_descend_min_circularity" if relaxed
+            else "drop_marker_min_circularity").value)
+        applied = (blue_ratio, circularity)
+        if applied != self._marker_refine_thresholds_applied:
+            self._marker_refiner.set_thresholds(blue_ratio, circularity)
+            self._marker_refine_thresholds_applied = applied
+            self.get_logger().info(
+                "DROP_MARKER: refine 门槛切换 -> "
+                f"{'放宽 (下降段)' if relaxed else '标定'} "
+                f"blue_ratio={blue_ratio} circularity={circularity} "
+                f"alt={alt:.1f}m"
+            )
+
     def _project_world_xy(self, u: float, v: float) -> Optional[tuple[float, float]]:
         """Project a pixel using only a fresh full 6-DoF pose."""
         if not self._pose_is_fresh() or self._coord_xform is None:
@@ -725,6 +757,7 @@ class VisionPipelineNode(Node):
                     self.get_parameter("drop_marker_refine_enable").value
                     and self._marker_refiner
                 ):
+                    self._apply_marker_refine_thresholds()
                     marker_dets = self._marker_refiner.refine(image, marker_dets)
                     marker_source = "yolo+blue"
 

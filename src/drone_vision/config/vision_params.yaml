@@ -42,6 +42,10 @@
     drop_marker_min_area: 80               # 蓝色连通域最小像素面积
     drop_marker_min_aspect_ratio: 0.4       # 过滤过度狭长的蓝色杂物
     drop_marker_min_circularity: 0.35       # 允许透视椭圆, 拒绝线缆/长条
+    # B1: 低空下降段放宽门槛 (运动模糊误杀 → 目标断裂)
+    drop_marker_descend_min_blue_ratio: 0.3
+    drop_marker_descend_min_circularity: 0.25
+    drop_marker_descend_alt_threshold: 4.5  # 低于该高度启用放宽, 覆盖 3.15-3.75m 丢失区间
     drop_marker_min_diameter: 30            # 过滤远小于 1m 标识投影的蓝色杂物
     drop_marker_min_scale_ratio: 0.45       # 实测直径/1m理论投影下限
     drop_marker_max_scale_ratio: 1.8        # 实测直径/1m理论投影上限
