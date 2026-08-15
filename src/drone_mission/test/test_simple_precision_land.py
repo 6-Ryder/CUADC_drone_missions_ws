@@ -392,9 +392,9 @@ def test_quick_params_enable_simple_landing():
 
 
 def test_quick_real_blind_altitude_above_h_detection_limit():
-    """真机: 盲降切换高度 1.3m, 高于 H 近地失效线 (~0.9m), 视觉仍有效时完成对心交接."""
+    """真机: 盲降切换高度 1.6m, 高于 H 近地失效线 (~0.9m), 视觉仍有效时完成对心交接."""
     p = _quick_params("mission_params_quick.yaml")
-    assert p["landing_blind_altitude"] == 1.3
+    assert p["landing_blind_altitude"] == 1.6
 
 
 def test_quick_sim_blind_altitude_above_h_detection_limit():
