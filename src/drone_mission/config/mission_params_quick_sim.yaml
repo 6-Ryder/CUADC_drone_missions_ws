@@ -45,10 +45,10 @@
     area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
-    # local: forward=[55,60], right=[-4,4]
+    # local: forward=[55,60], right=[-3,4]  (左边界右移1m: 实飞左偏 1m 补偿)
     area2_forward_min: 55.0
     area2_forward_max: 60.0
-    area2_right_min: -4.0
+    area2_right_min: -3.0
     area2_right_max: 4.0
     area2_altitude: 2.5           # 侦察区低空扫描高度 (m, NED z 负值)
 
