@@ -391,10 +391,10 @@ def test_quick_params_enable_simple_landing():
         assert p["landing_target_reacquire_timeout"] == 1.0
 
 
-def test_quick_real_blind_altitude_matches_test_mission():
-    """真机: 照搬 test_mission 0.5m (真机 H 标识大, 近地可检测)."""
+def test_quick_real_blind_altitude_above_h_detection_limit():
+    """真机: 盲降切换高度 1.3m, 高于 H 近地失效线 (~0.9m), 视觉仍有效时完成对心交接."""
     p = _quick_params("mission_params_quick.yaml")
-    assert p["landing_blind_altitude"] == 0.5
+    assert p["landing_blind_altitude"] == 1.3
 
 
 def test_quick_sim_blind_altitude_above_h_detection_limit():
