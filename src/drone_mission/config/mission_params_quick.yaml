@@ -154,7 +154,8 @@
     landing_target_reacquire_timeout: 1.0  # 低空目标失效后最多重捕获 1s
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
-    landing_blind_altitude: 0.5   # simple: 伺服降到 0.5m 才切盲降 (test_mission 值)
+    landing_blind_altitude: 1.3   # 盲降切换高度: 0.5→1.3m, 高于 H 近地失效线 (~0.9m, SITL 实测),
+                                  # 在视觉仍有效时完成对心交接, 避免 0.9m 以下检测断裂触发 PX4 LAND 兜底
     landing_blind_align_tolerance_px: 30.0  # 切入盲降前最大像素误差
     landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
     landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
