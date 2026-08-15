@@ -69,17 +69,24 @@ class CylinderApproachState:
         self._fsm.get_logger().info(
             f"APPROACH: 目标位置 World({self._target_world_xy[0]:.2f}, {self._target_world_xy[1]:.2f})"
         )
-        # 不做投放区边界硬拒绝 (8/15 实测: 同一目标三架次世界坐标散布 >7m,
-        # 而旧检查 margin=0.5, 真目标被随机误拒 2/4 架次)。
-        # 世界坐标 = PX4 定位 + 视觉换算, 仅用于粗导航; 真正收敛靠像素伺服
-        # (pixel_error<35px 稳定 10 帧)。防误检由搜索阶段入库过滤 + conf
-        # 门槛 + 2m 位置匹配兜底。
+        if hasattr(self._fsm, "is_in_drop_zone_world"):
+            if not self._fsm.is_in_drop_zone_world(
+                self._target_world_xy[0], self._target_world_xy[1], margin=0.5
+            ):
+                self._fsm.get_logger().error(
+                    "APPROACH: 目标坐标不在投放区内, 拒绝逼近 "
+                    f"World({self._target_world_xy[0]:.2f}, {self._target_world_xy[1]:.2f})"
+                )
+                self._target_world_xy = None
 
     def _goto_target_xy(self, speed: float) -> float:
         """飞到记忆目标正上方, 返回水平误差."""
         from px4_control.telemetry import ned_to_world, world_to_ned
 
         tx, ty = self._target_world_xy
+        if hasattr(self._fsm, "is_in_drop_zone_world"):
+            if not self._fsm.is_in_drop_zone_world(tx, ty, margin=0.5):
+                raise ValueError(f"target outside drop zone: ({tx:.2f}, {ty:.2f})")
         pos = self._fsm.bridge.get_current_position()
         drone_wx, drone_wy, _ = ned_to_world(pos.north, pos.east, pos.down)
         error = math.hypot(drone_wx - tx, drone_wy - ty)
