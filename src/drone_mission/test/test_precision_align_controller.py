@@ -507,3 +507,75 @@ def test_unconfigured_tight_window_height_keeps_single_window():
     # 即便 1.5m 低于任何切换高度, 仍用精校段窗口 35 → aligned
     controller.step([], _window_target(center_u=640.0 + 33.0), drop_height=1.5)
     assert controller.last_status.stable_count == 1
+
+
+def _marker(center_u, center_v, world_x, world_y, confidence=0.9):
+    return {
+        "confidence": confidence,
+        "center_u": center_u,
+        "center_v": center_v,
+        "world_position_valid": True,
+        "world_x": world_x,
+        "world_y": world_y,
+    }
+
+
+def _gate_candidates():
+    """居中但远离记忆点 / 偏右但贴近记忆点 — 同一批候选, 只看门控是否生效."""
+    return (
+        _marker(640.0, 480.0, 50.0, 20.0),   # center_ratio=0, 距 hint 17m
+        _marker(740.0, 480.0, 42.2, 5.1),    # center_ratio=0.0625, 距 hint 0.22m
+    )
+
+
+def test_world_gate_off_by_default_lets_off_hint_candidate_win():
+    """门控默认关闭: 远离记忆点但更居中的候选获胜 (一切以视觉像素为准)."""
+    fsm = _Fsm({"precision_align_target_source": "marker"})
+    controller = PrecisionAlignController(fsm)
+    controller.reset(target_hint_xy=(42.0, 5.0))
+
+    centered_off_hint, off_center_near_hint = _gate_candidates()
+    selected, _source, reason = controller._choose_target(
+        [centered_off_hint, off_center_near_hint], [],
+    )
+
+    assert reason == "tracking"
+    assert selected is centered_off_hint
+
+
+def test_world_gate_on_rejects_the_off_hint_candidate():
+    """门控开启: 同一批候选, 远处目标被拒, 改选贴近记忆点的那一个."""
+    fsm = _Fsm({
+        "precision_align_target_source": "marker",
+        "precision_align_world_gate_enable": True,
+        "precision_align_target_world_gate": 1.5,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset(target_hint_xy=(42.0, 5.0))
+
+    centered_off_hint, off_center_near_hint = _gate_candidates()
+    selected, _source, reason = controller._choose_target(
+        [centered_off_hint, off_center_near_hint], [],
+    )
+
+    assert reason == "tracking"
+    assert selected is off_center_near_hint
+
+
+def test_world_gate_on_rejects_every_candidate_when_all_are_off_hint():
+    """门控开启且全部候选都超距 → 无候选可用 (这正是 quick 当年卡死的机制)."""
+    fsm = _Fsm({
+        "precision_align_target_source": "marker",
+        "precision_align_world_gate_enable": True,
+        "precision_align_target_world_gate": 1.5,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset(target_hint_xy=(42.0, 5.0))
+
+    centered_off_hint, _ = _gate_candidates()
+    selected, _source, reason = controller._choose_target(
+        [centered_off_hint], [],
+    )
+
+    assert selected is None
+    assert reason == "all_candidates_rejected"

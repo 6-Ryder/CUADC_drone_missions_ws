@@ -466,6 +466,15 @@ class PrecisionAlignController:
 
         cx, cy, width, height = self._camera_geometry()
         diag = max(math.hypot(width, height), 1.0)
+        # 记忆世界坐标门控开关 (默认关闭 = 一切以视觉像素为准).
+        # 开启后, 未锁定时距搜索期记忆点超过 world_gate 的候选直接拒绝,
+        # 距离还作为弱项参与评分 (权重 0.08).
+        world_gate_enabled = bool(
+            self._param("precision_align_world_gate_enable", False)
+        )
+        world_gate = float(
+            self._param("precision_align_target_world_gate", 1.5)
+        )
         jump_gate = float(self._param("precision_align_max_jump_diag_ratio", 0.45))
         center_reject = float(self._param("precision_align_reject_center_ratio", 0.28))
 
@@ -474,6 +483,28 @@ class PrecisionAlignController:
             u = float(self._field(target, "center_u", cx))
             v = float(self._field(target, "center_v", cy))
             center_ratio = math.hypot(u - cx, v - cy) / diag
+
+            # 记忆世界坐标门控 (默认关闭, 见上方 world_gate_enabled).
+            # 关闭时 world_ratio 恒为 0, 评分式中的 0.08 项不产生任何影响.
+            world_ratio = 0.0
+            if (
+                world_gate_enabled
+                and self._target_hint_xy is not None
+                and self._locked_pixel_uv is None
+            ):
+                world_xy = self._world_xy(target)
+                if world_xy is None:
+                    world_ratio = 1.0
+                else:
+                    hint_x, hint_y = self._target_hint_xy
+                    world_error = math.hypot(
+                        world_xy[0] - hint_x, world_xy[1] - hint_y,
+                    )
+                    if world_error > world_gate:
+                        continue
+                    world_ratio = min(
+                        world_error / max(world_gate, 0.01), 1.0,
+                    )
 
             continuity_ratio = center_ratio
             if self._locked_pixel_uv is not None:
@@ -488,14 +519,15 @@ class PrecisionAlignController:
             # 评分权重设计原则 (越小越好):
             #   0.68 continuity_ratio  — 主项: 同一目标的帧间像素位移, 防止锁定跳变
             #   0.32 center_ratio       — 辅项: 距画面中心的归一化距离, 倾向选居中的目标
+            #   0.08 world_ratio        — 弱项: 距预期 World 位置的距离, 仅在门控
+            #                             开启且未锁定时非零 (默认关闭 → 恒为 0)
             #  -0.04 confidence         — 微调: 轻微偏好高置信度 (负权重→置信度越高 score 越低)
             #
             # continuity_ratio 占主导 (~65%) 确保锁定的目标不会被画面边缘的新目标"抢走".
-            # 注意: 记忆世界坐标 (target_hint) 不再参与评分/过滤 — 对心伺服一切以
-            # 视觉像素为准, 搜索期记忆点与下降期投影偏差不应拒绝高置信度目标.
             score = (
                 0.68 * continuity_ratio
                 + 0.32 * center_ratio
+                + 0.08 * world_ratio
                 - 0.04 * float(self._field(target, "confidence", 0.0))
             )
             scored.append((score, target, source))

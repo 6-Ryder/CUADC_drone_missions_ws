@@ -325,6 +325,10 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_final_raw_pixel_tolerance", 30.0)
         self.declare_parameter("precision_align_tight_window_height", 0.0)
         self.declare_parameter("precision_align_min_confidence", 0.25)
+        # 记忆世界坐标门控开关 (默认关闭 = 候选选择一切以视觉像素为准).
+        # 开启后 precision_align_target_world_gate 才被读取: 未锁定时拒绝距
+        # 搜索期记忆点过远的候选, 并把距离作为 0.08 权重的弱项参与评分.
+        self.declare_parameter("precision_align_world_gate_enable", False)
         self.declare_parameter("precision_align_target_world_gate", 1.5)
         self.declare_parameter("precision_align_max_jump_diag_ratio", 0.55)
         self.declare_parameter("precision_align_reject_center_ratio", 0.28)

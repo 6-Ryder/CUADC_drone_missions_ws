@@ -211,6 +211,10 @@ class VisionPipelineNode(Node):
         self.declare_parameter("drop_marker_descend_min_circularity", 0.25)
         self.declare_parameter("drop_marker_descend_alt_threshold", 4.5)
         self.declare_parameter("drop_marker_min_diameter", 30)
+        # 尺寸一致性过滤开关 (默认关闭 = 只信 yolo+blue 高置信目标).
+        # 开启后按当前高度推算 1m 标识理论投影直径, 用下面两个比例窗口拒绝
+        # 尺寸异常的目标; 两者仅在开关为 True 时被读取.
+        self.declare_parameter("drop_marker_filter_by_diameter_enable", False)
         self.declare_parameter("drop_marker_min_scale_ratio", 0.45)
         self.declare_parameter("drop_marker_max_scale_ratio", 1.8)
         # 相机
@@ -760,6 +764,33 @@ class VisionPipelineNode(Node):
                     self._apply_marker_refine_thresholds()
                     marker_dets = self._marker_refiner.refine(image, marker_dets)
                     marker_source = "yolo+blue"
+                    if self.get_parameter(
+                        "drop_marker_filter_by_diameter_enable"
+                    ).value:
+                        # 尺寸一致性过滤: 按当前高度推算 1m 标识的理论投影直径,
+                        # 拒绝比例超出窗口的蓝色连通域 (地面杂色/尺度异常误检).
+                        # 关闭 (默认): 只信 yolo+blue 高置信目标.
+                        # 开启: 额外要求尺寸与高度假设一致.
+                        expected_diameter = (
+                            (
+                                self.get_parameter("fx").value
+                                + self.get_parameter("fy").value
+                            )
+                            * 0.5
+                            / max(self._current_altitude, 0.5)
+                        )
+                        marker_dets = (
+                            self._marker_refiner.filter_by_expected_diameter(
+                                marker_dets,
+                                expected_diameter,
+                                self.get_parameter(
+                                    "drop_marker_min_scale_ratio"
+                                ).value,
+                                self.get_parameter(
+                                    "drop_marker_max_scale_ratio"
+                                ).value,
+                            )
+                        )
 
         # 发布投放区标识检测
         if self._marker_refiner:
