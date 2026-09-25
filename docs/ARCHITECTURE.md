@@ -117,7 +117,7 @@ px4_msgs          ← PX4 DDS 消息定义 (v1/v4 隔离)
 | `field/` | Gazebo 场景模板和按 `layout_heading_deg` 生成的运行时场地 |
 | `real_flight_logs/` | 真机飞行日志 (按日期) + 飞控参数修改记录 |
 | `log/` | SITL 仿真日志 (209 个子目录) |
-| `controller_params_v3.params` | 37KB PX4 控制器参数文件 |
+| `params_v4.params` | 37KB PX4 控制器参数文件 (真机基线) |
 
 ---
 
@@ -322,7 +322,7 @@ SITL：ROS Humble + workspace(v1) + isolated overlay(v4) → UDP Agent → PX4 S
 最近一次完整仿真：`log/simulation_20260730_192807/ros2_system.log`。
 关键证据包括两条“投放成功”、覆盖率最终 `1.0`、视觉盲降、SITL 近地停滞确认接地和 `mission_end: success=True`。
 
-代码测试与构建命令见 [README.md](README.md) 和 [DEPLOYMENT.md](DEPLOYMENT.md)。
+代码测试与构建命令见 [README.md](README.md) 和 [DEPLOYMENT.md](Deployment/DEPLOYMENT.md)。
 逐文件调用链和循序阅读路径见 [CODE_READING_GUIDE.md](CODE_READING_GUIDE.md)。
 
 ## 14. 已知限制

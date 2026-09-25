@@ -8,24 +8,28 @@
 
 ## 0. 你们拟采用的分阶段路线
 
-### 阶段 A：先部署 TF02‑Pro
+### 阶段 A：已落地（实际为 TFmini，不是 TF02‑Pro）
 
-这一步只改善垂直高度估计，不会解决 GPS 的水平漂移。当前仓库已经有距离融合参数，但硬件驱动尚未打开：`SENS_EN_TF02PRO=0`、`EKF2_RNG_CTRL=1`。[controller_params_v3.params](../controller_params_v3.params:456)
-
-接入并确认实际接口后，建议只做以下改动：
+这一步只改善垂直高度估计，不会解决 GPS 的水平漂移。**该阶段已随 `params_v4.params` 完成**，但实际装的是 Benewake **TFmini**、接在 **GPS 2 口**，并非本文原先设想的 TF02‑Pro。相对 v3 的实际改动是：
 
 ```text
-SENS_EN_TF02PRO: 0 → 1
-EKF2_RNG_CTRL:   保持 1（Conditional Range Aid）
+SENS_TFMINI_CFG:  0   → 202          # 0=禁用；202 = GPS 2 口（波特率 Auto）
+SENS_TFMINI_HW:   新增 → 1           # 1 = TFMINI
+EKF2_HGT_REF:     1   → 2            # 1=GPS → 2=测距仪
+EKF2_GPS_CTRL:    7   → 5            # 关掉 bit 1（高度融合），高度改由测距仪主导
+EKF2_RNG_POS_X/Y: 0 / 0 → 0.33 / −0.32   # 测距仪安装偏移
+EKF2_IMU_POS_Z:   0   → −0.2         # IMU 安装位置
 ```
 
-然后通过 PX4 的 `distance_sensor`、`vehicle_local_position.dist_bottom_valid` 和 `estimator_status_flags.cs_rng_hgt` 验证传感器确实被读取和融合。不要为了启用 TF02‑Pro 修改任务的 `home_x/home_y`、航点或速度。
+`SENS_EN_TF02PRO` 保持 `0`，`EKF2_RNG_CTRL` 保持 `1`（Conditional Range Aid）。验证仍走 PX4 的 `distance_sensor`、`vehicle_local_position.dist_bottom_valid` 和 `estimator_status_flags.cs_rng_hgt`。不要为了启用测距仪修改任务的 `home_x/home_y`、航点或速度。
 
-PX4 v1.17 已包含 `tf02pro` 距离传感器驱动；具体 I2C/UART 接口、地址和线缆必须按照 7‑Nano 与传感器版本的配件说明核对。[PX4 TF02‑Pro 驱动](https://docs.px4.io/v1.17/en/modules/modules_driver_distance_sensor)
+**GPS 2 口已被测距仪占用**，因此 `GPS_2_CONFIG` 必须保持 `0`；将来若要增加第二块 GPS，需先另找接口。
+
+若改用 TF02‑Pro，PX4 v1.17 已包含 `tf02pro` 驱动；具体 I2C/UART 接口、地址和线缆必须按照 7‑Nano 与传感器版本的配件说明核对。[PX4 距离传感器驱动](https://docs.px4.io/v1.17/en/modules/modules_driver_distance_sensor)
 
 ### 阶段 B：再部署 C‑RTK
 
-RTK 部署时保留 TF02‑Pro，不需要为了两种传感器增加 ROS 节点。RTK 收敛期间让 ROS 提前运行，但任务必须停在等待状态；只有 RTK 质量满足条件才允许起飞。这样既能保留 TF02‑Pro 的低空高度收益，也不会让普通 GPS 的平面误差进入任务航点闭环。
+RTK 部署时保留已装好的测距仪（TFmini），不需要为了两种传感器增加 ROS 节点。RTK 收敛期间让 ROS 提前运行，但任务必须停在等待状态；只有 RTK 质量满足条件才允许起飞。这样既能保留测距仪的低空高度收益，也不会让普通 GPS 的平面误差进入任务航点闭环。
 
 ## 1. 最终方案与不变量
 
@@ -83,7 +87,7 @@ PX4 会把 QGroundControl 传来的 `GPS_RTCM_DATA` 转发给 GPS/Rover；基站
 - 基站端的测量天线、Rover 端天线、机载固定支架、GPS 数据线和基站 USB 数据线。
 - 能与 QGroundControl 双向通信的机载数传/Wi-Fi；飞行时不能依赖系留 USB。其上行余量必须覆盖 RTCM，且必须确认 MAVLink 2。
 - 运行 QGroundControl 的电脑（RTK 基站设置不使用移动端 QGC）。
-- 备用的当前 `controller_params_v3.params` 导出和一块已验证的 SD 卡。
+- 备用的当前 `params_v4.params` 导出和一块已验证的 SD 卡。
 
 CUAV 文档说明 C-RTK 9P/9Ps 与 PX4 可即插即用；CUAV 7-Nano 的 GPS 接口也说明可连接 C-RTK 系列。仍须以实物接口和随件线缆为准，禁止以外观相似的线缆盲插。[CUAV C-RTK 配置](https://doc.cuav.net/gps/c-rtk-series/zh-hans/c-rtk-9ps/parameter.html) [7-Nano 手册](https://manual.cuav.net/controller/7-Nano_manual_en.pdf)
 
@@ -126,7 +130,7 @@ listener estimator_status_flags 5
 mavlink status
 ```
 
-期望 `vehicle_gps_position` 中有 `fix_type=6`（RTK Fixed）、`rtcm_msg_used=2`、`rtcm_crc_failed=false`，并且 `rtcm_injection_rate` 为正。`estimator_status_flags` 中应当有 `cs_gnss_pos=true`、`cs_gnss_vel=true`、`cs_gnss_fault=false`。字段定义见本工作空间的 [SensorGps.msg](../src/px4_msgs/msg/SensorGps.msg)；其含义也见 [PX4 SensorGps 文档](https://docs.px4.io/v1.17/en/msg_docs/SensorGps)。
+期望 `vehicle_gps_position` 中有 `fix_type=6`（RTK Fixed）、`rtcm_msg_used=2`、`rtcm_crc_failed=false`，并且 `rtcm_injection_rate` 为正。`estimator_status_flags` 中应当有 `cs_gnss_pos=true`、`cs_gnss_vel=true`、`cs_gnss_fault=false`。字段定义见本工作空间的 [SensorGps.msg](../../src/px4_msgs/msg/SensorGps.msg)；其含义也见 [PX4 SensorGps 文档](https://docs.px4.io/v1.17/en/msg_docs/SensorGps)。
 
 ### 4.3 收敛时间优化：不要每次从零开始 Survey-In
 
@@ -153,7 +157,7 @@ CUAV 对 9Ps 标称 RTK Survey-In 小于 60 s、热启动小于 1 s、冷启动�
 
 ## 5. PX4 参数：当前值、首飞设置与禁止项
 
-先在 QGC 导出参数，并保存为带日期的新文件；绝不覆盖仓库中的 `controller_params_v3.params`，它是当前基线记录。
+先在 QGC 导出参数，并保存为带日期的新文件；绝不覆盖仓库中的 `params_v4.params`，它是当前基线记录。
 
 ```sh
 # NuttX/QGC MAVLink Console：只用于读取和记录
@@ -352,11 +356,11 @@ rtk_data_timeout_s: 1.0
 
 ## 9. 与其他文档的关系
 
-- [ARCHITECTURE.md](ARCHITECTURE.md)：任务数据流、NED/World 坐标和 PX4/Jetson 边界。
+- [ARCHITECTURE.md](../ARCHITECTURE.md)：任务数据流、NED/World 坐标和 PX4/Jetson 边界。
 - [DEPLOYMENT.md](DEPLOYMENT.md)：工作空间构建、SITL 和现有真机启动入口。
-- [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)：遥控器、DDS、相机、舵机和接地现场清单。
-- [PARAMETER_USAGE_GUIDE.md](PARAMETER_USAGE_GUIDE.md)：任务航线、速度、相机与状态机参数；RTK 不改变它们的所有权。
-- `controller_params_v3.params`：历史真机基线。每次 RTK 参数变化都应新建带日期的导出，不要覆写。
+- [REAL_HARDWARE_DEBUG_GUIDE.md](../Debug/REAL_HARDWARE_DEBUG_GUIDE.md)：遥控器、DDS、相机、舵机和接地现场清单。
+- [PARAMETER_USAGE_GUIDE.md](../Debug/PARAMETER_USAGE_GUIDE.md)：任务航线、速度、相机与状态机参数；RTK 不改变它们的所有权。
+- `params_v4.params`：当前真机基线。每次 RTK 参数变化都应新建带日期的导出，不要覆写。
 
 ## 10. 首飞签字清单
 

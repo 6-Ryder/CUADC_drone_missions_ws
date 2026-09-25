@@ -46,7 +46,7 @@ CUAV 对 7-Nano 的官方接口定义为：`GPS&SAFETY` 可连接 C-RTK 系列�
 
 ## PX4 v1.17 参数：当前文件、建议与边界
 
-以下“当前值”来自仓库的 `controller_params_v3.params`，不是 PX4 官方默认值。修改前应从实机 QGC 再导出一份参数，修改后重启飞控并复查值。
+以下“当前值”来自仓库的 `params_v4.params`，不是 PX4 官方默认值。修改前应从实机 QGC 再导出一份参数，修改后重启飞控并复查值。
 
 | 参数 | 当前文件值 | RTK 部署处理 | 官方含义/边界 |
 |---|---:|---|---|
@@ -54,12 +54,12 @@ CUAV 对 7-Nano 的官方接口定义为：`GPS&SAFETY` 可连接 C-RTK 系列�
 | `GPS_1_PROTOCOL` | `1` | 保持现有经验证的 u-blox 配置；若实际 Rover 型号/协议不符，按其官方兼容说明处理，不要猜测协议编号。 | 本表不把它当作“开启 RTK”的开关。 |
 | `GPS_UBX_MODE` | `0` | 常规 QGC → 飞控 → Rover 的修正链路保持 `0`（Default）。 | PX4 明确说明大多数设置（含 RTK、非航向双 GPS）使用 Default；**只有**静态 Base 的 RTCM 直接进入 Rover UART2 时才用 Mode 5。[​PX4 参数参考](https://docs.px4.io/v1.17/en/advanced_config/parameter_reference#GPS_UBX_MODE) |
 | `MAV_PROTO_VER` | `2` | 保持 `2`，并以 `mavlink status` 验证实际数传链路。 | MAVLink2 是 RTK 低带宽链路的必要条件。[​PX4 RTK 指南](https://docs.px4.io/v1.17/en/gps_compass/rtk_gps) |
-| `EKF2_GPS_CTRL` | `7` | 保持首轮值。 | bit 0/1/2 分别为经纬度、高度、3D 速度融合；`7` 即三者开启。不要因单天线 C-RTK 而盲目加 bit 3；bit 3 仅为双天线航向融合。[​PX4 参数参考](https://docs.px4.io/v1.17/en/advanced_config/parameter_reference#EKF2_GPS_CTRL) |
+| `EKF2_GPS_CTRL` | `5` | 保持 `5`，**不要**改回 `7`。 | bit 0/1/2 分别为经纬度、高度、3D 速度融合；v4 为 `5` = 经纬度 + 3D 速度，**高度位已关闭**，因为高度基准已改由测距仪提供（`EKF2_HGT_REF=2`），改回 `7` 会与测距仪争抢高度基准。不要因单天线 C-RTK 而盲目加 bit 3；bit 3 仅为双天线航向融合。[​PX4 参数参考](https://docs.px4.io/v1.17/en/advanced_config/parameter_reference#EKF2_GPS_CTRL) |
 | `EKF2_REQ_FIX` | `3` | 首轮可先保持以验证 RTK 链路；若任务策略要求“未 RTK Fixed 禁止使用 GPS/执行任务”，评审后改为 `6`。 | 最小 GPS fix 类型；`6` = RTK fixed，默认值为 `3` = 3D fix。该参数是 EKF GPS 使用门槛，不是完整的任务状态机安全策略。[​PX4 参数参考](https://docs.px4.io/v1.17/en/advanced_config/parameter_reference#EKF2_REQ_FIX) |
 | `EKF2_REQ_EPH` | `3.0 m` | 先保留；待记录多架次 QGC/ULog 的 EPH、创新量和轨迹后再收紧。 | 用 GPS 所需的 EPH，v1.17 范围为 2–100 m；不能据此设成厘米级。[​PX4 参数参考](https://docs.px4.io/v1.17/en/advanced_config/parameter_reference#EKF2_REQ_EPH) |
 | `EKF2_GPS_P_NOISE` | `0.5 m` | RTK 固定解稳定后可从保守实验值开始评估是否调至 `0.2`。 | PX4 RTK 指南将 `EKF2_GPS_P_NOISE` 与 `EKF2_GPS_V_NOISE` 下降至 `0.2` 作为可选调参示例；不是无条件处方。[​PX4 RTK 指南](https://docs.px4.io/v1.17/en/gps_compass/rtk_gps) |
 | `EKF2_GPS_V_NOISE` | `0.3 m/s` | 同上，不在链路未验证时先改。 | 同上。 |
-| `GPS_2_CONFIG` | `0` | 首轮保持禁用，避免未验证的双接收机混入结果。 | 若未来增加第二个 GPS，须同时评审主接收机与混合策略。 |
+| `GPS_2_CONFIG` | `0` | **必须保持 `0`**：GPS 2 物理口已被 TFmini 测距仪占用（`SENS_TFMINI_CFG=202`）。 | 若未来增加第二个 GPS，须先另找接口，并同时评审主接收机与混合策略。 |
 | `SENS_GPS_MASK` / `SENS_GPS_PRIME` | `7` / `0` | 第二 GPS 启用前不改；启用后必须明确是否要 blending。 | `SENS_GPS_MASK=0` 禁用混合并总用第一实例；有混合时 `SENS_GPS_PRIME` 无效，否则定义优先实例。[​PX4 参数参考](https://docs.px4.io/v1.17/en/advanced_config/parameter_reference#SENS_GPS_MASK) |
 
 **不建议作为 RTK 首轮动作的设置：**
