@@ -48,7 +48,7 @@ fail()  { error "$*"; exit 1; }
 
 MODE="mission"
 LAUNCH_ARGS=()
-LAYOUT_HEADING_DEG="45.0"
+LAYOUT_HEADING_DEG="54.0"
 HAS_LAYOUT_HEADING=0
 for arg in "$@"; do
   case "$arg" in

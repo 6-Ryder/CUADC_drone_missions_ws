@@ -45,6 +45,8 @@ class DropState:
         self._precision_aligner = PrecisionAlignController(fsm)
         self._descend_retry_count: int = 0
         self._descend_best_pixel_error: float = float("inf")
+        # A 方案: 下降全程最佳地面误差 (曾对心的物理证据, 跨重试保留)
+        self._descend_best_ground_error: float = float("inf")
         self._precision_align_failed: bool = False
         self._final_descent_started: bool = False
         self._descent_ready_latched: bool = False
@@ -55,6 +57,8 @@ class DropState:
         self._alignment_progress: Optional[ProgressMonitor] = None
         # 快速模式边伺服边下降: 连续精校模式会把同一个目标锁保持至投放许可。
         self._servo_descend_active: bool = False
+        # 对心满足后的投放许可宽限截止时刻: 短暂丢帧不撤销已满足的对心许可
+        self._centered_latch_until: float = 0.0
 
     # ---- 子状态切换 ----
 
@@ -76,6 +80,7 @@ class DropState:
         self._last_descend_log_time = 0.0
         self._descend_retry_count = 0
         self._descend_best_pixel_error = float("inf")
+        self._descend_best_ground_error = float("inf")
         self._precision_align_failed = False
         self._final_descent_started = False
         self._descent_ready_latched = False
@@ -85,6 +90,7 @@ class DropState:
         self._ascend_progress = None
         self._alignment_progress = None
         self._servo_descend_active = False
+        self._centered_latch_until = 0.0
         self._visual_aligner.reset()
         self._precision_aligner.reset()
         # 停滞检测: pixel_error 在低值附近振荡但无法收敛 → 提前触发最终下降
@@ -166,6 +172,16 @@ class DropState:
         status = self._current_align_status()
         if status.pixel_error < self._descend_best_pixel_error:
             self._descend_best_pixel_error = status.pixel_error
+        # A 方案: 连续伺服模式下跟踪全程最佳地面误差 (物理对心证据).
+        # 仅 PrecisionAlignStatus 提供地面误差字段, legacy VisualAlignStatus 没有.
+        if self._precision_enabled():
+            p_status = self._precision_aligner.last_status
+            if p_status.continuous:
+                ground_err = math.hypot(
+                    p_status.ground_forward_error_m, p_status.ground_right_error_m
+                )
+                if ground_err < self._descend_best_ground_error:
+                    self._descend_best_ground_error = ground_err
 
         height_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
         descent_ready = self._check_descent_ready(height_error)
@@ -297,6 +313,12 @@ class DropState:
             if self._precision_align_failed:
                 self._precision_align_failed = False
                 self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
+                if self._ground_error_fallback_allow_drop():
+                    self._fsm.get_logger().warn(
+                        "DESCEND: 目标丢失但下降全程曾对心, 直接投放 "
+                        f"best_ground_error={self._descend_best_ground_error:.3f}m"
+                    )
+                    return "EXECUTE_DROP"
                 self._takeover("DESCEND: precision alignment target lost after retry")
                 return None
             self._warn_descend_throttled("DESCEND: 低空精校未取得可用目标, 继续等待复查")
@@ -313,6 +335,12 @@ class DropState:
             if self._precision_align_failed:
                 self._precision_align_failed = False
                 self._fsm.get_logger().error("DESCEND: 精校目标丢失重试耗尽")
+                if self._ground_error_fallback_allow_drop():
+                    self._fsm.get_logger().warn(
+                        "DESCEND: 目标丢失但下降全程曾对心, 直接投放 "
+                        f"best_ground_error={self._descend_best_ground_error:.3f}m"
+                    )
+                    return "EXECUTE_DROP"
                 self._takeover("DESCEND: precision alignment target lost after retry")
                 return None
             self._warn_descend_throttled("DESCEND: 到达投放高度但目标未居中/不可见, 继续等待复查")
@@ -520,6 +548,7 @@ class DropState:
 
         self._final_descent_started = True
         self._descent_ready_latched = False
+        self._centered_latch_until = 0.0
         # 仅重置确认状态 (稳定计数/刹车/投放许可), 保留目标锁和 EMA 平滑值.
         # 避免冷启动导致低空像素误差放大后精校器来回振荡 (抖动).
         self._precision_aligner.reset_confirmation()
@@ -551,6 +580,7 @@ class DropState:
 
         self._descend_retry_count += 1
         self._precision_aligner.reset(self._selected_memory_xy())
+        self._centered_latch_until = 0.0
         self._start_time = time.time()
         self._descend_best_pixel_error = float("inf")
         self._descend_stall_count = 0
@@ -621,43 +651,37 @@ class DropState:
         )
 
     def _drop_target_is_centered(self) -> bool:
-        """投放许可: release_ready 锁存 + 当前帧像素误差仍在阈值内."""
+        """投放许可: release_ready 锁存, 对心满足后宽限期内不因短暂丢帧撤销."""
         if self._precision_enabled():
             status = self._precision_aligner.last_status
             stable_frames = int(self._fsm.get_param("precision_align_stable_frames", 4))
             centered = status.release_ready and status.stable_count >= stable_frames
             if centered:
-                # release_ready 锁存后到投放执行有 ~1s 窗口,
-                # 必须复查当前帧像素误差仍在阈值内, 防止锁存后漂移
-                # 窗口与控制器同源: 低于 tight_window_height 用投放段收紧窗口
-                align_h = self._active_drop_height()
-                tight_h = float(self._fsm.get_param("precision_align_tight_window_height", 0.0))
-                if align_h < tight_h:
-                    raw_tol = float(self._fsm.get_param(
-                        "precision_align_final_raw_pixel_tolerance", 30.0))
-                else:
-                    raw_tol = float(self._fsm.get_param(
-                        "precision_align_raw_pixel_tolerance", 9.0))
-                smooth_tol = float(
-                    self._fsm.get_param("precision_align_smooth_pixel_tolerance", 7.0))
-                if (status.pixel_error > raw_tol
-                        or status.smooth_pixel_error > smooth_tol):
-                    self._warn_descend_throttled(
-                        "DESCEND: 投放许可锁存后像素误差超标 "
-                        f"raw={status.pixel_error:.1f}>{raw_tol:.0f}px "
-                        f"smooth={status.smooth_pixel_error:.1f}>{smooth_tol:.0f}px"
-                    )
-                    return False
-            if not centered:
+                # 对心一旦满足即锁存宽限窗口: 投放确认期短暂丢帧/像素超标
+                # 不撤销已满足的对心许可, 保证对心后及时投放、不卡在投放区.
+                # release_ready 本身在任一未对齐帧即清零, 宽限只覆盖刚满足后的
+                # 极短窗口 (默认 1.5s), 期间无人机物理位移可忽略 (刹车后 ≤0.04m/s).
+                latch_s = float(self._fsm.get_param(
+                    "precision_align_release_latch_s", 1.5))
+                self._centered_latch_until = time.time() + max(latch_s, 0.0)
+                return True
+            if time.time() < self._centered_latch_until:
                 self._warn_descend_throttled(
-                    "DESCEND: 精校投放许可失败 "
-                    f"source={status.source} raw={status.pixel_error:.1f}px "
-                    f"smooth_px={status.smooth_pixel_error:.1f}px "
-                    f"smooth=({status.smooth_dx_norm:+.4f},{status.smooth_dy_norm:+.4f}) "
+                    "DESCEND: 对心宽限期内保持投放许可 "
+                    f"raw={status.pixel_error:.1f}px "
                     f"stable={status.stable_count}/{stable_frames} "
-                    f"ready={status.release_ready} reason={status.reason}"
+                    f"ready={status.release_ready}"
                 )
-            return centered
+                return True
+            self._warn_descend_throttled(
+                "DESCEND: 精校投放许可失败 "
+                f"source={status.source} raw={status.pixel_error:.1f}px "
+                f"smooth_px={status.smooth_pixel_error:.1f}px "
+                f"smooth=({status.smooth_dx_norm:+.4f},{status.smooth_dy_norm:+.4f}) "
+                f"stable={status.stable_count}/{stable_frames} "
+                f"ready={status.release_ready} reason={status.reason}"
+            )
+            return False
 
         centered = self._visual_aligner.is_centered()
         if not centered:
@@ -741,17 +765,35 @@ class DropState:
         )
 
     def _quick_fallback_allow_drop(self, status) -> bool:
-        """quick 模式超时兜底: 像素误差有限且 ≤ 门限才允许直接投放, 不做盲投."""
+        """quick 模式超时兜底: 像素误差有限且 ≤ 门限, 或曾对心 (A 方案)."""
         if not self._fsm.get_param("quick_drop_mode", False):
             return False
         limit = float(self._fsm.get_param(
             "precision_align_fallback_max_pixel_error", 0.0
         ))
+        if (
+            limit > 0.0
+            and math.isfinite(status.pixel_error)
+            and status.pixel_error <= limit
+        ):
+            return True
+        # TARGET_LOST 走 _nudge_to_visible_drop_target 另一分支, 不会到这里;
+        # A 方案: 曾对心地面误差证据兜底, 不依赖当前像素有效性
+        return self._ground_error_fallback_allow_drop()
+
+    def _ground_error_fallback_allow_drop(self) -> bool:
+        """A 方案: 曾对心 (下降全程最佳地面误差 ≤ 阈值) 即允许投放."""
+        if not self._fsm.get_param("quick_drop_mode", False):
+            return False
+        limit = float(self._fsm.get_param(
+            "precision_align_fallback_max_ground_error", 0.4
+        ))
         if limit <= 0.0:
             return False
-        # TARGET_LOST 走 _nudge_to_visible_drop_target 另一分支, 不会到这里;
-        # 兜底仍要求有限像素误差, 丢失时 pixel_error=NaN 自然被拒
-        return math.isfinite(status.pixel_error) and status.pixel_error <= limit
+        return (
+            math.isfinite(self._descend_best_ground_error)
+            and self._descend_best_ground_error <= limit
+        )
 
     def _command_descend_target(self, drop_height: float) -> None:
         pos = self._fsm.bridge.get_current_position()

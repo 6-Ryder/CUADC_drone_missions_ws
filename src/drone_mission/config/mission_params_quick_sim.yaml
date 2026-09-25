@@ -45,10 +45,10 @@
     area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
-    # local: forward=[55,60], right=[-4,4]
+    # local: forward=[55,60], right=[-3,4]  (左边界右移1m: 实飞左偏 1m 补偿)
     area2_forward_min: 55.0
     area2_forward_max: 60.0
-    area2_right_min: -4.0
+    area2_right_min: -3.0
     area2_right_max: 4.0
     area2_altitude: 2.5           # 侦察区低空扫描高度 (m, NED z 负值)
 
@@ -159,8 +159,8 @@
     landing_visual_handoff_stable_frames: 10  # 圆心地面误差连续达标帧数
     landing_precision_target: 0.1 # 目标水平精度 (m)
     # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
-    landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)
-    landing_servo_max_horizontal_vel: 0.6  # 最大水平修正速度 (m/s)
+    landing_servo_kp_pixel: 0.0025      # 像素增益 (m/s body velocity per px error); 0.004→0.0025 降近地伺服速度
+    landing_servo_max_horizontal_vel: 0.35  # 最大水平修正速度 (m/s); 0.6→0.35 防最后一刻大位移偏离
     landing_servo_deadzone_px: 12.0     # 像素死区 (px), 进入后停止水平修正
     landing_servo_x_to_right_sign: 1.0  # u轴→右移符号
     landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)

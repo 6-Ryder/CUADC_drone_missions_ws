@@ -229,7 +229,7 @@ RTK 不需要额外 ROS 节点，也不需要重建 `px4_msgs`。仅在改变本
 2. 启动 ROS：
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch test_mission test_forward_recon.launch.py \
@@ -255,7 +255,7 @@ ros2 topic echo /fmu/out/vehicle_status_v1 --once
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/ryder/drone_tasks_ws/install/setup.bash
+source /home/nvidia/CUADC_drone_missions_ws/install/setup.bash
 ros2 launch drone_bringup real_flight.launch.py
 ```
 

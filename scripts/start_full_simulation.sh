@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# drone_tasks_ws — 无人机自主任务全仿真启动脚本
+# CUADC_drone_missions_ws — 无人机自主任务全仿真启动脚本
 #
 # 启动顺序:
 #   1. MicroXRCEAgent  (PX4 ↔ ROS2 DDS 桥梁, UDP 8888)
@@ -82,6 +82,12 @@ if ! source "$PROJ/scripts/sitl_env.sh"; then
     error "SITL ROS2 环境初始化失败"
     exit 1
 fi
+
+if [ ! -f "$PROJ/install/setup.bash" ]; then
+    error "工作空间未编译 ($PROJ), 请先运行: colcon build --symlink-install"
+    exit 1
+fi
+source "$PROJ/install/setup.bash"
 
 if ! command -v MicroXRCEAgent &>/dev/null; then
     error "MicroXRCEAgent 未安装"

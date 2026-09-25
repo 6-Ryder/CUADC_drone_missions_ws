@@ -391,10 +391,10 @@ def test_quick_params_enable_simple_landing():
         assert p["landing_target_reacquire_timeout"] == 1.0
 
 
-def test_quick_real_blind_altitude_matches_test_mission():
-    """真机: 照搬 test_mission 0.5m (真机 H 标识大, 近地可检测)."""
+def test_quick_real_blind_altitude_above_h_detection_limit():
+    """真机: 盲降切换高度 1.6m, 高于 H 近地失效线 (~0.9m), 视觉仍有效时完成对心交接."""
     p = _quick_params("mission_params_quick.yaml")
-    assert p["landing_blind_altitude"] == 0.5
+    assert p["landing_blind_altitude"] == 1.6
 
 
 def test_quick_sim_blind_altitude_above_h_detection_limit():
@@ -408,12 +408,19 @@ def test_quick_params_vision_loss_timeout_matches_test_mission():
     assert p["vision_loss_timeout"] == 3.0  # test_mission 默认
 
 
-def test_quick_params_enable_circle_geometry_handoff_only_for_quick_landing():
-    for name in ("mission_params_quick.yaml", "mission_params_quick_sim.yaml"):
-        params = _quick_params(name)
-        assert params["landing_visual_handoff_altitude"] == 1.6
-        assert params["landing_visual_handoff_max_ground_error_m"] == 0.20
-        assert params["landing_visual_handoff_stable_frames"] == 10
+def test_quick_real_params_blind_as_primary_strategy():
+    """真机 quick: 关闭圆形几何交接 + 1 帧死区锁存 → 切盲降为主策略."""
+    params = _quick_params("mission_params_quick.yaml")
+    assert params["landing_visual_handoff_altitude"] == 0.0
+    assert params["landing_blind_stable_frames"] == 1
+
+
+def test_quick_sim_params_keep_circle_geometry_handoff():
+    """SITL quick: 保留圆形几何交接 (SITL 档独立, 仿真/真机行为可不同)."""
+    params = _quick_params("mission_params_quick_sim.yaml")
+    assert params["landing_visual_handoff_altitude"] == 1.6
+    assert params["landing_visual_handoff_max_ground_error_m"] == 0.20
+    assert params["landing_visual_handoff_stable_frames"] == 10
 
     vision_config = ROOT / "drone_vision/config/vision_params_quick.yaml"
     import yaml

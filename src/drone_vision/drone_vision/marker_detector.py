@@ -35,6 +35,13 @@ class BlueMarkerRefiner:
         self.min_circularity = min_circularity
         self.min_component_diameter = min_component_diameter
 
+    def set_thresholds(
+        self, min_blue_ratio: float, min_circularity: float,
+    ) -> None:
+        """运行时切换蓝验证门槛 (B1: 低空下降段放宽, 防运动模糊误杀)."""
+        self.min_detection_blue_ratio = min_blue_ratio
+        self.min_circularity = min_circularity
+
     @staticmethod
     def _blue_mask(image: np.ndarray) -> np.ndarray:
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -183,22 +190,3 @@ class BlueMarkerRefiner:
             detections, key=lambda detection: detection.confidence,
             reverse=True,
         )
-
-    @staticmethod
-    def filter_by_expected_diameter(
-        detections: List[Detection],
-        expected_diameter_px: float,
-        min_ratio: float = 0.45,
-        max_ratio: float = 1.8,
-    ) -> List[Detection]:
-        """Reject blue components inconsistent with the known 1m marker size."""
-        if expected_diameter_px <= 0:
-            return []
-        filtered = []
-        for detection in detections:
-            x1, y1, x2, y2 = detection.bbox
-            diameter = ((x2 - x1) + (y2 - y1)) / 2.0
-            ratio = diameter / expected_diameter_px
-            if min_ratio <= ratio <= max_ratio:
-                filtered.append(detection)
-        return filtered

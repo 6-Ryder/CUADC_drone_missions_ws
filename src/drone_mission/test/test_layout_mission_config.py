@@ -93,7 +93,7 @@ def test_all_profiles_use_local_area_names_without_changing_values(filename):
     assert params["area1_right_max"] == 4.0
     assert params["area2_forward_min"] == 55.0
     assert params["area2_forward_max"] == 60.0
-    assert params["area2_right_min"] == -4.0
+    assert params["area2_right_min"] == -3.0
     assert params["area2_right_max"] == 4.0
     assert params["sweep_margin_forward"] == 1.0
     assert params["sweep_margin_right"] == 0.5

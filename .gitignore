@@ -31,3 +31,8 @@ cv_trainer/
 
 # Files
 docs/superpowers/
+
+src/drone_servo/
+
+# TensorRT 引擎: 硬件/版本绑定, 仅 jetson 真机分支跟踪; 开发机用 .onnx
+*.engine

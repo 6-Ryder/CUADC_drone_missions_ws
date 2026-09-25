@@ -95,9 +95,9 @@ def test_real_profile_preserves_full_mission_and_uses_proven_real_values():
     assert real["visual_progress_min_improvement"] == 2.0
     assert real["landing_search_progress_window"] == 15.0
 
-    assert real["landing_servo_kp_pixel"] == 0.004
-    assert real["landing_servo_max_horizontal_vel"] == 0.6
-    assert real["landing_servo_deadzone_px"] == 12.0
+    assert real["landing_servo_kp_pixel"] == 0.0025
+    assert real["landing_servo_max_horizontal_vel"] == 0.35
+    assert real["landing_servo_deadzone_px"] == 40.0
     assert real["landing_servo_x_to_right_sign"] == 1.0
     assert real["landing_servo_y_to_forward_sign"] == -1.0
     assert real["landing_descent_fast"] == 0.4

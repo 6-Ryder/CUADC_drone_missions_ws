@@ -318,6 +318,8 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_stable_frames", 5)
         self.declare_parameter("precision_align_final_brake_s", 0.5)
         self.declare_parameter("precision_align_release_max_horizontal_speed", 0.04)
+        # 对心满足后投放许可宽限秒数: 短暂丢帧不撤销已满足的对心, 避免卡在投放区
+        self.declare_parameter("precision_align_release_latch_s", 1.5)
         # 两级对心窗口: 仅真机显式配置 tight_window_height>0 时启用.
         # SITL 不配置 → 切换高度 0.0 → 始终用 raw_pixel_tolerance, 行为不变.
         self.declare_parameter("precision_align_final_raw_pixel_tolerance", 30.0)
@@ -382,6 +384,8 @@ class MissionFSM(Node):
         self.declare_parameter("drop_align_stall_stable_band", 5.0)
         self.declare_parameter("drop_align_stall_duration", 2.0)
         self.declare_parameter("precision_align_fallback_max_pixel_error", 0.0)  # 0=禁用兜底
+        # A 方案: 下降全程曾对心 (最佳地面误差 ≤ 阈值) 兜底投放, 0=禁用
+        self.declare_parameter("precision_align_fallback_max_ground_error", 0.4)
         self.declare_parameter("drop_descend_speed", 0.5)
         # 降落区 simple 模式 (landing_simple_mode 默认关闭 = 主任务逻辑)
         self.declare_parameter("landing_simple_mode", False)

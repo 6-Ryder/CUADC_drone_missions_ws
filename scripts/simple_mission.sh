@@ -57,6 +57,12 @@ if ! source "$PROJ/scripts/sitl_env.sh"; then
     exit 1
 fi
 
+if [ ! -f "$PROJ/install/setup.bash" ]; then
+    error "工作空间未编译 ($PROJ), 请先运行: colcon build --symlink-install"
+    exit 1
+fi
+source "$PROJ/install/setup.bash"
+
 if ! command -v MicroXRCEAgent &>/dev/null; then
     error "MicroXRCEAgent 未安装"
     exit 1

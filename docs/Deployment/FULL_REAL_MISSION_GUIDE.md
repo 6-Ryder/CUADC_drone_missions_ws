@@ -69,7 +69,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 使用干净的真机终端，不要预先加载 SITL 环境（若已加载，脚本会自动剥离 v4 overlay）：
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
@@ -80,7 +80,7 @@ source install/setup.bash
 启动唯一的全流程真机入口：
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 ./scripts/start_full_real_mission.sh
 ```
 
@@ -104,9 +104,9 @@ cd /home/ryder/drone_tasks_ws
 
 ```bash
 # systemd Type=simple:
-ExecStart=/home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh
+ExecStart=/home/nvidia/CUADC_drone_missions_ws/scripts/start_full_real_mission.sh
 # 或 cron @reboot:
-@reboot /home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh
+@reboot /home/nvidia/CUADC_drone_missions_ws/scripts/start_full_real_mission.sh
 ```
 
 同端口 Agent 唯一性由脚本 Step 0 清理保证（自启与现场终端并发时，后启动者拥有
@@ -120,7 +120,7 @@ ExecStart=/home/ryder/drone_tasks_ws/scripts/start_full_real_mission.sh
 保持启动终端运行，在第二个干净终端执行只读检查：
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 ./scripts/verify_real_flight_ready.sh
 ```
 

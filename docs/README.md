@@ -12,7 +12,7 @@
 - SITL 接地判定、停速和强制解锁完成；
 - `mission_end.success=True`，总时长约 200 s。
 
-日志目录：[log/simulation_20260730_192807](/home/ryder/drone_tasks_ws/log/simulation_20260730_192807)
+日志目录：[log/simulation_20260730_192807](/home/nvidia/CUADC_drone_missions_ws/log/simulation_20260730_192807)
 
 ## 先读什么
 
@@ -58,7 +58,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 ## 构建与测试
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash

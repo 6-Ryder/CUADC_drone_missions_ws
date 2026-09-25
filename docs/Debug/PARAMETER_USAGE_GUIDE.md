@@ -42,7 +42,7 @@
 ### 1.3 修改后的统一流程
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 编辑对应源文件
 colcon build --symlink-install
 source install/setup.bash

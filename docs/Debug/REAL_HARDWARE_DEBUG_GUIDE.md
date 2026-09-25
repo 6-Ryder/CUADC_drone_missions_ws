@@ -16,7 +16,7 @@
 先在地面启动环境（脚本会先启动唯一 MicroXRCEAgent、等待 DDS 就绪，再启动任务节点）：
 
 ```bash
-cd /home/ryder/drone_tasks_ws
+cd /home/nvidia/CUADC_drone_missions_ws
 ./scripts/start_full_real_mission.sh
 ```
 

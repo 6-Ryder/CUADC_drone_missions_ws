@@ -48,10 +48,10 @@
     area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
 
     # --- Area 2: 侦察区 ---
-    # local: forward=[55,60], right=[-4,4]
+    # local: forward=[55,60], right=[-3,4]  (左边界右移1m: 实飞左偏 1m 补偿)
     area2_forward_min: 55.0
     area2_forward_max: 60.0
-    area2_right_min: -4.0
+    area2_right_min: -3.0
     area2_right_max: 4.0
     area2_altitude: 3.0           # 已实飞侦察扫描高度 (m, NED z 负值)
 
@@ -128,6 +128,7 @@
     precision_align_final_drop_height: 1.5      # 未使用 (final_descent 关闭)
     precision_align_final_descent_speed: 0.25   # 未使用 (final_descent 关闭)
     precision_align_fallback_max_pixel_error: 60.0 # quick 兜底: 超时重试耗尽后像素 ≤60px 才直接投
+    precision_align_fallback_max_ground_error: 0.4 # A 方案: 曾对心 (地面误差≤0.4m) 兜底投放, 0=禁用
     precision_align_log_interval: 0.75
     cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
     cylinder_approach_slow_speed: 0.18   # 接近对心后慢速微调 (quick 提速至 0.18, 真机保守档)
@@ -153,18 +154,19 @@
     landing_target_reacquire_timeout: 1.0  # 低空目标失效后最多重捕获 1s
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
-    landing_blind_altitude: 0.5   # simple: 伺服降到 0.5m 才切盲降 (test_mission 值)
+    landing_blind_altitude: 1.6   # 盲降切换高度: 1.3→1.6m, 高于 H 近地失效线 (~0.9m, SITL 实测),
+                                  # 在视觉仍有效时完成对心交接, 避免 0.9m 以下检测断裂触发 PX4 LAND 兜底
     landing_blind_align_tolerance_px: 30.0  # 切入盲降前最大像素误差
-    landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
+    landing_blind_stable_frames: 1   # 1 帧进入像素死区即锁存 → 切盲降为主策略 (原 10 帧, 锁存常不达成)
     landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
-    landing_visual_handoff_altitude: 1.6  # 圆形几何对心后，开始纯垂直下降高度 (m)
+    landing_visual_handoff_altitude: 0.0  # 关闭圆形几何交接: 盲降入口回落像素死区锁存, 垂直锁存不再被要求
     landing_visual_handoff_max_ground_error_m: 0.20  # 交接前最大估算地面中心误差 (m)
     landing_visual_handoff_stable_frames: 10  # 圆心地面误差连续达标帧数
     landing_precision_target: 0.1 # 目标水平精度 (m)
     # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
-    landing_servo_kp_pixel: 0.004       # 像素增益 (m/s body velocity per px error)
-    landing_servo_max_horizontal_vel: 0.6  # 最大水平修正速度 (m/s)
-    landing_servo_deadzone_px: 12.0     # 像素死区 (px), 进入后停止水平修正
+    landing_servo_kp_pixel: 0.0025      # 像素增益 (m/s body velocity per px error); 0.004→0.0025 降近地伺服速度
+    landing_servo_max_horizontal_vel: 0.35  # 最大水平修正速度 (m/s); 0.6→0.35 防最后一刻大位移偏离
+    landing_servo_deadzone_px: 30.0     # 像素死区 (px), 进入后停止水平修正; 12→30 放宽锁存窗口, 切盲降为主策略
     landing_servo_x_to_right_sign: 1.0  # u轴→右移符号
     landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)
     landing_target_min_confidence: 0.60  # 过滤近地低置信度 H 畸变
