@@ -2,6 +2,9 @@
 # Read-only 漂移检查: Optimization(开发机) 相对 jetson(真机) 的差异是否已知.
 # 本脚本只读 git 对象, 不修改任何分支、工作树或索引.
 #
+# 比较对象是**工作区**, 不是 HEAD: 未提交的改动和新文件同样会被列出,
+# 因此开发中途就能跑, 不必先 commit.
+#
 # 差异分两类, 语义完全不同:
 #   A. 开发机专有 (WHITELIST_MACHINE): 路径/维护者元数据/模型/二进制.
 #      永不合并到真机, 属于长期共存.
@@ -76,7 +79,16 @@ if ! git rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null; then
   exit 2
 fi
 
-mapfile -t changed < <(git diff --name-only "$BASE_REF" HEAD -- src/ scripts/)
+# 对比对象是**工作区**而非 HEAD: 未提交的改动同样要能看见, 否则开发中途
+# 这个检查形同虚设. git diff 不含未跟踪文件, 故再并入 ls-files --others
+# (两者天然不相交: 一个列已跟踪改动, 一个列新文件).
+changed=()
+while IFS= read -r path; do
+  [[ -n "$path" ]] && changed+=("$path")
+done < <(
+  git diff --name-only "$BASE_REF" -- src/ scripts/
+  git ls-files --others --exclude-standard -- src/ scripts/
+)
 
 if [[ "${1:-}" == "--list" ]]; then
   printf '基线 %s -> HEAD 共 %d 个差异文件:\n' "$BASE_REF" "${#changed[@]}"
@@ -106,7 +118,7 @@ if (( ${#unexpected[@]} )); then
   printf 'DRIFT: %d 个文件与 %s 不同且不在任何白名单内:\n' \
     "${#unexpected[@]}" "$BASE_REF" >&2
   printf '  %s\n' "${unexpected[@]}" >&2
-  printf '\n若是意外改动 → 检查最近的提交; 若是有意的逻辑改动 →\n' >&2
+  printf '\n若是意外改动 → 检查最近的提交与未提交的工作区改动; 若是有意的 →\n' >&2
   printf '先确认是否该同步到真机, 再决定加入 WHITELIST_MACHINE 还是 WHITELIST_SEAM.\n' >&2
   exit 1
 fi
