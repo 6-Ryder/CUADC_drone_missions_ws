@@ -19,6 +19,7 @@
   wx, wy = transformer.pixel_to_world(u, v, altitude, q_wxyz)
 """
 
+import math
 import numpy as np
 from typing import Tuple, Optional
 
@@ -64,10 +65,22 @@ class CoordinateTransformer:
 
     """
 
-    def __init__(self, K: np.ndarray, image_top_faces_forward: bool = True):
+    def __init__(self, K: np.ndarray, image_top_faces_forward: bool = True,
+                 camera_body_offset=(0.0, 0.0, 0.0),
+                 camera_mount_rpy=(0.0, 0.0, 0.0)):
         self.K = K
         self.K_inv = np.linalg.inv(K)
         self._image_top_faces_forward = image_top_faces_forward
+        self._camera_body_offset = np.asarray(camera_body_offset, dtype=float)
+        roll, pitch, yaw = camera_mount_rpy
+        cr, sr = math.cos(roll), math.sin(roll)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        cy, sy = math.cos(yaw), math.sin(yaw)
+        self._camera_mount_rotation = np.array([
+            [cy*cp, cy*sp*sr-sy*cr, cy*sp*cr+sy*sr],
+            [sy*cp, sy*sp*sr+cy*cr, sy*sp*cr-cy*sr],
+            [-sp, cp*sr, cp*cr],
+        ])
 
     def update_intrinsics(self, fx: float, fy: float, cx: float, cy: float):
         """更新内参."""
@@ -136,7 +149,7 @@ class CoordinateTransformer:
                 [1,  0,  0],   # 相机 x → body right (+y)
                 [0,  0,  1],   # 相机 z (光轴) → body down
             ])
-        ray_body = R_cam_to_body @ ray_cam
+        ray_body = self._camera_mount_rotation @ R_cam_to_body @ ray_cam
 
         # 3. 机体 → World
         if q_convention == "xyzw":
@@ -153,7 +166,7 @@ class CoordinateTransformer:
         # 地面平面: z = ground_z
         # 参数方程: P = P_drone + t * ray_world
         # 令 P_z = ground_z → t = (ground_z - P_drone_z) / ray_world_z
-        P = np.array(drone_position)
+        P = np.array(drone_position) + R_body_to_world @ self._camera_body_offset
         if abs(ray_world[2]) < 1e-10:
             return None  # 射线平行于地面
 
@@ -186,7 +199,6 @@ class CoordinateTransformer:
         Returns (u, v) 或 None (在相机后方/图像外).
         """
         P_world = np.array([world_x, world_y, world_z])
-        P_drone = np.array(drone_position)
 
         # World → Body
         if q_convention == "xyzw":
@@ -195,6 +207,8 @@ class CoordinateTransformer:
         else:
             q = np.array(drone_attitude_q)
         R_world_to_body = _quat_to_matrix_inv(q)
+        P_camera = (np.array(drone_position)
+                    + _quat_to_matrix(q) @ self._camera_body_offset)
 
         # Body → Camera
         # R_cam_to_body 的逆 = 转置 (与 image_top_faces_forward 分支对应)
@@ -211,9 +225,10 @@ class CoordinateTransformer:
                 [0,  0,  1],
             ])
 
-        R_world_to_cam = R_body_to_cam @ R_world_to_body
+        R_world_to_cam = (R_body_to_cam @ self._camera_mount_rotation.T
+                          @ R_world_to_body)
 
-        P_cam = R_world_to_cam @ (P_world - P_drone)
+        P_cam = R_world_to_cam @ (P_world - P_camera)
 
         if P_cam[2] <= 0:
             return None  # 在相机后方

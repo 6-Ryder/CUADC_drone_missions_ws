@@ -139,6 +139,9 @@ class StandaloneBridge:
         self._battery_ready: bool = False
         self._last_status_time: Optional[float] = None
         self._last_odom_time: Optional[float] = None
+        self._pose_frame: Optional[int] = None
+        self._velocity_frame: Optional[int] = None
+        self._last_attitude_time: Optional[float] = None
         self._last_status_source_timestamp: Optional[int] = None
         self._last_odom_source_timestamp: Optional[int] = None
 
@@ -276,6 +279,8 @@ class StandaloneBridge:
             getattr(msg, "timestamp_sample", getattr(msg, "timestamp", None)),
         ):
             return
+        self._pose_frame = int(getattr(msg, "pose_frame", 0))
+        self._velocity_frame = int(getattr(msg, "velocity_frame", 0))
         self._position = Position(
             north=float(msg.position[0]),
             east=float(msg.position[1]),
@@ -323,11 +328,16 @@ class StandaloneBridge:
         q = msg.q  # [w, x, y, z]
         if len(q) >= 4:
             w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+            if (not all(math.isfinite(v) for v in (w, x, y, z))
+                    or w*w + x*x + y*y + z*z <= 1e-12):
+                self._last_attitude_time = None
+                return
             self._attitude = Attitude(q_w=w, q_x=x, q_y=y, q_z=z)
             self._current_yaw = math.atan2(
                 2.0 * (w * z + x * y),
                 1.0 - 2.0 * (y * y + z * z),
             )
+            self._last_attitude_time = time.monotonic()
 
     def _battery_cb(self, msg: BatteryStatus) -> None:
         if msg.connected and 0.0 <= msg.remaining <= 1.0:

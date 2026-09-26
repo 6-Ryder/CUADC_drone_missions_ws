@@ -49,6 +49,7 @@ from px4_control.standalone_bridge import StandaloneBridge
 from px4_control.telemetry import configure_home, ned_to_world, world_to_ned
 
 from drone_mission.cylinder_selector import CylinderSelector
+from drone_mission.quick_bucket_gate import BucketReleaseGate, pair_bucket_marker
 from drone_mission.path_planner import PathPlanner
 
 from drone_utils.logger import TaskLogger
@@ -64,6 +65,14 @@ FROZEN_LAYOUT_PARAMETERS = frozenset({
     "area2_forward_min", "area2_forward_max",
     "area2_right_min", "area2_right_max",
     "sweep_margin_forward", "sweep_margin_right",
+    "quick_drop_profile", "bucket_calibration_valid", "bucket_rim_height",
+    "bucket_front_forward", "bucket_rear_forward",
+    "bucket_front_right", "bucket_rear_right",
+    "bucket_front_delay", "bucket_rear_delay",
+    "bucket_front_uncertainty", "bucket_rear_uncertainty",
+    "bucket_disc_uncertainty",
+    "bucket_front_bias_north", "bucket_front_bias_east",
+    "bucket_rear_bias_north", "bucket_rear_bias_east",
 })
 
 
@@ -212,6 +221,11 @@ class MissionFSM(Node):
         self._cylinders_timestamp: float = 0.0
         self._markers_timestamp: float = 0.0
         self._hazards_timestamp: float = 0.0
+        self._cylinder_capture_stamp: float = 0.0
+        self._marker_capture_stamp: float = 0.0
+        self._quick_bucket_pair = None
+        self._quick_bucket_gate = None
+        self._quick_release_intent = None
 
         self._standalone_odom_ready = False
 
@@ -383,6 +397,22 @@ class MissionFSM(Node):
         self.declare_parameter("state_max_duration", 180.0)
         # 快速投放策略 (quick_drop_mode 默认关闭, 保持现状行为)
         self.declare_parameter("quick_drop_mode", False)
+        self.declare_parameter("quick_drop_profile", "blue")
+        self.declare_parameter("bucket_calibration_valid", False)
+        self.declare_parameter("bucket_rim_height", 0.3)
+        self.declare_parameter("bucket_front_forward", 0.04)
+        self.declare_parameter("bucket_rear_forward", -0.04)
+        self.declare_parameter("bucket_front_right", 0.0)
+        self.declare_parameter("bucket_rear_right", 0.0)
+        self.declare_parameter("bucket_front_delay", 0.0)
+        self.declare_parameter("bucket_rear_delay", 0.0)
+        self.declare_parameter("bucket_front_uncertainty", 0.03)
+        self.declare_parameter("bucket_rear_uncertainty", 0.10)
+        self.declare_parameter("bucket_disc_uncertainty", 0.10)
+        self.declare_parameter("bucket_front_bias_north", 0.0)
+        self.declare_parameter("bucket_front_bias_east", 0.0)
+        self.declare_parameter("bucket_rear_bias_north", 0.0)
+        self.declare_parameter("bucket_rear_bias_east", 0.0)
         self.declare_parameter("drop_target_source", "cylinder")  # "cylinder" | "marker"
         self.declare_parameter("drop_align_stall_threshold", 40.0)
         self.declare_parameter("drop_align_stall_stable_band", 5.0)
@@ -441,13 +471,20 @@ class MissionFSM(Node):
         if any(param.name in FROZEN_LAYOUT_PARAMETERS for param in params):
             return SetParametersResult(
                 successful=False,
-                reason="layout geometry is fixed at mission startup",
+                reason="mission geometry and drop profile are fixed at startup",
             )
         return SetParametersResult(successful=True)
 
     def _lazy_init(self):
         """等待 PX4 Bridge 就绪后初始化."""
         if self._initialized:
+            return
+
+        profile = self.get_param("quick_drop_profile", "blue")
+        if profile not in ("blue", "bucket"):
+            self.get_logger().error(f"quick_drop_profile 非法: {profile}")
+            self._mission_failed = True
+            self._init_timer.cancel()
             return
 
         drop_bounds = self._validate_zone_bounds("area1")
@@ -638,20 +675,39 @@ class MissionFSM(Node):
     # ================================================================
 
     def _cyl_cb(self, msg):
+        capture_stamp = self._capture_seconds(msg)
+        if (self.get_param("quick_drop_profile", "blue") == "bucket"
+                and capture_stamp <= self._cylinder_capture_stamp):
+            return
         self._cylinders = list(msg.cylinders)
         self._cylinders_timestamp = time.time()
+        self._cylinder_capture_stamp = capture_stamp
         if self._current_state == MissionState.CYLINDER_SEARCH:
             self._remember_cylinders(self._cylinders)
         self._emergency.update_vision(len(self._cylinders) > 0)
 
     def _marker_cb(self, msg):
+        capture_stamp = self._capture_seconds(msg)
+        if (self.get_param("quick_drop_profile", "blue") == "bucket"
+                and capture_stamp <= self._marker_capture_stamp):
+            return
         self._markers = list(msg.cylinders)
         self._markers_timestamp = time.time()
+        self._marker_capture_stamp = capture_stamp
         if self._current_state == MissionState.CYLINDER_SEARCH:
             self._remember_markers(self._markers)
         # marker_only 模式下 cylinders 恒空, 应急视觉信号必须由 marker 喂给
         if self.get_param("drop_target_source", "cylinder") == "marker":
             self._emergency.update_vision(len(self._markers) > 0)
+
+    @staticmethod
+    def _capture_seconds(msg) -> float:
+        try:
+            stamp = msg.header.stamp
+            seconds = stamp.sec + stamp.nanosec * 1e-9
+            return seconds if math.isfinite(seconds) and seconds > 0 else 0.0
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
 
     @staticmethod
     def _cyl_field(cyl, key: str, default=0.0):
@@ -978,6 +1034,14 @@ class MissionFSM(Node):
     def _handle_select_target(self):
         """处理圆筒选择."""
         targets = self.get_known_drop_targets()
+        if self.quick_bucket_enabled():
+            cylinders = self.get_known_cylinders()
+            markers = self.get_known_markers()
+            targets = [c for c in cylinders
+                       if pair_bucket_marker(c, cylinders, markers) is not None]
+            if not targets:
+                self.request_takeover("SELECT_TARGET: no unique bucket/disc pair")
+                return
         if not targets:
             self.get_logger().warn("SELECT_TARGET: 暂无可投目标, 返回投放区搜索")
             self._transition_to(MissionState.CYLINDER_SEARCH)
@@ -994,6 +1058,41 @@ class MissionFSM(Node):
             return
 
         self._current_drop_cyl_id = target_id
+        if self.quick_bucket_enabled():
+            bucket = next(c for c in targets if int(c["id"]) == target_id)
+            disc = pair_bucket_marker(bucket, self.get_known_cylinders(),
+                                      self.get_known_markers())
+            if disc is None:
+                self.request_takeover("SELECT_TARGET: bucket/disc association changed")
+                return
+            self._quick_bucket_pair = (bucket, disc)
+            bucket_n, bucket_e, _ = world_to_ned(bucket["world_x"], bucket["world_y"], 0.0)
+            disc_n, disc_e, _ = world_to_ned(disc["world_x"], disc["world_y"], 0.0)
+            from drone_mission.quick_bucket_gate import Calibration
+            calibration = None
+            if self.get_param("bucket_calibration_valid", False):
+                calibration = Calibration(
+                    self.get_param("bucket_front_forward", 0.04),
+                    self.get_param("bucket_rear_forward", -0.04),
+                    self.get_param("bucket_front_right", 0.0),
+                    self.get_param("bucket_rear_right", 0.0),
+                    self.get_param("bucket_front_delay", 0.0),
+                    self.get_param("bucket_rear_delay", 0.0),
+                    self.get_param("bucket_rim_height", 0.3),
+                    self.get_param("bucket_front_uncertainty", 0.03),
+                    self.get_param("bucket_rear_uncertainty", 0.10),
+                    self.get_param("bucket_disc_uncertainty", 0.10),
+                    self.get_param("bucket_front_bias_north", 0.0),
+                    self.get_param("bucket_front_bias_east", 0.0),
+                    self.get_param("bucket_rear_bias_north", 0.0),
+                    self.get_param("bucket_rear_bias_east", 0.0),
+                )
+                if not calibration.valid_for_bucket():
+                    self.request_takeover("SELECT_TARGET: invalid bucket calibration")
+                    return
+            self._quick_bucket_gate = BucketReleaseGate(
+                (bucket_n, bucket_e), (disc_n, disc_e), calibration)
+            self._quick_release_intent = None
         self.get_logger().info(f"SELECT_TARGET: 选中圆筒 ID={target_id}")
         self._task_logger.log("target_selected", {
             "cylinder_id": target_id,
@@ -1315,6 +1414,8 @@ class MissionFSM(Node):
         默认圆筒目标优先。只有完全没有圆筒候选时，才用蓝色圆形标识兜底。
         quick_drop_mode 下由 drop_target_source="marker" 门控：只认蓝色标识。
         """
+        if self.quick_bucket_enabled():
+            return self.get_known_cylinders()
         if self.get_param("drop_target_source", "cylinder") == "marker":
             return self._dedupe_markers(self.get_known_markers())
 
@@ -1323,6 +1424,10 @@ class MissionFSM(Node):
             return cylinders
 
         return self._dedupe_markers(self.get_known_markers())
+
+    def quick_bucket_enabled(self) -> bool:
+        return (bool(self.get_param("quick_drop_mode", False))
+                and self.get_param("quick_drop_profile", "blue") == "bucket")
 
     def _dedupe_markers(self, markers: list) -> list:
         """同一蓝色标识按世界坐标 0.6m 去重后返回."""
@@ -1345,11 +1450,17 @@ class MissionFSM(Node):
         self._known_markers.clear()
         self._next_known_cylinder_id = 1
         self._next_known_marker_id = 1001
+        self._quick_bucket_pair = None
+        self._quick_bucket_gate = None
+        self._quick_release_intent = None
 
     def release_current_drop_target(self) -> None:
         """投放未执行或失败时释放当前选择, 允许重新搜索/重试."""
         self._cylinder_selector.release_last_selection()
         self._current_drop_cyl_id = -1
+        self._quick_bucket_pair = None
+        self._quick_bucket_gate = None
+        self._quick_release_intent = None
 
     def is_in_drop_zone_world(self, world_x: float, world_y: float, margin: float = 0.5) -> bool:
         return self._contains_drop_target_world_xy(

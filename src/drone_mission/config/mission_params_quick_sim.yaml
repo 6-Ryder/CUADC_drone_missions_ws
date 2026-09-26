@@ -137,6 +137,9 @@
 
     # --- 快速投放策略 (quick_drop_mode) ---
     quick_drop_mode: true                 # 启用快速投放策略
+    quick_drop_profile: "blue"            # 默认保留蓝盘 quick；launch 可选 bucket
+    bucket_calibration_valid: false       # 未标定时仅允许同盘安全兜底
+    bucket_rim_height: 0.3                # SITL 桶口高度
     drop_target_source: "marker"          # 只认蓝底标识作为投放目标
     drop_align_stall_threshold: 85.0      # 停滞阈值 (raw 80 + 5 兜底)
     drop_align_stall_stable_band: 5.0     # 停滞稳定带宽 (px)

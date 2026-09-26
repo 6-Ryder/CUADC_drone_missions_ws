@@ -15,6 +15,7 @@ import time
 from typing import Optional, List
 
 from drone_utils.progress_monitor import ProgressMonitor
+from drone_mission.quick_bucket_gate import pair_bucket_marker
 
 class CylinderSearchState:
     """投放区圆筒搜索状态."""
@@ -43,10 +44,11 @@ class CylinderSearchState:
             self._fsm.get_param("min_drop_targets_required", 2)
         )
         if self._fsm.get_param("quick_drop_mode", False):
-            # quick 模式: 视觉只跑蓝底识别模型 (mode 6 marker_only)
+            # 蓝盘基线保留单模型；小桶配置同时运行圆筒和蓝盘模型。
             # 服务不可用会抛异常并被 _transition_to 升级为 takeover, 必须兜住
             try:
-                self._fsm.set_vision_mode("marker_only")
+                profile = self._fsm.get_param("quick_drop_profile", "blue")
+                self._fsm.set_vision_mode("all" if profile == "bucket" else "marker_only")
             except Exception as exc:
                 self._fsm.get_logger().warn(
                     f"CYL_SEARCH: 切换到 marker_only 失败, 继续用默认检测模式: {exc}"
@@ -89,8 +91,13 @@ class CylinderSearchState:
         else:
             known_cylinders = valid
 
-        if (
+        if self._fsm.get_param("quick_drop_mode", False) and self._fsm.get_param("quick_drop_profile", "blue") == "bucket":
+            remembered_markers = self._fsm.get_known_markers()
+            known = [c for c in known_cylinders
+                     if pair_bucket_marker(c, known_cylinders, remembered_markers) is not None]
+        elif (
             self._fsm.get_param("quick_drop_mode", False)
+            and self._fsm.get_param("quick_drop_profile", "blue") != "bucket"
             and hasattr(self._fsm, "get_known_markers")
         ):
             # quick 模式只认蓝底标识; mode 6 切换是异步服务调用,

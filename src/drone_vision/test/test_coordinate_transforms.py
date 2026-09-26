@@ -102,6 +102,17 @@ def test_downward_camera_center_projects_to_drone_world_xy():
     assert math.isclose(world_xy[1], 0.0, abs_tol=1e-6)
 
 
+def test_measured_camera_forward_offset_moves_center_projection():
+    tf = CoordinateTransformer(
+        np.array([[400.0, 0, 320.0], [0, 400.0, 240.0], [0, 0, 1.0]]),
+        camera_body_offset=(0.10, 0.0, 0.0),
+    )
+    pose = ned_to_world_pose(0.0, 0.0, -2.0, 0, 0, 0, 1)
+    world = tf.pixel_to_world(320, 240, pose[:3], pose[3:])
+    assert world is not None
+    assert math.isclose(world[1], 0.10, abs_tol=1e-6)
+
+
 def test_downward_camera_pixel_axes_match_world_enu_axes():
     """像素 x→世界东, 像素 y→世界南 (画面顶朝机头安装).
 

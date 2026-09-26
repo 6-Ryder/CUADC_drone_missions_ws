@@ -200,6 +200,28 @@ def test_pipeline_without_pose_preserves_pixel_detection_and_invalidates_world()
     assert math.isnan(cylinder.world_y)
 
 
+def test_bucket_cylinder_uses_capture_stamp_and_rim_plane():
+    pipeline = bare_pipeline_without_pose()
+    pipeline._bucket_projection = True
+    pipeline._frame_pose = (0, 0, 2.4, 0, 0, 0, 1)
+    pipeline._frame_stamp = Time(sec=12, nanosec=345)
+    original_get_parameter = pipeline.get_parameter
+    pipeline.get_parameter = lambda name: (
+        SimpleNamespace(value=0.3) if name == "bucket_rim_height"
+        else original_get_parameter(name))
+    planes = []
+    pipeline._project_world_xy = lambda u, v, ground_z=0: (
+        planes.append(ground_z) or (1.0, 2.0))
+    detection = SimpleNamespace(
+        bbox=(300, 220, 342, 260), confidence=0.9, cx=321, cy=239)
+    pipeline._process_cylinders_v2(np.zeros((2, 2, 3)), [detection])
+    array = pipeline._cyl_pub.messages[-1]
+    assert array.header.stamp.sec == 12
+    assert array.header.stamp.nanosec == 345
+    assert planes == [0.3]
+    assert array.cylinders[0].radius == pytest.approx(12 * 2.1 / 400)
+
+
 def test_empty_pipeline_and_standalone_arrays_keep_world_frame():
     pipeline = bare_pipeline_without_pose()
 

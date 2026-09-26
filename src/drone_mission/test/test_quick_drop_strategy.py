@@ -221,6 +221,31 @@ def test_quick_search_enters_requests_marker_only_vision():
     assert fsm.layout_frame.ned_to_local(north, east) == pytest.approx((32.5, 0.0))
 
 
+def test_bucket_search_runs_both_models_and_requires_unique_pair():
+    fsm = _SearchFSM({
+        "quick_drop_mode": True,
+        "quick_drop_profile": "bucket",
+        "min_drop_targets_required": 1,
+    })
+    fsm._known_cylinders[0].update(world_x=1.0, world_y=1.0, radius=0.075)
+    fsm.logger = type("TL", (), {"log_state": staticmethod(lambda *a: None)})()
+    fsm.fc = type("FC", (), {
+        "goto_ned": staticmethod(lambda *a, **kw: None),
+        "altitude_to_ned": staticmethod(lambda a: -a),
+    })()
+    fsm.clear_known_cylinders = lambda: None
+    state = CylinderSearchState(fsm)
+    state.enter()
+    assert fsm.set_vision_calls == ["all"]
+    for _ in range(4):
+        assert state.execute() is None
+    assert state.execute() == "SELECT_TARGET"
+    fsm._known_markers.append(dict(world_x=1.1, world_y=1.0))
+    state = _search_state(fsm)
+    for _ in range(5):
+        assert state.execute() is None
+
+
 def test_default_search_does_not_request_marker_only():
     fsm = _SearchFSM({
         "quick_drop_mode": False,

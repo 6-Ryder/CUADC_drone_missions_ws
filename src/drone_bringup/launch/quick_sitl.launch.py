@@ -56,6 +56,14 @@ def generate_launch_description():
         default_value="/fmu/out/vehicle_status_v4",
         description="SITL PX4 VehicleStatus DDS topic",
     )
+    quick_profile_arg = DeclareLaunchArgument(
+        "quick_drop_profile", default_value="blue",
+        description="quick drop profile: blue or bucket",
+    )
+    bucket_rim_arg = DeclareLaunchArgument(
+        "bucket_rim_height", default_value="0.3",
+        description="bucket rim height above ground in metres",
+    )
 
     # ---- 包路径 ----
     pkg_control = get_package_share_directory("px4_control")
@@ -88,6 +96,7 @@ def generate_launch_description():
             "home_y": LaunchConfiguration("home_y"),
             "home_z": LaunchConfiguration("home_z"),
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
+            "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -105,6 +114,9 @@ def generate_launch_description():
                 LaunchConfiguration("layout_heading_deg"), value_type=float,
             ),
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
+            "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
+            "bucket_rim_height": ParameterValue(
+                LaunchConfiguration("bucket_rim_height"), value_type=float),
         }],
         arguments=[
             "--ros-args",
@@ -143,6 +155,9 @@ def generate_launch_description():
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
+            "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
+            "bucket_rim_height": ParameterValue(
+                LaunchConfiguration("bucket_rim_height"), value_type=float),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -172,6 +187,8 @@ def generate_launch_description():
         home_z_args,
         layout_heading_arg,
         vehicle_status_topic_arg,
+        quick_profile_arg,
+        bucket_rim_arg,
         px4_bridge_node,
         vision_delayed,
         servo_delayed,

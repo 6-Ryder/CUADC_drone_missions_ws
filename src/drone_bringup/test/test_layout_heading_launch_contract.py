@@ -1,6 +1,7 @@
 """Contracts for the single layout-heading launch input."""
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -52,8 +53,11 @@ def test_heading_launch_override_is_always_typed_as_double(launch_name):
     source = (LAUNCH_DIR / launch_name).read_text(encoding="utf-8")
 
     assert "from launch_ros.parameter_descriptions import ParameterValue" in source
-    assert source.count("ParameterValue(") == 2
-    assert source.count('value_type=float') == 2
+    heading_values = re.findall(
+        r'ParameterValue\(\s*LaunchConfiguration\("layout_heading_deg"\),\s*value_type=float',
+        source,
+    )
+    assert len(heading_values) == 2
 
 
 @pytest.mark.parametrize("script", [QUICK_REAL_SCRIPT, FULL_REAL_SCRIPT])
