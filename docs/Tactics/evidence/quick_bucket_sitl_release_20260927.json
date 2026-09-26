@@ -1,0 +1,71 @@
+{
+  "source_run": "log/quick_simulation_20260927_003807",
+  "source_gazebo_pose_probe": "/tmp/quick_bucket_gz_pose_release_20260927.jsonl",
+  "source_world": "log/quick_simulation_20260927_003807/drone_field.sdf",
+  "release_event": {
+    "time": 1790440762.8511634,
+    "decision": "small_bucket",
+    "target_id": 2,
+    "cylinder_capture_time": 1790440762.7857337,
+    "marker_capture_time": 1790440762.7857337,
+    "front_impact_ned": [
+      27.783228212424614,
+      14.829914674342305
+    ],
+    "rear_impact_ned": [
+      27.714402803036098,
+      14.78988121088346
+    ],
+    "front_residual_m": 0.010276994433419529,
+    "rear_residual_m": 0.09072050832094754,
+    "bucket_center_ned": [
+      27.957409521702623,
+      14.936945955399615
+    ],
+    "disc_center_ned": [
+      27.935219093089522,
+      14.893124401881344
+    ],
+    "altitude_m": 1.605392411351204,
+    "yaw_ned": 0.5237312401751413,
+    "velocity_ned": [
+      0.008028372190892696,
+      -0.0004320185398682952,
+      -0.0005360647337511182
+    ],
+    "telemetry_time": 1790440762.8511608,
+    "calibrated": true
+  },
+  "gazebo_model_pose_nearest": {
+    "t": 1790440762.8679645,
+    "name": "x500_mono_cam_down_0",
+    "xyz": [
+      18.864550871403434,
+      37.729398693156824,
+      1.5728027729475413
+    ],
+    "q": [
+      0.0002378996235207821,
+      -6.584839102452465e-05,
+      0.5155656323720581,
+      0.8568500556016545
+    ]
+  },
+  "gazebo_pose_time_offset_s": 0.016801118850708008,
+  "small_bucket_truth_center_world_xy_m": [
+    18.883974596,
+    37.779800219
+  ],
+  "nominal_front_offset_body_forward_m": 0.04,
+  "nominal_payload_radius_m": 0.03,
+  "nominal_front_uncertainty_m": 0.03,
+  "nominal_rim_height_m": 0.3,
+  "gazebo_yaw_ned_rad": 0.4874610546681428,
+  "predicted_front_impact_from_gazebo_truth_world_xy_m": [
+    18.883066143633336,
+    37.76882980082575
+  ],
+  "truth_residual_m": 0.011007968051392576,
+  "effective_margin_m": 0.015,
+  "limit": "Nominal geometry only. No simulated payload trajectory or bucket entry sensor."
+}
