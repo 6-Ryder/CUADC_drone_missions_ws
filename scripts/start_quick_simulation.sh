@@ -6,7 +6,7 @@
 # 与 start_full_simulation.sh 的区别:
 #   - Step 4 换 quick_sitl.launch.py (mission_params_quick_sim.yaml +
 #     servo_params_quick.yaml)
-#   - 任务流程: 5.6m 扫描(只认蓝底) → 2.4m 单次降高 → 放宽对心 → 一次全开双投
+#   - 投放模式由下方 QUICK_DROP_PROFILE 选择，默认 blue，可切换 bucket
 #
 # 启动顺序:
 #   1. MicroXRCEAgent  (PX4 ↔ ROS2 DDS 桥梁, UDP 8888)
@@ -30,6 +30,35 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $(date '+%H:%M:%S') $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $(date '+%H:%M:%S') $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $*"; }
 step()  { echo -e "\n${BLUE}==== $(date '+%H:%M:%S') $* ====${NC}"; }
+
+# quick 模式默认值：可改为 bucket，也可在启动时传 quick_drop_profile:=bucket 覆盖。
+QUICK_DROP_PROFILE="blue"
+LAYOUT_HEADING_DEG="30.0"
+HAS_LAYOUT_HEADING=0
+HAS_QUICK_PROFILE=0
+for task_arg in "$@"; do
+    case "$task_arg" in
+        layout_heading_deg:=*)
+            LAYOUT_HEADING_DEG="${task_arg#layout_heading_deg:=}"
+            HAS_LAYOUT_HEADING=1
+            ;;
+        quick_drop_profile:=*)
+            QUICK_DROP_PROFILE="${task_arg#quick_drop_profile:=}"
+            HAS_QUICK_PROFILE=1
+            ;;
+    esac
+done
+case "$QUICK_DROP_PROFILE" in
+    blue|bucket) ;;
+    *) error "quick_drop_profile 只能是 blue 或 bucket: $QUICK_DROP_PROFILE"; exit 1 ;;
+esac
+# 只补充未在命令行指定的默认值，避免同一 launch 参数出现两次。
+if [ "$HAS_LAYOUT_HEADING" -eq 0 ]; then
+    set -- "layout_heading_deg:=${LAYOUT_HEADING_DEG}" "$@"
+fi
+if [ "$HAS_QUICK_PROFILE" -eq 0 ]; then
+    set -- "quick_drop_profile:=${QUICK_DROP_PROFILE}" "$@"
+fi
 
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$PROJ/log/quick_simulation_$(date +%Y%m%d_%H%M%S)"
@@ -55,22 +84,7 @@ if [ ! -d "$(dirname "$PX4_WORLD")" ]; then
     exit 1
 fi
 
-# 从原始 ROS launch 参数解析场地朝向；原始参数随后完整转发给 ROS2。
-# 默认场地方向：北偏东 30°。传入 layout_heading_deg:=... 可临时覆盖。
-LAYOUT_HEADING_DEG="30.0"
-HAS_LAYOUT_HEADING=0
-for task_arg in "$@"; do
-    case "$task_arg" in
-        layout_heading_deg:=*)
-            LAYOUT_HEADING_DEG="${task_arg#layout_heading_deg:=}"
-            HAS_LAYOUT_HEADING=1
-            ;;
-    esac
-done
-# 未显式传参时，也必须把脚本默认值传给 ROS launch，避免场地与任务方向不一致。
-if [ "$HAS_LAYOUT_HEADING" -eq 0 ]; then
-    set -- "layout_heading_deg:=${LAYOUT_HEADING_DEG}" "$@"
-fi
+# 已在启动前解析场地朝向和投放模式；原始参数及缺省值都会传给 ROS launch。
 
 # 每次运行生成独立场地，确保 Gazebo 场地、机体初始 yaw 与 ROS 任务朝向一致。
 RUNTIME_FIELD="$LOG_DIR/drone_field.sdf"
@@ -83,6 +97,7 @@ printf 'layout_heading_deg=%s\nhome_x=4.0\nhome_y=10.0\nruntime_field=%s\ngazebo
     "$LAYOUT_HEADING_DEG" "$RUNTIME_FIELD" "$GAZEBO_YAW_RAD" \
     > "$LOG_DIR/layout_heading.log"
 info "场地朝向: ${LAYOUT_HEADING_DEG}° (NED 顺时针); Gazebo yaw: ${GAZEBO_YAW_RAD} rad"
+info "投放模式: ${QUICK_DROP_PROFILE}"
 info "运行时场地: $RUNTIME_FIELD"
 
 # 清理 PX4 持久化参数 (避免旧参数覆盖启动设置)
@@ -236,9 +251,10 @@ echo "│                  无画面全仿真快速投放已启动              
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  场地:      drone_field (70m × 8m)                              │"
 echo "│  场地朝向:  ${LAYOUT_HEADING_DEG}° NED 顺时针                         │"
+echo "│  投放模式:  ${QUICK_DROP_PROFILE}                                            │"
 echo "│  无人机:    gz_x500 @ H起降点 (4, 10, 0.3)                      │"
 echo "│  飞行方向:  向北 (NED north)                                    │"
-echo "│  投放区:    y=40~45m (蓝底标识, 只认蓝底)                        │"
+echo "│  投放区:    y=40~45m (blue 蓝盘 / bucket 桶盘配对)                │"
 echo "│  侦察区:    y=65~70m (5个圆筒, 3个含危险品标识)                  │"
 echo "│  起降点:    (4, 10) — 含 H 标识                                 │"
 echo "├──────────────────────────────────────────────────────────────────┤"
@@ -249,8 +265,8 @@ echo "│    ✓ ros_gz_image bridge          (PID: $BRIDGE_PID)            │"
 echo "│    → 正在启动 ROS2 节点...                                       │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  任务流程 (FSM quick):                                            │"
-echo "│    INIT → ARM → TAKEOFF → TRANSIT → CYLINDER_SEARCH(marker)     │"
-echo "│    → SELECT → APPROACH(5.6m) → DESCEND(2.4m) → DROP(单次双投)    │"
+echo "│    INIT → ARM → TAKEOFF → TRANSIT → CYLINDER_SEARCH             │"
+echo "│    → SELECT → APPROACH(5.6m) → DESCEND → DROP(单次双投)          │"
 echo "│    → ASCEND → RECON_PATROL → RETURN → PRECISION_LAND → COMPLETE  │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  日志目录: $LOG_DIR                                              │"

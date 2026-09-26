@@ -4,14 +4,15 @@
 #
 # 与 start_full_real_mission.sh 相同的结构: 脚本持有唯一 MicroXRCEAgent,
 # launch 只启动任务节点。区别仅是 launch 换 quick_flight.launch.py
-# (mission_params_quick.yaml + servo_params_quick.yaml: 单次降高 2.4m +
-# marker_only 视觉 + 放宽对心 + 一次全开双投)。
+# (mission_params_quick.yaml + servo_params_quick.yaml)。默认 blue 保留
+# 2.4m 蓝盘投放；可选择 bucket 桶盘配对投放；两者均一次全开双投。
 # 默认场地方向为北偏东 30°；真机不会生成 SDF，必须确认实体场地方向一致。
 #
 # 用法:
 #   # 现场终端直接运行快速投放全流程
 #   ./scripts/start_quick_mission_real.sh
 #   ./scripts/start_quick_mission_real.sh camera_device:=/dev/video0
+#   ./scripts/start_quick_mission_real.sh quick_drop_profile:=bucket
 #
 #   # 仅启动 Agent (可选: 飞控晚于 Jetson 上电超过 60s 时用于自启)
 #   ./scripts/start_quick_mission_real.sh --agent-only
@@ -50,6 +51,9 @@ MODE="mission"
 LAUNCH_ARGS=()
 LAYOUT_HEADING_DEG="54.0"
 HAS_LAYOUT_HEADING=0
+# 可改为 bucket；命令行 quick_drop_profile:=... 优先。小桶精投仍需有效标定。
+QUICK_DROP_PROFILE="blue"
+HAS_QUICK_PROFILE=0
 for arg in "$@"; do
   case "$arg" in
     --agent-only) MODE="agent" ;;
@@ -58,12 +62,24 @@ for arg in "$@"; do
       HAS_LAYOUT_HEADING=1
       LAUNCH_ARGS+=("$arg")
       ;;
+    quick_drop_profile:=*)
+      QUICK_DROP_PROFILE="${arg#quick_drop_profile:=}"
+      HAS_QUICK_PROFILE=1
+      LAUNCH_ARGS+=("$arg")
+      ;;
     *) LAUNCH_ARGS+=("$arg") ;;
   esac
 done
+case "$QUICK_DROP_PROFILE" in
+  blue|bucket) ;;
+  *) fail "quick_drop_profile 只能是 blue 或 bucket: $QUICK_DROP_PROFILE" ;;
+esac
 # 未显式传参时，将默认方向一并传给 quick_flight.launch.py。
 if [ "$HAS_LAYOUT_HEADING" -eq 0 ]; then
   LAUNCH_ARGS+=("layout_heading_deg:=${LAYOUT_HEADING_DEG}")
+fi
+if [ "$HAS_QUICK_PROFILE" -eq 0 ]; then
+  LAUNCH_ARGS+=("quick_drop_profile:=${QUICK_DROP_PROFILE}")
 fi
 
 mkdir -p "$LOG_DIR/ros"
@@ -213,7 +229,8 @@ echo "├───────────────────────�
 echo "│  通信:     PX4 Ethernet → Agent UDP:$DDS_PORT (脚本持有)   │"
 echo "│  解锁:     遥控器 Arm Switch → is_armed() → 起飞           │"
 echo "│  Home:     解锁点 (0, 0)                                 │"
-echo "│  投放:     5.6m 扫描 → 2.4m 单次降高 → 一次全开双投         │"
+echo "│  模式:     ${QUICK_DROP_PROFILE}                                             │"
+echo "│  投放:     5.6m 扫描 → 模式目标高度 → 一次全开双投          │"
 echo "│  安全:     Agent 退出自动停止任务; 随时遥控器切 Offboard    │"
 echo "├──────────────────────────────────────────────────────────┤"
 echo "│  日志:     $LOG_DIR                                      │"
