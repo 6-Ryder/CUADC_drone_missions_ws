@@ -15,7 +15,9 @@ import time
 from typing import Optional, List
 
 from drone_utils.progress_monitor import ProgressMonitor
-from drone_mission.quick_bucket_gate import pair_bucket_marker
+from drone_mission.quick_bucket_gate import (
+    is_small_bucket_candidate, pair_bucket_marker,
+)
 
 class CylinderSearchState:
     """投放区圆筒搜索状态."""
@@ -94,7 +96,8 @@ class CylinderSearchState:
         if self._fsm.get_param("quick_drop_mode", False) and self._fsm.get_param("quick_drop_profile", "blue") == "bucket":
             remembered_markers = self._fsm.get_known_markers()
             known = [c for c in known_cylinders
-                     if pair_bucket_marker(c, known_cylinders, remembered_markers) is not None]
+                     if is_small_bucket_candidate(c)
+                     and pair_bucket_marker(c, known_cylinders, remembered_markers) is not None]
         elif (
             self._fsm.get_param("quick_drop_mode", False)
             and self._fsm.get_param("quick_drop_profile", "blue") != "bucket"
@@ -195,7 +198,14 @@ class CylinderSearchState:
         if self._scan_wp_idx >= len(self._scan_waypoints):
             # 扫描完成
             self._scan_phase = 2
-            if hasattr(self._fsm, "get_known_drop_targets"):
+            if (self._fsm.get_param("quick_drop_mode", False)
+                    and self._fsm.get_param("quick_drop_profile", "blue") == "bucket"):
+                cylinders = self._fsm.get_known_cylinders()
+                markers = self._fsm.get_known_markers()
+                targets = [c for c in cylinders
+                           if is_small_bucket_candidate(c)
+                           and pair_bucket_marker(c, cylinders, markers) is not None]
+            elif hasattr(self._fsm, "get_known_drop_targets"):
                 targets = self._fsm.get_known_drop_targets()
             else:
                 targets = self._fsm.get_cylinders()

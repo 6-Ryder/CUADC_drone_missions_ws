@@ -16,7 +16,9 @@ import time
 from typing import Optional
 
 from drone_mission.drop_visual_aligner import DropVisualAligner
-from drone_mission.quick_bucket_gate import GateResult, Observation
+from drone_mission.quick_bucket_gate import (
+    BUCKET_IDENTITY_RADIUS_M, GateResult, Observation,
+)
 from drone_mission.quick_release_geometry import impact_ned
 from px4_control.telemetry import world_to_ned
 from drone_mission.precision_align_controller import (
@@ -62,6 +64,7 @@ class DropState:
         self._servo_descend_active: bool = False
         # 对心满足后的投放许可宽限截止时刻: 短暂丢帧不撤销已满足的对心许可
         self._centered_latch_until: float = 0.0
+        self._bucket_last_seen_at: Optional[float] = None
 
     # ---- 子状态切换 ----
 
@@ -94,6 +97,7 @@ class DropState:
         self._alignment_progress = None
         self._servo_descend_active = False
         self._centered_latch_until = 0.0
+        self._bucket_last_seen_at = None
         self._visual_aligner.reset()
         self._precision_aligner.reset()
         # 停滞检测: pixel_error 在低值附近振荡但无法收敛 → 提前触发最终下降
@@ -238,7 +242,8 @@ class DropState:
                     if not math.isfinite(wx) or not math.isfinite(wy):
                         continue
                     north, east, _ = world_to_ned(wx, wy, 0.0)
-                    if math.hypot(north - expected_ne[0], east - expected_ne[1]) <= 0.25:
+                    if (math.hypot(north - expected_ne[0], east - expected_ne[1])
+                            <= BUCKET_IDENTITY_RADIUS_M):
                         matches.append((target, Observation(
                             stamp, north, east,
                             float(self._target_field(target, "radius", 0.0)))))
@@ -302,12 +307,19 @@ class DropState:
                 self._takeover("DESCEND: bucket precision deadline")
                 return None
 
-        if altitude > 1.72:
+        # Enter the gate inside its 1.5–1.7 m release window. Holding at
+        # 1.72 m can leave the vehicle hovering forever just above the gate.
+        if altitude > 1.65:
             if cyl_obj is None and marker_obj is None:
                 self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
-                if now - self._start_time > 5.0 and gate.started_at is None:
+                last_seen = self._bucket_last_seen_at
+                if gate.started_at is None and (
+                    (last_seen is None and now - self._start_time > 5.0)
+                    or (last_seen is not None and now - last_seen > 2.0)
+                ):
                     self._takeover("DESCEND: no fresh paired target above 2.4m")
                 return None
+            self._bucket_last_seen_at = now
             descent = (float(self._fsm.get_param("drop_servo_descend_fast", 0.45))
                        if altitude > 3.0 else
                        (0.12 if altitude < 1.9 else
@@ -332,6 +344,14 @@ class DropState:
                 drop_height=1.6, altitude_m=altitude,
                 descent_speed=0.0, allow_release=False)
         result = self._bucket_gate_result()
+        if now - self._last_descend_log_time >= 0.75:
+            self._fsm.get_logger().info(
+                f"BUCKET_GATE: alt={altitude:.2f} action={result.action} "
+                f"reason={result.reason} radius_ok={gate.radius_confirmed} "
+                f"front={result.front_residual:.3f} "
+                f"rear={result.rear_residual:.3f}"
+            )
+            self._last_descend_log_time = now
         if result.action == "takeover":
             self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
             self._takeover(f"DESCEND: {result.reason}")

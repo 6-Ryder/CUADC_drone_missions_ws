@@ -27,6 +27,7 @@ class Gate:
         self.bucket_ne = (1.0, 2.0)
         self.disc_ne = (1.0, 2.0)
         self.calibration = object()
+        self.started_at = None
 
     def commit_release(self):
         self.committed += 1
@@ -117,3 +118,22 @@ def test_blue_shadow_runs_after_original_service_request():
     assert events[0] == ("service", 3)
     assert events[1][0] == "shadow"
     assert isinstance(events[1][1], float)
+
+
+def test_bucket_descend_holds_on_one_missing_frame_then_takes_over(monkeypatch):
+    handler, fsm, _calls = state()
+    fsm.bridge.get_current_position = lambda: SimpleNamespace(down=-4.4)
+    fsm.fc.set_velocity_body = lambda *_args: None
+    reasons = []
+    fsm.request_takeover = reasons.append
+    handler._start_time = 0.0
+    handler._bucket_last_seen_at = 4.9
+    clock = [5.1]
+    monkeypatch.setattr("drone_mission.states.state_drop.time.time", lambda: clock[0])
+
+    assert handler._execute_bucket_descend() is None
+    assert reasons == []
+
+    clock[0] = 7.0
+    assert handler._execute_bucket_descend() is None
+    assert reasons == ["DESCEND: no fresh paired target above 2.4m"]

@@ -64,7 +64,18 @@ def test_radius_confirmation_rejects_low_effective_frame_rate():
         stamp = 8.0 + i * 0.3
         gate.observe_radius(obs(stamp), now=stamp + 0.01)
     assert not gate.radius_confirmed
-    assert gate.radius_failed
+    assert not gate.radius_failed
+
+
+def test_radius_confirmation_accepts_five_small_frames_amid_refiner_outliers():
+    gate = BucketReleaseGate((1, 2), (1, 2), calibrated())
+    gate.start(8.0)
+    for i in range(10):
+        radius = 0.077 if i % 2 == 0 else 0.10
+        stamp = 8.0 + i * 0.08
+        gate.observe_radius(obs(stamp, radius=radius), now=stamp + 0.01)
+    assert gate.radius_confirmed
+    assert not gate.radius_failed
 
 
 def test_requires_three_distinct_fits_then_post_brake_new_frame():

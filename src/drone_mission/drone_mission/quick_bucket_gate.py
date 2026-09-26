@@ -12,6 +12,9 @@ from typing import Optional, Tuple
 from drone_mission.quick_release_geometry import impact_ned, landing_fits
 
 
+BUCKET_IDENTITY_RADIUS_M = 0.5
+
+
 @dataclass(frozen=True)
 class Observation:
     stamp: float                 # camera capture time, seconds in ROS/system clock
@@ -61,6 +64,21 @@ def _xy(item):
     if isinstance(item, dict):
         return float(item.get("world_x", math.nan)), float(item.get("world_y", math.nan))
     return float(getattr(item, "world_x", math.nan)), float(getattr(item, "world_y", math.nan))
+
+
+def is_small_bucket_candidate(bucket) -> bool:
+    """Search/selection must use the same opening-size window as the gate."""
+    if isinstance(bucket, dict) and "small_radius_confirmed" in bucket:
+        return bool(bucket["small_radius_confirmed"])
+    if isinstance(bucket, dict):
+        radius = bucket.get("radius", math.nan)
+    else:
+        radius = getattr(bucket, "radius", math.nan)
+    try:
+        radius = float(radius)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(radius) and 0.06 <= radius <= 0.09
 
 
 def pair_bucket_marker(bucket, cylinders, markers, max_separation=0.25):
@@ -122,13 +140,17 @@ class BucketReleaseGate:
         if not math.isfinite(cylinder.radius):
             return self.radius_confirmed
         self._radii[cylinder.stamp] = cylinder.radius
+        self._radii = {stamp: radius for stamp, radius in self._radii.items()
+                       if now - stamp <= 1.0}
         self._last_cylinder_at = now
-        if len(self._radii) >= 5:
-            recent = list(self._radii.items())[-5:]
-            median = statistics.median(radius for _, radius in recent)
-            self.radius_confirmed = (0.06 <= median <= 0.09
-                                     and recent[-1][0] - recent[0][0] <= 1.0)
-            self.radius_failed = not self.radius_confirmed
+        inliers = [radius for radius in self._radii.values()
+                   if math.isfinite(radius) and 0.06 <= radius <= 0.09]
+        if len(inliers) >= 5:
+            self.radius_confirmed = True
+        elif len(self._radii) >= 15:
+            # A noisy small rim may alternate with the blue disc or a larger
+            # radius. Do not reject it after the first five mixed samples.
+            self.radius_failed = True
         return self.radius_confirmed
 
     @staticmethod
@@ -171,10 +193,10 @@ class BucketReleaseGate:
 
         marker_ok = self._fresh(marker, now, 0.4) and (
             math.hypot(marker.north - self.disc_ne[0],
-                       marker.east - self.disc_ne[1]) <= 0.25)
+                       marker.east - self.disc_ne[1]) <= BUCKET_IDENTITY_RADIUS_M)
         cylinder_ok = self._fresh(cylinder, now, 0.25) and (
             math.hypot(cylinder.north - self.bucket_ne[0],
-                       cylinder.east - self.bucket_ne[1]) <= 0.25)
+                       cylinder.east - self.bucket_ne[1]) <= BUCKET_IDENTITY_RADIUS_M)
         if cylinder_ok:
             self._last_cylinder_at = now
 
@@ -203,7 +225,9 @@ class BucketReleaseGate:
 
         small_fit = False
         front_residual = rear_residual = math.inf
-        if bucket_possible and cylinder_ok and marker_ok:
+        if (bucket_possible and cylinder_ok and marker_ok
+                and math.hypot(cylinder.north - marker.north,
+                               cylinder.east - marker.east) <= 0.25):
             front = self._impact(north, east, yaw, vn, ve, vd, altitude,
                                  cal.rim_height, cal.front_forward,
                                  cal.front_right, cal.front_delay,

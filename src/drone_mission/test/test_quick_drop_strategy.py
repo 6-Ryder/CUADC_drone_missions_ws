@@ -246,6 +246,30 @@ def test_bucket_search_runs_both_models_and_requires_unique_pair():
         assert state.execute() is None
 
 
+def test_bucket_search_waits_for_small_opening_instead_of_first_paired_cylinder():
+    fsm = _SearchFSM({
+        "quick_drop_mode": True,
+        "quick_drop_profile": "bucket",
+        "min_drop_targets_required": 1,
+    })
+    fsm._known_cylinders[0].update(world_x=1.0, world_y=1.0, radius=0.10)
+    state = _search_state(fsm)
+    for _ in range(5):
+        assert state.execute() is None
+
+    fsm._known_cylinders.append({
+        "world_position_valid": True,
+        "world_x": 2.0,
+        "world_y": 1.0,
+        "radius": 0.075,
+        "observations": 2,
+    })
+    fsm._known_markers.append({"world_x": 2.0, "world_y": 1.0})
+    for _ in range(4):
+        assert state.execute() is None
+    assert state.execute() == "SELECT_TARGET"
+
+
 def test_default_search_does_not_request_marker_only():
     fsm = _SearchFSM({
         "quick_drop_mode": False,

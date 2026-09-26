@@ -49,7 +49,9 @@ from px4_control.standalone_bridge import StandaloneBridge
 from px4_control.telemetry import configure_home, ned_to_world, world_to_ned
 
 from drone_mission.cylinder_selector import CylinderSelector
-from drone_mission.quick_bucket_gate import BucketReleaseGate, pair_bucket_marker
+from drone_mission.quick_bucket_gate import (
+    BucketReleaseGate, is_small_bucket_candidate, pair_bucket_marker,
+)
 from drone_mission.path_planner import PathPlanner
 
 from drone_utils.logger import TaskLogger
@@ -756,7 +758,7 @@ class MissionFSM(Node):
                 best["observations"] = obs + 1
                 best["last_seen"] = now
             else:
-                self._known_cylinders.append({
+                best = {
                     "id": self._next_known_cylinder_id,
                     "world_position_valid": True,
                     "world_x": cx,
@@ -765,8 +767,19 @@ class MissionFSM(Node):
                     "confidence": conf,
                     "observations": 1,
                     "last_seen": now,
-                })
+                }
+                self._known_cylinders.append(best)
                 self._next_known_cylinder_id += 1
+
+            # The rim refiner can alternate between a real 7.5 cm rim and
+            # nearby blue-disc edges. Keep independent small-radius evidence
+            # instead of diluting it into the all-sample mean above.
+            samples = [(stamp, value) for stamp, value in
+                       best.get("small_radius_samples", []) if now - stamp <= 1.0]
+            if math.isfinite(radius) and 0.06 <= radius <= 0.09:
+                samples.append((now, radius))
+            best["small_radius_samples"] = samples[-30:]
+            best["small_radius_confirmed"] = len(samples) >= 5
 
     def _remember_markers(self, markers: list) -> None:
         """Accumulate blue drop-marker positions as fallback drop targets."""
@@ -1038,7 +1051,8 @@ class MissionFSM(Node):
             cylinders = self.get_known_cylinders()
             markers = self.get_known_markers()
             targets = [c for c in cylinders
-                       if pair_bucket_marker(c, cylinders, markers) is not None]
+                       if is_small_bucket_candidate(c)
+                       and pair_bucket_marker(c, cylinders, markers) is not None]
             if not targets:
                 self.request_takeover("SELECT_TARGET: no unique bucket/disc pair")
                 return
