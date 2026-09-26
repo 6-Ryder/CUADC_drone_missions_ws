@@ -103,6 +103,7 @@ def generate_launch_description():
                 LaunchConfiguration("layout_heading_deg"), value_type=float,
             ),
             "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
+            "camera_compressed": True,
         }],
         arguments=[
             "--ros-args",

@@ -113,7 +113,8 @@ def generate_launch_description():
             "layout_heading_deg": ParameterValue(
                 LaunchConfiguration("layout_heading_deg"), value_type=float,
             ),
-            "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
+            "image_top_faces_forward": True,  # gz 实测: 画面顶朝机头
+            "camera_compressed": True,
             "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
             "bucket_rim_height": ParameterValue(
                 LaunchConfiguration("bucket_rim_height"), value_type=float),
@@ -154,7 +155,7 @@ def generate_launch_description():
             ),
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
-            "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
+            "image_top_faces_forward": True,  # gz 实测: 画面顶朝机头
             "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
             "bucket_rim_height": ParameterValue(
                 LaunchConfiguration("bucket_rim_height"), value_type=float),

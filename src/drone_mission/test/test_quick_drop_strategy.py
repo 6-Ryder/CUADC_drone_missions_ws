@@ -450,7 +450,7 @@ def test_quick_real_and_sim_are_independent():
     assert sim["camera_fx"] == 539.9
     # 相机朝向 (image_top_faces_forward) 与各自基线一致
     assert real["image_top_faces_forward"] is True
-    assert sim["image_top_faces_forward"] is False
+    assert sim["image_top_faces_forward"] is True
 
 
 def test_base_params_untouched_by_quick_strategy():

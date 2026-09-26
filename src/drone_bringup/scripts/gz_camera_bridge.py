@@ -1,91 +1,104 @@
 #!/usr/bin/env python3
-"""
-Gazebo Camera → ROS2 Image Bridge.
+"""Bridge Gazebo camera frames to ROS without JSON/Base64 conversion.
 
-解决 ros_gz_image C++ bridge 的 DDS 大消息传输问题。
-通过 gz topic --json-output 抓取单帧，base64 解码后发布为 ROS2 Image。
-
-用法: python3 gz_camera_bridge.py [gz_camera_topic] [ros_image_topic]
-默认: gz camera → /drone/camera/image_raw @ 10 FPS
+Gazebo delivers frames on a transport callback thread. The ROS timer publishes
+only the newest frame, so image processing cannot build an old-frame backlog.
+Run with ``python3 -s``: system Gazebo protobuf bindings must take priority
+over a user's Python packages.
 """
-import subprocess
+
 import os
-import json
-import base64
 import sys
+import threading
+import time
 
+import cv2
+import numpy as np
 import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Image
-from std_msgs.msg import Header
+from rclpy.node import Node as RosNode
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import CompressedImage
+from gz.transport13 import Node as GazeboNode
+from gz.msgs10.image_pb2 import Image as GazeboImage
+
 
 GZ_TOPIC = sys.argv[1] if len(sys.argv) > 1 else (
     "/world/drone_field/model/x500_mono_cam_down_0/link/camera_link/sensor/camera/image"
 )
-ROS_TOPIC = sys.argv[2] if len(sys.argv) > 2 else "/drone/camera/image_raw"
-GZ_ENV = {**os.environ, "GZ_IP": "127.0.0.1"}
+ROS_TOPIC = sys.argv[2] if len(sys.argv) > 2 else "/drone/camera/image_compressed"
+PUBLISH_HZ = 15.0
 
 
-class GzCameraBridge(Node):
-    """Gazebo Transport → ROS2 Image 桥接节点."""
-
+class GzCameraBridge(RosNode):
     def __init__(self):
         super().__init__("gz_camera_bridge")
-        self._pub = self.create_publisher(Image, ROS_TOPIC, 10)
-        self._count = 0
-        # 10 FPS — 平衡实时性和 CPU 开销
-        self._timer = self.create_timer(0.1, self._capture)
+        self._pub = self.create_publisher(
+            CompressedImage, ROS_TOPIC, qos_profile_sensor_data)
+        self._gz_node = GazeboNode()
+        self._lock = threading.Lock()
+        self._latest = None
+        self._received = 0
+        self._published = 0
+        self._last_log = time.monotonic()
+        self._gz_node.subscribe(GazeboImage, GZ_TOPIC, self._capture)
+        self._timer = self.create_timer(1.0 / PUBLISH_HZ, self._publish_latest)
         self.get_logger().info(
-            f"Gazebo 相机桥接已启动: {GZ_TOPIC} → {ROS_TOPIC} @10Hz"
+            f"Gazebo 原生相机桥接: {GZ_TOPIC} → {ROS_TOPIC}, "
+            f"发布上限 {PUBLISH_HZ:.0f} Hz"
         )
 
-    def _capture(self):
-        """抓取一帧并发布."""
-        try:
-            r = subprocess.run(
-                ["gz", "topic", "-t", GZ_TOPIC, "-e", "--num", "1", "--json-output"],
-                capture_output=True, timeout=3, env=GZ_ENV,
+    def _capture(self, frame):
+        if frame.width <= 0 or frame.height <= 0 or not frame.data:
+            return
+        if frame.pixel_format_type not in (3, 8):  # RGB_INT8 / BGR_INT8
+            return
+        stamp_ns = time.time_ns()
+        with self._lock:
+            self._latest = (frame, stamp_ns)
+            self._received += 1
+
+    def _publish_latest(self):
+        with self._lock:
+            latest = self._latest
+            self._latest = None
+        if latest is None:
+            return
+
+        frame, stamp_ns = latest
+        if frame.step < frame.width * 3 or len(frame.data) < frame.step * frame.height:
+            return
+        pixels = np.frombuffer(frame.data, dtype=np.uint8).reshape(
+            frame.height, frame.step)[:, :frame.width * 3].reshape(
+            frame.height, frame.width, 3)
+        bgr = (cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)
+               if frame.pixel_format_type == 3 else pixels)
+        encoded, jpeg = cv2.imencode(
+            ".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not encoded:
+            return
+
+        msg = CompressedImage()
+        msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(stamp_ns, 10**9)
+        msg.header.frame_id = "camera_link"
+        msg.format = "jpeg"
+        msg.data = jpeg.tobytes()
+        self._pub.publish(msg)
+        self._published += 1
+
+        now = time.monotonic()
+        if now - self._last_log >= 10.0:
+            self.get_logger().info(
+                f"相机帧: 收到 {self._received}, 发布 {self._published} "
+                f"({frame.width}x{frame.height} jpeg {len(msg.data)//1024}KB)"
             )
-            if r.returncode != 0 or len(r.stdout) < 100:
-                return
+            self._last_log = now
 
-            frame = json.loads(r.stdout)
-            w = frame.get("width", 0)
-            h = frame.get("height", 0)
-            b64 = frame.get("data", "")
-            if not w or not h or not b64:
-                return
-
-            img_bytes = base64.b64decode(b64)
-            step = frame.get("step", w * 3)
-            enc = "rgb8" if step == w * 3 else "bgr8"
-
-            msg = Image()
-            msg.header = Header(
-                stamp=self.get_clock().now().to_msg(),
-                frame_id="camera_link",
-            )
-            msg.width = w
-            msg.height = h
-            msg.encoding = enc
-            msg.is_bigendian = 0
-            msg.step = step
-            msg.data = img_bytes
-            self._pub.publish(msg)
-
-            self._count += 1
-            if self._count == 1 or self._count % 50 == 0:
-                self.get_logger().info(
-                    f"已发布 {self._count} 帧 ({w}x{h} {enc} {len(img_bytes)//1024}KB)"
-                )
-        except subprocess.TimeoutExpired:
-            pass
-        except Exception as e:
-            if self._count == 0:
-                self.get_logger().warn(f"相机抓取异常: {e}")
+    def close(self):
+        self._gz_node.unsubscribe(GZ_TOPIC)
 
 
 def main():
+    os.environ.setdefault("GZ_IP", "127.0.0.1")
     rclpy.init()
     node = GzCameraBridge()
     try:
@@ -93,6 +106,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        node.close()
         node.destroy_node()
         rclpy.shutdown()
 

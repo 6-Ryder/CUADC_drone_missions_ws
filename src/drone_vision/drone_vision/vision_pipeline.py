@@ -30,7 +30,7 @@ from rclpy.qos import (
     QoSProfile,
     QoSReliabilityPolicy,
 )
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from std_msgs.msg import String
 from cv_bridge import CvBridge
@@ -145,11 +145,14 @@ class VisionPipelineNode(Node):
         self._skip_count = 0
 
         # ---- 订阅 ----
-        # gz_camera_bridge.py (Python) 发布到 /drone/camera/image_raw, QoS 匹配
-        self._img_sub = self.create_subscription(
-            Image, "/drone/camera/image_raw", self._image_cb,
-            IMAGE_QOS,
-        )
+        if self.get_parameter("camera_compressed").value:
+            self._img_sub = self.create_subscription(
+                CompressedImage, "/drone/camera/image_compressed",
+                self._image_cb, IMAGE_QOS)
+        else:
+            self._img_sub = self.create_subscription(
+                Image, "/drone/camera/image_raw", self._image_cb,
+                IMAGE_QOS)
         self._caminfo_sub = self.create_subscription(
             CameraInfo, "/drone/camera/camera_info", self._caminfo_cb,
             CAMERA_INFO_QOS,
@@ -208,6 +211,7 @@ class VisionPipelineNode(Node):
         self.declare_parameter("model_height", 640)
         self.declare_parameter("device", "cuda")
         self.declare_parameter("max_inference_fps", 30.0)
+        self.declare_parameter("camera_compressed", False)
         self.declare_parameter("quick_drop_profile", "blue")
         self.declare_parameter("bucket_rim_height", 0.3)
         self.declare_parameter("bucket_camera_forward", 0.0)
@@ -796,7 +800,9 @@ class VisionPipelineNode(Node):
 
         t0 = time.time()
         try:
-            image = self._bridge.imgmsg_to_cv2(msg, "bgr8")
+            image = (self._bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+                     if isinstance(msg, CompressedImage)
+                     else self._bridge.imgmsg_to_cv2(msg, "bgr8"))
         except Exception:
             return
 

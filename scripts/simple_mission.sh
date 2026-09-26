@@ -174,7 +174,7 @@ info "PX4 参数已初始化"
 # Step 3: ros_gz_image bridge
 # ============================================================================
 step "Step 3/4 — 启动 ros_gz_image bridge"
-python3 "$PROJ/src/drone_bringup/scripts/gz_camera_bridge.py" \
+python3 -s "$PROJ/src/drone_bringup/scripts/gz_camera_bridge.py" \
     > "$LOG_DIR/camera_bridge.log" 2>&1 &
 BRIDGE_PID=$!
 echo "$BRIDGE_PID" > "$LOG_DIR/image_bridge.pid"

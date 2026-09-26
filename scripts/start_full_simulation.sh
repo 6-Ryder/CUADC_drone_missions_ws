@@ -206,7 +206,7 @@ step "Step 3/4 — 启动 ros_gz_image bridge (Gazebo 相机 → ROS2)"
 
 # 启动 Python Gazebo 相机桥接 (替代 ros_gz_image, 绕过 DDS 大消息问题)
 info "启动 Gazebo 相机桥接 (Python)..."
-python3 "$PROJ/src/drone_bringup/scripts/gz_camera_bridge.py" \
+python3 -s "$PROJ/src/drone_bringup/scripts/gz_camera_bridge.py" \
     > "$LOG_DIR/camera_bridge.log" 2>&1 &
 BRIDGE_PID=$!
 echo "$BRIDGE_PID" > "$LOG_DIR/image_bridge.pid"
