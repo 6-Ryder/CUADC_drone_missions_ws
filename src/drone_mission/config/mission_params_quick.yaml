@@ -143,10 +143,10 @@
     quick_drop_mode: true                 # 启用快速投放策略
     quick_drop_profile: "blue"            # 启动脚本会覆盖此值；默认保留蓝盘 quick
     bucket_calibration_valid: false       # 测量与试投完成前保持 false；bucket 仍可能蓝盘兜底投放
-    # 下列数值是与当前代码默认值相同的占位值，不是真机实测标定。
+    # 除桶口高度外，下列投放参数仍是占位值，不是真机实测标定。
     # 桶口高度由 quick_flight.launch.py 的 bucket_rim_height 启动参数覆盖；
-    # 真机需在自启命令中传入现场实测高度，使视觉与任务节点使用同一个值。
-    bucket_rim_height: 0.3                # 桶口距地高度，m；占位值
+    # launch 默认值已同步为现场报告的 0.40 m，使视觉与任务节点一致。
+    bucket_rim_height: 0.40               # 桶口距地高度，m；现场报告值
     # 前/后舱出口相对机体原点的偏移：forward 向机头为正，right 向机体右侧为正。
     bucket_front_forward: 0.04           # m；占位值，须实测
     bucket_rear_forward: -0.04           # m；占位值，须实测
