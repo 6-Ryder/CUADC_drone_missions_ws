@@ -141,9 +141,28 @@
 
     # --- 快速投放策略 (quick_drop_mode) ---
     quick_drop_mode: true                 # 启用快速投放策略
-    quick_drop_profile: "blue"            # 默认保留已飞行的蓝盘 quick；launch 可选 bucket
-    bucket_calibration_valid: false       # 未完成静态量测和试投前禁止小桶自动释放
-    bucket_rim_height: 0.3                # 仅仿真示例，真机必须实测
+    quick_drop_profile: "blue"            # 启动脚本会覆盖此值；默认保留蓝盘 quick
+    bucket_calibration_valid: false       # 测量与试投完成前保持 false；bucket 仍可能蓝盘兜底投放
+    # 下列数值是与当前代码默认值相同的占位值，不是真机实测标定。
+    # 桶口高度由 quick_flight.launch.py 的 bucket_rim_height 启动参数覆盖；
+    # 真机需在自启命令中传入现场实测高度，使视觉与任务节点使用同一个值。
+    bucket_rim_height: 0.3                # 桶口距地高度，m；占位值
+    # 前/后舱出口相对机体原点的偏移：forward 向机头为正，right 向机体右侧为正。
+    bucket_front_forward: 0.04           # m；占位值，须实测
+    bucket_rear_forward: -0.04           # m；占位值，须实测
+    bucket_front_right: 0.0              # m；占位值，须实测
+    bucket_rear_right: 0.0               # m；占位值，须实测
+    bucket_front_delay: 0.0              # s；前舱从发出命令到物品脱离的实测延迟
+    bucket_rear_delay: 0.0               # s；后舱从发出命令到物品脱离的实测延迟
+    # 重复试投得到的落点预测误差上界，不可直接把下列占位值当作实测结果。
+    bucket_front_uncertainty: 0.03       # m；小桶门禁还要求该值 <= 0.03 m
+    bucket_rear_uncertainty: 0.10        # m；后舱落入蓝盘的误差上界
+    bucket_disc_uncertainty: 0.10        # m；蓝盘兜底投放的误差上界
+    # 已测得的系统性落点偏差，按 NED 北/东方向填写；未测定前保持标定锁关闭。
+    bucket_front_bias_north: 0.0         # m
+    bucket_front_bias_east: 0.0          # m
+    bucket_rear_bias_north: 0.0          # m
+    bucket_rear_bias_east: 0.0           # m
     drop_target_source: "marker"          # 只认蓝底标识作为投放目标
     drop_align_stall_threshold: 45.0      # 停滞阈值 (raw 40 + 5 兜底)
     drop_align_stall_stable_band: 5.0     # 停滞稳定带宽 (px)
