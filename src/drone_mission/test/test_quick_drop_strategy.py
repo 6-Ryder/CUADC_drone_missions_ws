@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from drone_mission.mission_state_machine import MissionFSM
+from drone_mission.quick_bucket_gate import is_small_bucket_candidate
 from drone_mission.states.state_cylinder_search import CylinderSearchState
 from drone_mission.states.state_drop import DropState
 from drone_utils.layout_frame import LayoutFrame
@@ -219,6 +220,74 @@ def test_quick_search_enters_requests_marker_only_vision():
     assert fsm.set_vision_calls == ["marker_only"]
     north, east, _down = goto_calls[-1][0]
     assert fsm.layout_frame.ned_to_local(north, east) == pytest.approx((32.5, 0.0))
+
+
+def test_bucket_search_runs_both_models_and_requires_unique_pair():
+    fsm = _SearchFSM({
+        "quick_drop_mode": True,
+        "quick_drop_profile": "bucket",
+        "min_drop_targets_required": 1,
+    })
+    fsm._known_cylinders[0].update(world_x=1.0, world_y=1.0, radius=0.075)
+    fsm.logger = type("TL", (), {"log_state": staticmethod(lambda *a: None)})()
+    fsm.fc = type("FC", (), {
+        "goto_ned": staticmethod(lambda *a, **kw: None),
+        "altitude_to_ned": staticmethod(lambda a: -a),
+    })()
+    fsm.clear_known_cylinders = lambda: None
+    state = CylinderSearchState(fsm)
+    state.enter()
+    assert fsm.set_vision_calls == ["all"]
+    for _ in range(4):
+        assert state.execute() is None
+    assert state.execute() == "SELECT_TARGET"
+    fsm._known_markers.append(dict(world_x=1.1, world_y=1.0))
+    state = _search_state(fsm)
+    for _ in range(5):
+        assert state.execute() is None
+
+
+def test_bucket_search_waits_for_small_opening_instead_of_first_paired_cylinder():
+    fsm = _SearchFSM({
+        "quick_drop_mode": True,
+        "quick_drop_profile": "bucket",
+        "min_drop_targets_required": 1,
+    })
+    fsm._known_cylinders[0].update(world_x=1.0, world_y=1.0, radius=0.10)
+    state = _search_state(fsm)
+    for _ in range(5):
+        assert state.execute() is None
+
+    fsm._known_cylinders.append({
+        "world_position_valid": True,
+        "world_x": 2.0,
+        "world_y": 1.0,
+        "radius": 0.075,
+        "observations": 2,
+    })
+    fsm._known_markers.append({"world_x": 2.0, "world_y": 1.0})
+    for _ in range(4):
+        assert state.execute() is None
+    assert state.execute() == "SELECT_TARGET"
+
+
+def test_bucket_memory_keeps_small_rim_evidence_amid_disc_radius_outlier():
+    fsm = _bare_fsm()
+    fsm._known_cylinders = []
+    fsm._next_known_cylinder_id = 1
+    fsm.validate_drop_target_world_xy = lambda x, y: (x, y)
+    for radius in (0.077, 0.078, 0.46, 0.076, 0.078, 0.077):
+        fsm._remember_cylinders([{
+            "confidence": 0.9,
+            "world_position_valid": True,
+            "world_x": 1.0,
+            "world_y": 2.0,
+            "radius": radius,
+        }])
+    target = fsm.get_known_cylinders()[0]
+    assert target["radius"] > 0.09  # all-sample mean was misleading
+    assert target["small_radius_confirmed"]
+    assert is_small_bucket_candidate(target)
 
 
 def test_default_search_does_not_request_marker_only():

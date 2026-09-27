@@ -68,6 +68,14 @@ def generate_launch_description():
         "rc_require_arm_signal", default_value="true",
         description="true=等待人用遥控器Arm Switch解锁, false=代码arm直接起飞",
     )
+    quick_profile_arg = DeclareLaunchArgument(
+        "quick_drop_profile", default_value="blue",
+        description="quick 投放配置: blue 或 bucket；bucket 须完成现场标定",
+    )
+    bucket_rim_arg = DeclareLaunchArgument(
+        "bucket_rim_height", default_value="0.3",
+        description="小桶桶口距地高度（米），真机使用现场量测值",
+    )
 
     # PX4 桥接
     px4_bridge_node = Node(
@@ -125,6 +133,9 @@ def generate_launch_description():
                     LaunchConfiguration("layout_heading_deg"), value_type=float,
                 ),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
+                "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
+                "bucket_rim_height": ParameterValue(
+                    LaunchConfiguration("bucket_rim_height"), value_type=float),
             },
         ],
     )
@@ -157,6 +168,9 @@ def generate_launch_description():
                 ),
                 "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
+                "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
+                "bucket_rim_height": ParameterValue(
+                    LaunchConfiguration("bucket_rim_height"), value_type=float),
             },
         ],
         additional_env={"RCUTILS_COLORIZED_OUTPUT": "1"},
@@ -175,6 +189,8 @@ def generate_launch_description():
         home_z_arg,
         layout_heading_arg,
         rc_require_arg,
+        quick_profile_arg,
+        bucket_rim_arg,
         camera_node,
         px4_bridge_node,
         vision_delayed,

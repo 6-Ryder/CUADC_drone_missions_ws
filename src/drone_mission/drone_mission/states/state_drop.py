@@ -16,6 +16,11 @@ import time
 from typing import Optional
 
 from drone_mission.drop_visual_aligner import DropVisualAligner
+from drone_mission.quick_bucket_gate import (
+    BUCKET_IDENTITY_RADIUS_M, GateResult, Observation,
+)
+from drone_mission.quick_release_geometry import impact_ned
+from px4_control.telemetry import world_to_ned
 from drone_mission.precision_align_controller import (
     PrecisionAlignController,
     PrecisionAlignResult,
@@ -59,6 +64,7 @@ class DropState:
         self._servo_descend_active: bool = False
         # 对心满足后的投放许可宽限截止时刻: 短暂丢帧不撤销已满足的对心许可
         self._centered_latch_until: float = 0.0
+        self._bucket_last_seen_at: Optional[float] = None
 
     # ---- 子状态切换 ----
 
@@ -91,6 +97,7 @@ class DropState:
         self._alignment_progress = None
         self._servo_descend_active = False
         self._centered_latch_until = 0.0
+        self._bucket_last_seen_at = None
         self._visual_aligner.reset()
         self._precision_aligner.reset()
         # 停滞检测: pixel_error 在低值附近振荡但无法收敛 → 提前触发最终下降
@@ -105,7 +112,8 @@ class DropState:
             self._enter_ascend()
 
     def _enter_descend(self):
-        drop_h = self._fsm.get_param("drop_descend_height", 2.0)
+        drop_h = (1.6 if self._bucket_mode()
+                  else self._fsm.get_param("drop_descend_height", 2.0))
         self._fsm.get_logger().info(f"DESCEND: 降高至 {drop_h}m")
         self._precision_aligner.reset(self._selected_memory_xy())
 
@@ -134,14 +142,22 @@ class DropState:
         self._fsm.get_logger().info("DROP: 执行投放")
         self._fsm.logger.log_state("DESCEND_TO_DROP", "EXECUTE_DROP", "开始投放")
 
+        if self._bucket_mode():
+            # A different DropState instance handles EXECUTE_DROP.  Recheck the
+            # shared intent against a current frame on its first execute tick.
+            return
+
         # 调用舵机投放服务
         cyl_id = (
             self._fsm._current_drop_cyl_id
             if hasattr(self._fsm, "_current_drop_cyl_id")
             else -1
         )
+        request_time = time.time()
         self._fsm.start_drop_service(cyl_id)
         self._drop_executed = True
+        if self._fsm.get_param("quick_drop_mode", False):
+            self._log_blue_shadow(request_time)
         self._fsm.get_logger().info(f"DROP: 已发送投放请求 cyl={cyl_id}")
 
     def _enter_ascend(self):
@@ -152,6 +168,200 @@ class DropState:
         pos = self._fsm.bridge.get_current_position()
         self._fsm.fc.goto_ned(pos.north, pos.east, self._fsm.fc.altitude_to_ned(takeoff_h), speed=1.0)
         self._ascend_progress = self._new_navigation_progress()
+
+    def _bucket_mode(self) -> bool:
+        return (bool(self._fsm.get_param("quick_drop_mode", False))
+                and self._fsm.get_param("quick_drop_profile", "blue") == "bucket")
+
+    def _log_blue_shadow(self, request_time: float) -> None:
+        """Observe baseline release without changing its decision or timing."""
+        try:
+            sample_time = time.time()
+            telemetry = self._fsm.bridge.get_telemetry()
+            pos = self._fsm.bridge.get_current_position()
+            vel = telemetry.velocity
+            altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
+            yaw = float(getattr(self._fsm.bridge, "_current_yaw", 0.0))
+            markers = self._fsm.get_markers()
+            cx = float(self._fsm.get_param("camera_cx", 320.0))
+            cy = float(self._fsm.get_param("camera_cy", 240.0))
+            marker = min(markers, key=lambda m: math.hypot(
+                float(self._target_field(m, "center_u", cx)) - cx,
+                float(self._target_field(m, "center_v", cy)) - cy), default=None)
+            points = [impact_ned(
+                north=float(pos.north), east=float(pos.east), yaw=yaw,
+                offset_forward=offset, offset_right=0.0,
+                vn=float(vel.vn), ve=float(vel.ve), vd=float(vel.vd),
+                release_height=altitude, target_height=0.0, delay=0.0,
+            ) for offset in (0.04, -0.04)]
+            self._fsm._task_logger.log("quick_blue_release_shadow", {
+                "request_time": request_time,
+                "sample_time": sample_time,
+                "target_source": "marker",
+                "marker_capture_time": getattr(self._fsm, "_marker_capture_stamp", 0.0),
+                "marker_receive_time": getattr(self._fsm, "_markers_timestamp", 0.0),
+                "marker_id": self._target_field(marker, "id", -1) if marker else -1,
+                "pixel_error": (math.hypot(
+                    float(self._target_field(marker, "center_u", cx)) - cx,
+                    float(self._target_field(marker, "center_v", cy)) - cy)
+                    if marker else None),
+                "altitude": altitude, "yaw": yaw,
+                "velocity_ned": [vel.vn, vel.ve, vel.vd],
+                "predicted_front_ned": list(points[0]),
+                "predicted_rear_ned": list(points[1]),
+                "estimate_calibrated": False,
+            })
+        except Exception as exc:
+            self._fsm.get_logger().warn(f"DROP: blue shadow unavailable: {exc}")
+
+    @staticmethod
+    def _target_field(target, key, default=None):
+        return (target.get(key, default) if isinstance(target, dict)
+                else getattr(target, key, default))
+
+    def _bucket_current_objects(self):
+        """Select fresh observations tied to the search-time paired targets."""
+        gate = getattr(self._fsm, "_quick_bucket_gate", None)
+        if gate is None:
+            return None, None
+        now = time.time()
+        selected = []
+        for objects, stamp, expected_ne, max_age in (
+            (self._fsm.get_cylinders(), self._fsm._cylinder_capture_stamp,
+             gate.bucket_ne, 0.25),
+            (self._fsm.get_markers(), self._fsm._marker_capture_stamp,
+             gate.disc_ne, 0.40),
+        ):
+            matches = []
+            if 0 < stamp <= now and now - stamp <= max_age:
+                for target in objects:
+                    if not self._target_field(target, "world_position_valid", False):
+                        continue
+                    wx = float(self._target_field(target, "world_x", math.nan))
+                    wy = float(self._target_field(target, "world_y", math.nan))
+                    if not math.isfinite(wx) or not math.isfinite(wy):
+                        continue
+                    north, east, _ = world_to_ned(wx, wy, 0.0)
+                    if (math.hypot(north - expected_ne[0], east - expected_ne[1])
+                            <= BUCKET_IDENTITY_RADIUS_M):
+                        matches.append((target, Observation(
+                            stamp, north, east,
+                            float(self._target_field(target, "radius", 0.0)))))
+            selected.append(matches[0] if len(matches) == 1 else (None, None))
+        return selected[0], selected[1]
+
+    def _bucket_gate_result(self):
+        gate = self._fsm._quick_bucket_gate
+        bridge = self._fsm.bridge
+        odom = getattr(bridge, "_odom", None)
+        pose_frame = getattr(bridge, "_pose_frame", getattr(odom, "pose_frame", 0))
+        velocity_frame = getattr(bridge, "_velocity_frame", getattr(odom, "velocity_frame", 0))
+        if pose_frame != 1 or velocity_frame != 1:
+            return GateResult("takeover", "unsupported_odometry_frame")
+        (_, cylinder), (_, marker) = self._bucket_current_objects()
+        now = time.time()
+        telemetry = self._fsm.bridge.get_telemetry()
+        velocity = telemetry.velocity
+        pos = self._fsm.bridge.get_current_position()
+        telemetry_stamp = float(telemetry.timestamp)
+        # StandaloneBridge currently stamps get_telemetry() at read time; use
+        # its actual odometry receive time to avoid treating stale data as fresh.
+        last_odom = getattr(self._fsm.bridge, "_last_odom_time", None)
+        if hasattr(self._fsm.bridge, "_last_odom_time"):
+            telemetry_stamp = (now - (time.monotonic() - last_odom)
+                               if last_odom is not None else 0.0)
+        attitude_time = getattr(self._fsm.bridge, "_last_attitude_time", None)
+        yaw = (float(getattr(self._fsm.bridge, "_current_yaw", math.nan))
+               if attitude_time is not None
+               and 0 <= time.monotonic() - attitude_time <= 0.10
+               else math.nan)
+        return gate.evaluate(
+            now=now,
+            altitude=float(self._fsm.fc.ned_to_altitude(pos.down)),
+            north=float(pos.north), east=float(pos.east),
+            yaw=yaw,
+            vn=float(velocity.vn), ve=float(velocity.ve), vd=float(velocity.vd),
+            telemetry_stamp=telemetry_stamp,
+            cylinder=cylinder, marker=marker,
+        )
+
+    def _execute_bucket_descend(self) -> Optional[str]:
+        gate = getattr(self._fsm, "_quick_bucket_gate", None)
+        if gate is None:
+            self._takeover("DESCEND: missing paired bucket gate")
+            return None
+        pos = self._fsm.bridge.get_current_position()
+        altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
+        if altitude < 1.5:
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            self._takeover("DESCEND: below bucket safety altitude")
+            return None
+        now = time.time()
+        (cyl_obj, cylinder), (marker_obj, marker) = self._bucket_current_objects()
+        if altitude <= 2.45:
+            gate.start(now)
+            if 2.2 <= altitude <= 2.5:
+                gate.observe_radius(cylinder, now)
+            if now - gate.started_at > 15.0:
+                self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+                self._takeover("DESCEND: bucket precision deadline")
+                return None
+
+        # Enter the gate inside its 1.5–1.7 m release window. Holding at
+        # 1.72 m can leave the vehicle hovering forever just above the gate.
+        if altitude > 1.65:
+            if cyl_obj is None and marker_obj is None:
+                self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+                last_seen = self._bucket_last_seen_at
+                if gate.started_at is None and (
+                    (last_seen is None and now - self._start_time > 5.0)
+                    or (last_seen is not None and now - last_seen > 2.0)
+                ):
+                    self._takeover("DESCEND: no fresh paired target above 2.4m")
+                return None
+            self._bucket_last_seen_at = now
+            descent = (float(self._fsm.get_param("drop_servo_descend_fast", 0.45))
+                       if altitude > 3.0 else
+                       (0.12 if altitude < 1.9 else
+                        float(self._fsm.get_param("drop_servo_descend_slow", 0.28))))
+            if (gate.started_at is not None and altitude >= 2.2
+                    and not gate.radius_confirmed and not gate.radius_failed
+                    and now - gate.started_at < 2.0):
+                descent = 0.0
+            self._precision_aligner.step(
+                markers=[marker_obj] if marker_obj is not None else [],
+                cylinders=[cyl_obj] if cyl_obj is not None else [],
+                drop_height=1.6, altitude_m=altitude,
+                descent_speed=descent, allow_release=False)
+            return None
+
+        if cyl_obj is None and marker_obj is None:
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+        else:
+            self._precision_aligner.step(
+                markers=[marker_obj] if marker_obj is not None else [],
+                cylinders=[cyl_obj] if cyl_obj is not None else [],
+                drop_height=1.6, altitude_m=altitude,
+                descent_speed=0.0, allow_release=False)
+        result = self._bucket_gate_result()
+        if now - self._last_descend_log_time >= 0.75:
+            self._fsm.get_logger().info(
+                f"BUCKET_GATE: alt={altitude:.2f} action={result.action} "
+                f"reason={result.reason} radius_ok={gate.radius_confirmed} "
+                f"front={result.front_residual:.3f} "
+                f"rear={result.rear_residual:.3f}"
+            )
+            self._last_descend_log_time = now
+        if result.action == "takeover":
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            self._takeover(f"DESCEND: {result.reason}")
+        elif result.action == "brake":
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+        elif result.action == "release":
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            self._fsm._quick_release_intent = result.reason
+            return "EXECUTE_DROP"
+        return None
 
     def execute(self) -> Optional[str]:
         if self._sub_state == "DESCEND_TO_DROP":
@@ -164,6 +374,8 @@ class DropState:
         return None
 
     def _execute_descend(self) -> Optional[str]:
+        if self._bucket_mode():
+            return self._execute_bucket_descend()
         drop_h = self._active_drop_height()
         pos = self._fsm.bridge.get_current_position()
         elapsed = time.time() - self._start_time
@@ -694,10 +906,72 @@ class DropState:
         return centered
 
     def _execute_drop(self) -> Optional[str]:
+        if self._bucket_mode() and not self._drop_executed:
+            intent = getattr(self._fsm, "_quick_release_intent", None)
+            gate = getattr(self._fsm, "_quick_bucket_gate", None)
+            if intent is None or gate is None:
+                self._takeover("DROP: missing bucket release intent")
+                return None
+            result = self._bucket_gate_result()
+            if result.action != "release" or result.reason != intent:
+                self._fsm._quick_release_intent = None
+                self._fsm.get_logger().warn(
+                    f"DROP: release recheck rejected {result.reason}; resume servo")
+                return "DESCEND_TO_DROP"
+            try:
+                (_, cylinder), (_, marker) = self._bucket_current_objects()
+                telemetry = self._fsm.bridge.get_telemetry()
+                position = self._fsm.bridge.get_current_position()
+                velocity = telemetry.velocity
+                self._fsm._task_logger.log("quick_bucket_release_gate", {
+                    "time": time.time(),
+                    "decision": result.reason,
+                    "target_id": self._fsm._current_drop_cyl_id,
+                    "cylinder_capture_time": cylinder.stamp if cylinder else None,
+                    "marker_capture_time": marker.stamp if marker else None,
+                    "front_impact_ned": list(result.front_impact) if result.front_impact else None,
+                    "rear_impact_ned": list(result.rear_impact) if result.rear_impact else None,
+                    "front_residual_m": result.front_residual,
+                    "rear_residual_m": result.rear_residual,
+                    "bucket_center_ned": list(gate.bucket_ne),
+                    "disc_center_ned": list(gate.disc_ne),
+                    "altitude_m": self._fsm.fc.ned_to_altitude(position.down),
+                    "yaw_ned": getattr(self._fsm.bridge, "_current_yaw", None),
+                    "velocity_ned": [velocity.vn, velocity.ve, velocity.vd],
+                    "telemetry_time": telemetry.timestamp,
+                    "calibrated": gate.calibration is not None,
+                })
+            except Exception as exc:
+                self._takeover(f"DROP: cannot record release gate: {exc}")
+                return None
+            gate.commit_release()
+            self._fsm._quick_release_intent = None
+            self._fsm._quick_release_reason = result.reason
+            cyl_id = self._fsm._current_drop_cyl_id
+            self._fsm.get_logger().info(
+                f"DROP_GATE: release={result.reason} cyl={cyl_id} "
+                f"front_residual={result.front_residual:.3f} "
+                f"rear_residual={result.rear_residual:.3f}")
+            self._fsm.start_drop_service(cyl_id)
+            self._drop_executed = True
+            self._start_time = time.time()
+            return None
         # 等待投放确认
         timeout = self._fsm.get_param("drop_confirmation_timeout", 5.0)
         result = self._fsm.check_drop_service_result()
         if result is not None:
+            if self._fsm.get_param("quick_drop_mode", False):
+                try:
+                    self._fsm._task_logger.log("quick_drop_service_result", {
+                        "time": time.time(),
+                        "profile": self._fsm.get_param("quick_drop_profile", "blue"),
+                        "release_reason": getattr(
+                            self._fsm, "_quick_release_reason", "blue_baseline"),
+                        "service_success": bool(result),
+                        "means_target_hit": False,
+                    })
+                except Exception as exc:
+                    self._fsm.get_logger().warn(f"DROP: result log unavailable: {exc}")
             self._drop_success = result
             if self._drop_success:
                 self._fsm.get_logger().info("DROP: 投放成功")

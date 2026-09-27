@@ -241,6 +241,15 @@ class PrecisionAlignController:
         cx, cy, width, height = self._camera_geometry()
         u = float(self._field(target, "center_u", cx))
         v = float(self._field(target, "center_v", cy))
+        if self._param("quick_drop_profile", "blue") == "bucket" and altitude > 0:
+            # Aim the body behind the bucket by the measured front-bottle offset.
+            plane_distance = max(altitude - float(self._param("bucket_rim_height", 0.3)), 0.3)
+            y_sign = float(self._param("precision_align_image_y_to_forward_sign", -1.0))
+            if abs(y_sign) > 1e-6:
+                v -= (float(self._param("bucket_front_forward", 0.04))
+                      * float(self._param("camera_fy", 400.0)) / plane_distance / y_sign)
+            u -= (float(self._param("bucket_front_right", 0.0))
+                  * float(self._param("camera_fx", 400.0)) / plane_distance)
         raw_dx = (u - cx) / width
         raw_dy = (v - cy) / height
         pixel_error = math.hypot(u - cx, v - cy)
@@ -266,8 +275,11 @@ class PrecisionAlignController:
 
         smooth_du = float(self._smooth_dx) * width
         smooth_dv = float(self._smooth_dy) * height
+        plane_altitude = (max(altitude - float(self._param("bucket_rim_height", 0.3)), 0.3)
+                          if self._param("quick_drop_profile", "blue") == "bucket"
+                          else altitude)
         ground_forward_error_m, ground_right_error_m = self._ground_error_m(
-            smooth_du, smooth_dv, altitude,
+            smooth_du, smooth_dv, plane_altitude,
         ) if continuous else (0.0, 0.0)
 
         target_world_xy = self._world_xy(target)
@@ -442,6 +454,9 @@ class PrecisionAlignController:
 
     def _choose_target(self, markers: list, cylinders: list):
         source_preference = str(self._param("precision_align_target_source", "cylinder")).lower()
+        bucket_mode = self._param("quick_drop_profile", "blue") == "bucket"
+        if bucket_mode:
+            source_preference = "bucket"
         min_conf = float(self._param("precision_align_min_confidence", 0.25))
 
         marker_candidates = [
@@ -455,7 +470,16 @@ class PrecisionAlignController:
             if float(self._field(c, "confidence", 0.0)) >= min_conf
         ]
 
-        if source_preference == "marker":
+        if source_preference == "bucket":
+            hint = self._selected_memory_xy()
+            def associated(item):
+                point = self._world_xy(item)
+                return (hint is not None and point is not None
+                        and math.dist(point, hint) <= 0.35)
+            cylinder_candidates = [item for item in cylinder_candidates if associated(item[0])]
+            marker_candidates = [item for item in marker_candidates if associated(item[0])]
+            candidates = cylinder_candidates or marker_candidates
+        elif source_preference == "marker":
             candidates = marker_candidates
         elif source_preference == "cylinder":
             candidates = cylinder_candidates
@@ -466,6 +490,15 @@ class PrecisionAlignController:
 
         cx, cy, width, height = self._camera_geometry()
         diag = max(math.hypot(width, height), 1.0)
+        # 记忆世界坐标门控开关 (默认关闭 = 一切以视觉像素为准).
+        # 开启后, 未锁定时距搜索期记忆点超过 world_gate 的候选直接拒绝,
+        # 距离还作为弱项参与评分 (权重 0.08).
+        world_gate_enabled = bool(
+            self._param("precision_align_world_gate_enable", False)
+        )
+        world_gate = float(
+            self._param("precision_align_target_world_gate", 1.5)
+        )
         jump_gate = float(self._param("precision_align_max_jump_diag_ratio", 0.45))
         center_reject = float(self._param("precision_align_reject_center_ratio", 0.28))
 
@@ -474,6 +507,28 @@ class PrecisionAlignController:
             u = float(self._field(target, "center_u", cx))
             v = float(self._field(target, "center_v", cy))
             center_ratio = math.hypot(u - cx, v - cy) / diag
+
+            # 记忆世界坐标门控 (默认关闭, 见上方 world_gate_enabled).
+            # 关闭时 world_ratio 恒为 0, 评分式中的 0.08 项不产生任何影响.
+            world_ratio = 0.0
+            if (
+                world_gate_enabled
+                and self._target_hint_xy is not None
+                and self._locked_pixel_uv is None
+            ):
+                world_xy = self._world_xy(target)
+                if world_xy is None:
+                    world_ratio = 1.0
+                else:
+                    hint_x, hint_y = self._target_hint_xy
+                    world_error = math.hypot(
+                        world_xy[0] - hint_x, world_xy[1] - hint_y,
+                    )
+                    if world_error > world_gate:
+                        continue
+                    world_ratio = min(
+                        world_error / max(world_gate, 0.01), 1.0,
+                    )
 
             continuity_ratio = center_ratio
             if self._locked_pixel_uv is not None:
@@ -488,14 +543,15 @@ class PrecisionAlignController:
             # 评分权重设计原则 (越小越好):
             #   0.68 continuity_ratio  — 主项: 同一目标的帧间像素位移, 防止锁定跳变
             #   0.32 center_ratio       — 辅项: 距画面中心的归一化距离, 倾向选居中的目标
+            #   0.08 world_ratio        — 弱项: 距预期 World 位置的距离, 仅在门控
+            #                             开启且未锁定时非零 (默认关闭 → 恒为 0)
             #  -0.04 confidence         — 微调: 轻微偏好高置信度 (负权重→置信度越高 score 越低)
             #
             # continuity_ratio 占主导 (~65%) 确保锁定的目标不会被画面边缘的新目标"抢走".
-            # 注意: 记忆世界坐标 (target_hint) 不再参与评分/过滤 — 对心伺服一切以
-            # 视觉像素为准, 搜索期记忆点与下降期投影偏差不应拒绝高置信度目标.
             score = (
                 0.68 * continuity_ratio
                 + 0.32 * center_ratio
+                + 0.08 * world_ratio
                 - 0.04 * float(self._field(target, "confidence", 0.0))
             )
             scored.append((score, target, source))

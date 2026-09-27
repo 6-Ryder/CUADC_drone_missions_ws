@@ -52,6 +52,8 @@ from drone_vision.landing_detector import LandingCircleTracker, LandingPadRefine
 from drone_vision.coverage_monitor import CoverageMonitor
 from drone_utils.layout_frame import LayoutFrame
 from drone_vision.coordinate_transforms import CoordinateTransformer
+from drone_vision.capture_pose import interpolate_pose
+from collections import deque
 from drone_vision.visual_servoing import (
     VisualServoController, CylinderApproachController, ServoState,
 )
@@ -70,7 +72,11 @@ IMAGE_QOS = QoSProfile(
 )
 
 
-FROZEN_LAYOUT_PARAMETERS = frozenset({"layout_heading_deg"})
+FROZEN_LAYOUT_PARAMETERS = frozenset({
+    "layout_heading_deg", "quick_drop_profile", "bucket_rim_height",
+    "bucket_camera_forward", "bucket_camera_right", "bucket_camera_down",
+    "bucket_camera_roll", "bucket_camera_pitch", "bucket_camera_yaw",
+})
 
 
 class VisionPipelineNode(Node):
@@ -87,6 +93,8 @@ class VisionPipelineNode(Node):
         super().__init__("vision_pipeline")
 
         self._declare_params()
+        self._bucket_projection = (
+            self.get_parameter("quick_drop_profile").value == "bucket")
         self._layout_frame = LayoutFrame(
             float(self.get_parameter("layout_heading_deg").value)
         )
@@ -128,17 +136,18 @@ class VisionPipelineNode(Node):
         self._last_pose_monotonic: Optional[float] = None
         self._current_altitude = 5.0
         self._current_yaw_ned = 0.0
+        self._pose_history = deque(maxlen=100)
+        self._frame_pose = None
+        self._frame_stamp = None
         self._last_frame_time = time.time()
         self._landing_last_yolo_inference_monotonic = 0.0
         self._frame_count = 0
         self._skip_count = 0
 
         # ---- 订阅 ----
-        # gz_camera_bridge.py (Python) 发布到 /drone/camera/image_raw, QoS 匹配
         self._img_sub = self.create_subscription(
             Image, "/drone/camera/image_raw", self._image_cb,
-            IMAGE_QOS,
-        )
+            IMAGE_QOS)
         self._caminfo_sub = self.create_subscription(
             CameraInfo, "/drone/camera/camera_info", self._caminfo_cb,
             CAMERA_INFO_QOS,
@@ -197,6 +206,14 @@ class VisionPipelineNode(Node):
         self.declare_parameter("model_height", 640)
         self.declare_parameter("device", "cuda")
         self.declare_parameter("max_inference_fps", 30.0)
+        self.declare_parameter("quick_drop_profile", "blue")
+        self.declare_parameter("bucket_rim_height", 0.3)
+        self.declare_parameter("bucket_camera_forward", 0.0)
+        self.declare_parameter("bucket_camera_right", 0.0)
+        self.declare_parameter("bucket_camera_down", 0.0)
+        self.declare_parameter("bucket_camera_roll", 0.0)
+        self.declare_parameter("bucket_camera_pitch", 0.0)
+        self.declare_parameter("bucket_camera_yaw", 0.0)
         # 类别名 (YAML 配置, 必须与模型输出类别数一致)
         self.declare_parameter("class_names", ["cylinder"])
         self.declare_parameter("drop_marker_class_names", ["drop_zone_marker"])
@@ -211,6 +228,10 @@ class VisionPipelineNode(Node):
         self.declare_parameter("drop_marker_descend_min_circularity", 0.25)
         self.declare_parameter("drop_marker_descend_alt_threshold", 4.5)
         self.declare_parameter("drop_marker_min_diameter", 30)
+        # 尺寸一致性过滤开关 (默认关闭 = 只信 yolo+blue 高置信目标).
+        # 开启后按当前高度推算 1m 标识理论投影直径, 用下面两个比例窗口拒绝
+        # 尺寸异常的目标; 两者仅在开关为 True 时被读取.
+        self.declare_parameter("drop_marker_filter_by_diameter_enable", False)
         self.declare_parameter("drop_marker_min_scale_ratio", 0.45)
         self.declare_parameter("drop_marker_max_scale_ratio", 1.8)
         # 相机
@@ -293,6 +314,16 @@ class VisionPipelineNode(Node):
             image_top_faces_forward=self.get_parameter(
                 "image_top_faces_forward"
             ).value,
+            camera_body_offset=(tuple(float(self.get_parameter(name).value)
+                                      for name in ("bucket_camera_forward",
+                                                   "bucket_camera_right",
+                                                   "bucket_camera_down"))
+                                if self._bucket_projection else (0.0, 0.0, 0.0)),
+            camera_mount_rpy=(tuple(float(self.get_parameter(name).value)
+                                    for name in ("bucket_camera_roll",
+                                                 "bucket_camera_pitch",
+                                                 "bucket_camera_yaw"))
+                              if self._bucket_projection else (0.0, 0.0, 0.0)),
         )
 
         # --- 后处理器 ---
@@ -643,12 +674,19 @@ class VisionPipelineNode(Node):
         ):
             self._pose_received = False
             self._last_pose_monotonic = None
+            if hasattr(self, "_pose_history"):
+                self._pose_history.clear()
             self.get_logger().warn("VISION: 忽略无效无人机位姿")
             return
 
         self._drone_pose = pose
         self._pose_received = True
         self._last_pose_monotonic = time.monotonic()
+        pose_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if (math.isfinite(pose_stamp) and pose_stamp > 0
+                and hasattr(self, "_pose_history")
+                and (not self._pose_history or pose_stamp > self._pose_history[-1][0])):
+            self._pose_history.append((pose_stamp, pose))
         self._current_altitude = msg.pose.position.z
         q = msg.pose.orientation
         world_yaw = math.atan2(
@@ -695,24 +733,36 @@ class VisionPipelineNode(Node):
                 f"alt={alt:.1f}m"
             )
 
-    def _project_world_xy(self, u: float, v: float) -> Optional[tuple[float, float]]:
+    def _project_world_xy(
+        self, u: float, v: float, ground_z: float = 0.0,
+    ) -> Optional[tuple[float, float]]:
         """Project a pixel using only a fresh full 6-DoF pose."""
-        if not self._pose_is_fresh() or self._coord_xform is None:
+        if self._coord_xform is None:
             return None
+        if getattr(self, "_bucket_projection", False):
+            pose = getattr(self, "_frame_pose", None)
+            if pose is None:
+                return None
+        else:
+            if not self._pose_is_fresh():
+                return None
+            pose = self._drone_pose
         result = self._coord_xform.pixel_to_world(
-            u, v, self._drone_pose[:3], self._drone_pose[3:7],
-            ground_z=0.0, q_convention="xyzw",
+            u, v, pose[:3], pose[3:7],
+            ground_z=ground_z, q_convention="xyzw",
         )
         if result is None:
             return None
         offset = math.hypot(
-            result[0] - self._drone_pose[0], result[1] - self._drone_pose[1],
+            result[0] - pose[0], result[1] - pose[1],
         )
-        return result if offset <= max(self._current_altitude * 1.5, 3.0) else None
+        return result if offset <= max(pose[2] * 1.5, 3.0) else None
 
     def _new_cylinder_array(self) -> CylinderArray:
         msg = CylinderArray()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        frame_stamp = getattr(self, "_frame_stamp", None)
+        msg.header.stamp = (frame_stamp if frame_stamp is not None
+                            else self.get_clock().now().to_msg())
         msg.header.frame_id = "world"
         return msg
 
@@ -735,6 +785,12 @@ class VisionPipelineNode(Node):
                 self.get_logger().debug(f"跳帧 {self._skip_count}/{self._frame_count}")
             return
         self._last_frame_time = time.time()
+        self._frame_stamp = msg.header.stamp
+        if getattr(self, "_bucket_projection", False):
+            image_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            self._frame_pose = interpolate_pose(self._pose_history, image_stamp)
+        else:
+            self._frame_pose = None
 
         t0 = time.time()
         try:
@@ -760,6 +816,33 @@ class VisionPipelineNode(Node):
                     self._apply_marker_refine_thresholds()
                     marker_dets = self._marker_refiner.refine(image, marker_dets)
                     marker_source = "yolo+blue"
+                    if self.get_parameter(
+                        "drop_marker_filter_by_diameter_enable"
+                    ).value:
+                        # 尺寸一致性过滤: 按当前高度推算 1m 标识的理论投影直径,
+                        # 拒绝比例超出窗口的蓝色连通域 (地面杂色/尺度异常误检).
+                        # 关闭 (默认): 只信 yolo+blue 高置信目标.
+                        # 开启: 额外要求尺寸与高度假设一致.
+                        expected_diameter = (
+                            (
+                                self.get_parameter("fx").value
+                                + self.get_parameter("fy").value
+                            )
+                            * 0.5
+                            / max(self._current_altitude, 0.5)
+                        )
+                        marker_dets = (
+                            self._marker_refiner.filter_by_expected_diameter(
+                                marker_dets,
+                                expected_diameter,
+                                self.get_parameter(
+                                    "drop_marker_min_scale_ratio"
+                                ).value,
+                                self.get_parameter(
+                                    "drop_marker_max_scale_ratio"
+                                ).value,
+                            )
+                        )
 
         # 发布投放区标识检测
         if self._marker_refiner:
@@ -885,9 +968,18 @@ class VisionPipelineNode(Node):
         self._cyl_tracker.prune()
         active = self._cyl_tracker.get_active()
 
+        bucket_mode = getattr(self, "_bucket_projection", False)
         fx = self.get_parameter("fx").value
         fy = self.get_parameter("fy").value
-        alt = max(self._current_altitude, 0.5)
+        if bucket_mode and self._coord_xform is not None:
+            fx = float(self._coord_xform.K[0, 0])
+            fy = float(self._coord_xform.K[1, 1])
+        rim_height = (float(self.get_parameter("bucket_rim_height").value)
+                      if bucket_mode else 0.0)
+        pose_altitude = (self._frame_pose[2]
+                         if bucket_mode and self._frame_pose
+                         else self._current_altitude)
+        alt = max(pose_altitude - rim_height, 0.5)
 
         msg_array = self._new_cylinder_array()
 
@@ -906,7 +998,7 @@ class VisionPipelineNode(Node):
                 det.bbox_x1, det.bbox_y1, det.bbox_x2, det.bbox_y2 = bbox
 
             # World coordinates require a fresh full 6-DoF pose; pixels stay usable.
-            selected_xy = self._project_world_xy(t["cx"], t["cy"])
+            selected_xy = self._project_world_xy(t["cx"], t["cy"], rim_height)
 
             if selected_xy is not None and all(
                 math.isfinite(value) for value in selected_xy
