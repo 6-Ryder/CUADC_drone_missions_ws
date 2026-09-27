@@ -1,11 +1,11 @@
 /vision_pipeline:
   ros__parameters:
     # bucket 配置的相机机体 FRD 安装偏移与额外姿态（弧度）。
-    # 现场确认光轴朝正下方；位置偏移和细小倾角仍待测量/图像核对。
+    # 现场报告镜头水平偏移为 0、光轴朝正下方；bucket_camera_down 待核对符号/参考点。
     # blue 配置不读取这些值，保持已飞过的投影行为。
-    bucket_camera_forward: 0.0
-    bucket_camera_right: 0.0
-    bucket_camera_down: 0.0
+    bucket_camera_forward: 0.0   # m；现场报告值
+    bucket_camera_right: 0.0     # m；现场报告值
+    bucket_camera_down: 0.0      # m；未确认，当前仅为占位值
     bucket_camera_roll: 0.0
     bucket_camera_pitch: 0.0
     bucket_camera_yaw: 0.0
