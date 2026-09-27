@@ -79,7 +79,7 @@ def generate_launch_description():
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
     vision_quick_param_file = os.path.join(
-        pkg_vision, "config", "vision_params_quick.yaml"
+        pkg_vision, "config", "vision_params_quick_sim.yaml"
     )
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params_quick.yaml")
     mission_param_file = os.path.join(

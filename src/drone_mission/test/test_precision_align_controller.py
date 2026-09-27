@@ -374,6 +374,41 @@ def test_ground_error_is_height_invariant_for_same_physical_offset():
     assert right_high == right_low == 0.20
 
 
+def test_bucket_servo_uses_camera_to_rim_distance_from_measured_heights():
+    fsm = _Fsm({
+        "quick_drop_profile": "bucket",
+        "precision_align_continuous_enable": True,
+        "bucket_home_body_height": 0.40,
+        "bucket_camera_down": 0.365,
+        "bucket_rim_height": 0.40,
+        "bucket_front_forward": 0.045,
+        "bucket_front_right": 0.0,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+
+    controller.step(
+        markers=[],
+        cylinders=[{
+            "confidence": 0.9,
+            "center_u": 680.0,
+            "center_v": 480.0,
+            "world_position_valid": True,
+            "world_x": 42.3,
+            "world_y": 5.5,
+        }],
+        drop_height=1.6,
+        altitude_m=1.6,
+        descent_speed=0.10,
+        allow_release=False,
+    )
+
+    assert math.isclose(controller.last_status.ground_right_error_m,
+                        40.0 * 1.235 / 400.0, abs_tol=1e-9)
+
+
 def test_continuous_step_keeps_horizontal_servo_and_descent_in_one_command():
     fsm = _Fsm({
         "precision_align_continuous_enable": True,

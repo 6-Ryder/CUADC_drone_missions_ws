@@ -68,8 +68,10 @@ FROZEN_LAYOUT_PARAMETERS = frozenset({
     "area2_right_min", "area2_right_max",
     "sweep_margin_forward", "sweep_margin_right",
     "quick_drop_profile", "bucket_calibration_valid", "bucket_rim_height",
+    "bucket_home_body_height", "bucket_camera_down",
     "bucket_front_forward", "bucket_rear_forward",
     "bucket_front_right", "bucket_rear_right",
+    "bucket_front_down", "bucket_rear_down",
     "bucket_front_delay", "bucket_rear_delay",
     "bucket_front_uncertainty", "bucket_rear_uncertainty",
     "bucket_disc_uncertainty",
@@ -402,10 +404,14 @@ class MissionFSM(Node):
         self.declare_parameter("quick_drop_profile", "blue")
         self.declare_parameter("bucket_calibration_valid", False)
         self.declare_parameter("bucket_rim_height", 0.3)
+        self.declare_parameter("bucket_home_body_height", 0.0)
+        self.declare_parameter("bucket_camera_down", 0.0)
         self.declare_parameter("bucket_front_forward", 0.04)
         self.declare_parameter("bucket_rear_forward", -0.04)
         self.declare_parameter("bucket_front_right", 0.0)
         self.declare_parameter("bucket_rear_right", 0.0)
+        self.declare_parameter("bucket_front_down", 0.0)
+        self.declare_parameter("bucket_rear_down", 0.0)
         self.declare_parameter("bucket_front_delay", 0.0)
         self.declare_parameter("bucket_rear_delay", 0.0)
         self.declare_parameter("bucket_front_uncertainty", 0.03)
@@ -1100,6 +1106,9 @@ class MissionFSM(Node):
                     self.get_param("bucket_front_bias_east", 0.0),
                     self.get_param("bucket_rear_bias_north", 0.0),
                     self.get_param("bucket_rear_bias_east", 0.0),
+                    self.get_param("bucket_home_body_height", 0.0),
+                    self.get_param("bucket_front_down", 0.0),
+                    self.get_param("bucket_rear_down", 0.0),
                 )
                 if not calibration.valid_for_bucket():
                     self.request_takeover("SELECT_TARGET: invalid bucket calibration")

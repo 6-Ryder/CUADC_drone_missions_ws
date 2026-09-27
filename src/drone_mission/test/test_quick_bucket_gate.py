@@ -1,4 +1,8 @@
+from dataclasses import replace
+import math
 from types import SimpleNamespace
+
+import pytest
 
 from drone_mission.quick_bucket_gate import (
     BucketReleaseGate,
@@ -126,3 +130,18 @@ def test_deadline_and_low_height_fail_closed():
     assert gate.evaluate(**params(now=23.01, telemetry_stamp=23.01)).action == "takeover"
     gate = confirmed_gate()
     assert gate.evaluate(**params(altitude=1.49)).action == "takeover"
+
+
+def test_bucket_impact_uses_release_point_height_above_ground():
+    gate = confirmed_gate()
+    gate.calibration = replace(
+        calibrated(), home_body_height=0.40,
+        front_down=0.345, rear_down=0.345, front_uncertainty=0.0,
+    )
+
+    result = gate.evaluate(**params(vn=0.08))
+
+    fall_distance = 1.6 + 0.40 - 0.345 - 0.3
+    assert result.front_impact[0] == pytest.approx(
+        0.96 + 0.04 + 0.08 * math.sqrt(2 * fall_distance / 9.81)
+    )

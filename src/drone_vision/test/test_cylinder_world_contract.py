@@ -203,11 +203,14 @@ def test_pipeline_without_pose_preserves_pixel_detection_and_invalidates_world()
 def test_bucket_cylinder_uses_capture_stamp_and_rim_plane():
     pipeline = bare_pipeline_without_pose()
     pipeline._bucket_projection = True
-    pipeline._frame_pose = (0, 0, 2.4, 0, 0, 0, 1)
+    pipeline._bucket_ground_z = -0.40
+    pipeline._frame_pose = (0, 0, 1.6, 0, 0, 0, 1)
     pipeline._frame_stamp = Time(sec=12, nanosec=345)
     original_get_parameter = pipeline.get_parameter
     pipeline.get_parameter = lambda name: (
-        SimpleNamespace(value=0.3) if name == "bucket_rim_height"
+        SimpleNamespace(value={"bucket_rim_height": 0.40,
+                               "bucket_camera_down": 0.365}[name])
+        if name in {"bucket_rim_height", "bucket_camera_down"}
         else original_get_parameter(name))
     planes = []
     pipeline._project_world_xy = lambda u, v, ground_z=0: (
@@ -218,8 +221,56 @@ def test_bucket_cylinder_uses_capture_stamp_and_rim_plane():
     array = pipeline._cyl_pub.messages[-1]
     assert array.header.stamp.sec == 12
     assert array.header.stamp.nanosec == 345
-    assert planes == [0.3]
-    assert array.cylinders[0].radius == pytest.approx(12 * 2.1 / 400)
+    assert planes == [0.40]
+    assert array.cylinders[0].radius == pytest.approx(12 * 1.235 / 400)
+
+
+def test_bucket_projection_uses_takeoff_pose_as_ground_anchor():
+    pipeline = bare_pipeline_without_pose()
+    pipeline._bucket_projection = True
+    pipeline._bucket_ground_z = None
+    planes = []
+    pipeline._coord_xform = SimpleNamespace(pixel_to_world=lambda *args, **kwargs: (
+        planes.append(kwargs["ground_z"]) or (0.0, 0.0)))
+    original_get_parameter = pipeline.get_parameter
+    pipeline.get_parameter = lambda name: (
+        SimpleNamespace(value=0.40) if name == "bucket_home_body_height"
+        else original_get_parameter(name))
+    pipeline._pose_cb(SimpleNamespace(
+        pose=SimpleNamespace(
+            position=SimpleNamespace(x=0.0, y=0.0, z=0.2),
+            orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0)),
+        header=SimpleNamespace(stamp=Time(sec=1))))
+    pipeline._frame_pose = (0.0, 0.0, 1.8, 0.0, 0.0, 0.0, 1.0)
+
+    assert pipeline._bucket_ground_z == pytest.approx(-0.2)
+    assert pipeline._project_world_xy(320.0, 240.0, 0.40) == (0.0, 0.0)
+    assert planes == [pytest.approx(0.2)]
+
+
+def test_bucket_without_ground_anchor_does_not_publish_world_position():
+    pipeline = bare_pipeline_without_pose()
+    pipeline._bucket_projection = True
+    pipeline._bucket_ground_z = None
+    pipeline._frame_pose = (0.0, 0.0, 1.6, 0.0, 0.0, 0.0, 1.0)
+    pipeline._coord_xform = SimpleNamespace(
+        K=np.diag([400.0, 400.0, 1.0]),
+        pixel_to_world=lambda *args, **kwargs: (1.0, 2.0))
+    pipeline._frame_stamp = Time(sec=12)
+    original_get_parameter = pipeline.get_parameter
+    pipeline.get_parameter = lambda name: (
+        SimpleNamespace(value={"bucket_rim_height": 0.40,
+                               "bucket_camera_down": 0.365}[name])
+        if name in {"bucket_rim_height", "bucket_camera_down"}
+        else original_get_parameter(name))
+    detection = SimpleNamespace(
+        bbox=(300, 220, 342, 260), confidence=0.9, cx=321, cy=239)
+
+    pipeline._process_cylinders_v2(np.zeros((2, 2, 3)), [detection])
+
+    cylinder = pipeline._cyl_pub.messages[-1].cylinders[0]
+    assert cylinder.world_position_valid is False
+    assert math.isnan(cylinder.radius)
 
 
 def test_empty_pipeline_and_standalone_arrays_keep_world_frame():

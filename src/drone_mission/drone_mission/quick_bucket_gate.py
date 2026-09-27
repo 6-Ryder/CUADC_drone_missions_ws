@@ -39,12 +39,18 @@ class Calibration:
     front_bias_east: float = 0.0
     rear_bias_north: float = 0.0
     rear_bias_east: float = 0.0
+    home_body_height: float = 0.0
+    front_down: float = 0.0
+    rear_down: float = 0.0
 
     def valid_for_bucket(self) -> bool:
         numbers = tuple(self.__dict__.values())
         return (all(math.isfinite(value) for value in numbers)
                 and self.front_delay >= 0 and self.rear_delay >= 0
                 and self.rim_height >= 0
+                and self.home_body_height >= 0
+                and 0 <= self.front_down <= self.home_body_height
+                and 0 <= self.rear_down <= self.home_body_height
                 and 0 <= self.front_uncertainty <= 0.03
                 and self.rear_uncertainty >= 0
                 and self.disc_uncertainty >= 0)
@@ -209,11 +215,13 @@ class BucketReleaseGate:
             bucket_possible = self.radius_confirmed and not self.radius_failed
 
         if marker_ok:
-            front_disc = self._impact(north, east, yaw, vn, ve, vd, altitude, 0,
+            front_height = altitude + cal.home_body_height - cal.front_down
+            rear_height = altitude + cal.home_body_height - cal.rear_down
+            front_disc = self._impact(north, east, yaw, vn, ve, vd, front_height, 0,
                                       cal.front_forward, cal.front_right,
                                       cal.front_delay, cal.front_bias_north,
                                       cal.front_bias_east)
-            rear_disc = self._impact(north, east, yaw, vn, ve, vd, altitude, 0,
+            rear_disc = self._impact(north, east, yaw, vn, ve, vd, rear_height, 0,
                                      cal.rear_forward, cal.rear_right,
                                      cal.rear_delay, cal.rear_bias_north,
                                      cal.rear_bias_east)
@@ -228,7 +236,7 @@ class BucketReleaseGate:
         if (bucket_possible and cylinder_ok and marker_ok
                 and math.hypot(cylinder.north - marker.north,
                                cylinder.east - marker.east) <= 0.25):
-            front = self._impact(north, east, yaw, vn, ve, vd, altitude,
+            front = self._impact(north, east, yaw, vn, ve, vd, front_height,
                                  cal.rim_height, cal.front_forward,
                                  cal.front_right, cal.front_delay,
                                  cal.front_bias_north, cal.front_bias_east)

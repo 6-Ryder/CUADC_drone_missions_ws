@@ -73,7 +73,7 @@ def generate_launch_description():
         description="quick 投放配置: blue 或 bucket；bucket 须完成现场标定",
     )
     bucket_rim_arg = DeclareLaunchArgument(
-        "bucket_rim_height", default_value="0.3",
+        "bucket_rim_height", default_value="0.40",
         description="小桶桶口距地高度（米），真机使用现场量测值",
     )
 

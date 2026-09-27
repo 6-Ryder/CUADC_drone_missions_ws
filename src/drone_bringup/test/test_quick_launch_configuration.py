@@ -68,6 +68,24 @@ def test_quick_sitl_references_quick_sim_params():
     assert "servo_params.yaml" not in files
 
 
+def test_bucket_camera_geometry_stays_separate_between_real_and_sitl():
+    real_files = _param_files(LAUNCH_DIR / "quick_flight.launch.py")
+    sim_files = _param_files(LAUNCH_DIR / "quick_sitl.launch.py")
+    vision_config = WORKSPACE / "src/drone_vision/config"
+    real_vision = yaml.safe_load((vision_config / "vision_params_quick.yaml").read_text())[
+        "/vision_pipeline"]["ros__parameters"]
+    sim_vision = yaml.safe_load((vision_config / "vision_params_quick_sim.yaml").read_text())[
+        "/vision_pipeline"]["ros__parameters"]
+
+    assert "vision_params_quick.yaml" in real_files
+    assert "vision_params_quick_sim.yaml" in sim_files
+    assert real_vision["bucket_home_body_height"] == 0.40
+    assert real_vision["bucket_camera_down"] == 0.365
+    assert sim_vision["bucket_home_body_height"] == 0.0
+    assert sim_vision["bucket_camera_down"] == 0.0
+    assert _mission_params("mission_params_quick.yaml")["bucket_calibration_valid"] is False
+
+
 def test_original_launches_do_not_reference_quick_params():
     """策略隔离: 原真机/SITL launch 绝不加载 quick 参数."""
     assert "mission_params_quick" not in _launch_text("real_flight.launch.py")

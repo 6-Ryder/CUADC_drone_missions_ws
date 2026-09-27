@@ -143,7 +143,25 @@
     quick_drop_mode: true                 # 启用快速投放策略
     quick_drop_profile: "blue"            # 默认保留已飞行的蓝盘 quick；launch 可选 bucket
     bucket_calibration_valid: false       # 未完成静态量测和试投前禁止小桶自动释放
-    bucket_rim_height: 0.3                # 仅仿真示例，真机必须实测
+    # 以下几何为现场静态量测的中值；释放延迟与落点误差仍须实测。
+    bucket_rim_height: 0.40              # m；桶口距地高度
+    bucket_home_body_height: 0.40        # m；装载时 O 点距起飞地面约 40 cm
+    bucket_camera_down: 0.365           # m；镜头光学中心距地 3-4 cm
+    bucket_front_forward: 0.045         # m；前舱脱离点在 O 前方 4.5 cm
+    bucket_rear_forward: -0.045         # m；后舱脱离点在 O 后方 4.5 cm
+    bucket_front_right: 0.0             # m；前舱脱离点无左右偏移
+    bucket_rear_right: 0.0              # m；后舱脱离点无左右偏移
+    bucket_front_down: 0.345            # m；前物品脱离点距地 5-6 cm
+    bucket_rear_down: 0.345             # m；后物品脱离点距地 5-6 cm
+    bucket_front_delay: 0.0             # s；占位值，须实测
+    bucket_rear_delay: 0.0              # s；占位值，须实测
+    bucket_front_uncertainty: 0.03      # m；占位值，须重复试投验证
+    bucket_rear_uncertainty: 0.10       # m；占位值，须重复试投验证
+    bucket_disc_uncertainty: 0.10       # m；占位值，须重复试投验证
+    bucket_front_bias_north: 0.0        # m；占位值，须试投验证
+    bucket_front_bias_east: 0.0         # m；占位值，须试投验证
+    bucket_rear_bias_north: 0.0         # m；占位值，须试投验证
+    bucket_rear_bias_east: 0.0          # m；占位值，须试投验证
     drop_target_source: "marker"          # 只认蓝底标识作为投放目标
     drop_align_stall_threshold: 45.0      # 停滞阈值 (raw 40 + 5 兜底)
     drop_align_stall_stable_band: 5.0     # 停滞稳定带宽 (px)
