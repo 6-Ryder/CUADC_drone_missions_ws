@@ -243,7 +243,10 @@ class PrecisionAlignController:
         v = float(self._field(target, "center_v", cy))
         if self._param("quick_drop_profile", "blue") == "bucket" and altitude > 0:
             # Aim the body behind the bucket by the measured front-bottle offset.
-            plane_distance = max(altitude - float(self._param("bucket_rim_height", 0.3)), 0.3)
+            plane_distance = max(
+                altitude + float(self._param("bucket_home_body_height", 0.0))
+                - float(self._param("bucket_camera_down", 0.0))
+                - float(self._param("bucket_rim_height", 0.3)), 0.3)
             y_sign = float(self._param("precision_align_image_y_to_forward_sign", -1.0))
             if abs(y_sign) > 1e-6:
                 v -= (float(self._param("bucket_front_forward", 0.04))
@@ -275,7 +278,10 @@ class PrecisionAlignController:
 
         smooth_du = float(self._smooth_dx) * width
         smooth_dv = float(self._smooth_dy) * height
-        plane_altitude = (max(altitude - float(self._param("bucket_rim_height", 0.3)), 0.3)
+        plane_altitude = (max(
+                            altitude + float(self._param("bucket_home_body_height", 0.0))
+                            - float(self._param("bucket_camera_down", 0.0))
+                            - float(self._param("bucket_rim_height", 0.3)), 0.3)
                           if self._param("quick_drop_profile", "blue") == "bucket"
                           else altitude)
         ground_forward_error_m, ground_right_error_m = self._ground_error_m(

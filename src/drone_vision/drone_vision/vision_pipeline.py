@@ -74,6 +74,7 @@ IMAGE_QOS = QoSProfile(
 
 FROZEN_LAYOUT_PARAMETERS = frozenset({
     "layout_heading_deg", "quick_drop_profile", "bucket_rim_height",
+    "bucket_home_body_height",
     "bucket_camera_forward", "bucket_camera_right", "bucket_camera_down",
     "bucket_camera_roll", "bucket_camera_pitch", "bucket_camera_yaw",
 })
@@ -139,6 +140,7 @@ class VisionPipelineNode(Node):
         self._pose_history = deque(maxlen=100)
         self._frame_pose = None
         self._frame_stamp = None
+        self._bucket_ground_z: Optional[float] = None
         self._last_frame_time = time.time()
         self._landing_last_yolo_inference_monotonic = 0.0
         self._frame_count = 0
@@ -208,6 +210,7 @@ class VisionPipelineNode(Node):
         self.declare_parameter("max_inference_fps", 30.0)
         self.declare_parameter("quick_drop_profile", "blue")
         self.declare_parameter("bucket_rim_height", 0.3)
+        self.declare_parameter("bucket_home_body_height", 0.0)
         self.declare_parameter("bucket_camera_forward", 0.0)
         self.declare_parameter("bucket_camera_right", 0.0)
         self.declare_parameter("bucket_camera_down", 0.0)
@@ -680,6 +683,12 @@ class VisionPipelineNode(Node):
             return
 
         self._drone_pose = pose
+        if self._bucket_projection and self._bucket_ground_z is None:
+            # quick launch starts on the ground: the first PX4 body pose anchors
+            # physical ground in the odometry World frame, whose z origin is arbitrary.
+            self._bucket_ground_z = (
+                pose[2] - float(self.get_parameter("bucket_home_body_height").value)
+            )
         self._pose_received = True
         self._last_pose_monotonic = time.monotonic()
         pose_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -741,8 +750,10 @@ class VisionPipelineNode(Node):
             return None
         if getattr(self, "_bucket_projection", False):
             pose = getattr(self, "_frame_pose", None)
-            if pose is None:
+            base_z = getattr(self, "_bucket_ground_z", None)
+            if pose is None or base_z is None:
                 return None
+            ground_z += base_z
         else:
             if not self._pose_is_fresh():
                 return None
@@ -976,10 +987,14 @@ class VisionPipelineNode(Node):
             fy = float(self._coord_xform.K[1, 1])
         rim_height = (float(self.get_parameter("bucket_rim_height").value)
                       if bucket_mode else 0.0)
-        pose_altitude = (self._frame_pose[2]
-                         if bucket_mode and self._frame_pose
-                         else self._current_altitude)
-        alt = max(pose_altitude - rim_height, 0.5)
+        if bucket_mode:
+            ground_z = getattr(self, "_bucket_ground_z", None)
+            pose = getattr(self, "_frame_pose", None)
+            alt = (max(pose[2] - float(self.get_parameter("bucket_camera_down").value)
+                       - ground_z - rim_height, 0.5)
+                   if pose is not None and ground_z is not None else math.nan)
+        else:
+            alt = max(self._current_altitude - rim_height, 0.5)
 
         msg_array = self._new_cylinder_array()
 
