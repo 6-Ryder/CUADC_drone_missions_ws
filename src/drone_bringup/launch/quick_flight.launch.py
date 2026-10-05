@@ -69,7 +69,7 @@ def generate_launch_description():
         description="true=等待人用遥控器Arm Switch解锁, false=代码arm直接起飞",
     )
     quick_profile_arg = DeclareLaunchArgument(
-        "quick_drop_profile", default_value="blue",
+        "quick_drop_profile", default_value="bucket",
         description="quick 投放配置: blue 或 bucket；bucket 须完成现场标定",
     )
     bucket_rim_arg = DeclareLaunchArgument(

@@ -1,5 +1,6 @@
 /vision_pipeline:
   ros__parameters:
+    quick_drop_profile: "bucket" # quick 真机默认；launch 可覆盖为 blue
     # bucket 真机相机 FRD 安装偏移：O 离地约 40 cm，镜头光学中心离地 3-4 cm。
     # blue 配置不读取这些值，保持已飞过的投影行为。
     bucket_camera_forward: 0.0

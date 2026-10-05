@@ -6,7 +6,7 @@
 # 与 start_full_simulation.sh 的区别:
 #   - Step 4 换 quick_sitl.launch.py (mission_params_quick_sim.yaml +
 #     servo_params_quick.yaml)
-#   - 投放模式由下方 QUICK_DROP_PROFILE 选择，默认 blue，可切换 bucket
+#   - 投放模式由下方 QUICK_DROP_PROFILE 选择，默认 bucket，可切换 blue
 #
 # 启动顺序:
 #   1. MicroXRCEAgent  (PX4 ↔ ROS2 DDS 桥梁, UDP 8888)
@@ -31,8 +31,8 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $(date '+%H:%M:%S') $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $*"; }
 step()  { echo -e "\n${BLUE}==== $(date '+%H:%M:%S') $* ====${NC}"; }
 
-# quick 模式默认值：可改为 bucket，也可在启动时传 quick_drop_profile:=bucket 覆盖。
-QUICK_DROP_PROFILE="blue"
+# quick 模式默认值：可改为 blue，也可在启动时传 quick_drop_profile:=blue 覆盖。
+QUICK_DROP_PROFILE="bucket"
 LAYOUT_HEADING_DEG="30.0"
 HAS_LAYOUT_HEADING=0
 HAS_QUICK_PROFILE=0

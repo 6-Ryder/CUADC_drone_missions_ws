@@ -137,7 +137,7 @@
 
     # --- 快速投放策略 (quick_drop_mode) ---
     quick_drop_mode: true                 # 启用快速投放策略
-    quick_drop_profile: "blue"            # 默认保留蓝盘 quick；launch 可选 bucket
+    quick_drop_profile: "bucket"          # 默认桶盘配对；launch 可选 blue 基线
     bucket_calibration_valid: false       # 未标定时仅允许同盘安全兜底
     bucket_rim_height: 0.3                # SITL 桶口高度
     drop_target_source: "marker"          # 只认蓝底标识作为投放目标

@@ -57,7 +57,7 @@ def generate_launch_description():
         description="SITL PX4 VehicleStatus DDS topic",
     )
     quick_profile_arg = DeclareLaunchArgument(
-        "quick_drop_profile", default_value="blue",
+        "quick_drop_profile", default_value="bucket",
         description="quick drop profile: blue or bucket",
     )
     bucket_rim_arg = DeclareLaunchArgument(

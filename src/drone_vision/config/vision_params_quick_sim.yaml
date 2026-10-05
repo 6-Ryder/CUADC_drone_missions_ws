@@ -1,5 +1,6 @@
 /vision_pipeline:
   ros__parameters:
+    quick_drop_profile: "bucket" # quick 仿真默认；launch 可覆盖为 blue
     # SITL 保留此前已验证的零高度基准及零相机偏移；不使用真机量测值。
     # blue 配置不读取这些值，保持已飞过的投影行为。
     bucket_camera_forward: 0.0
