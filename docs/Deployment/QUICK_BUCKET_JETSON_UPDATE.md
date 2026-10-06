@@ -1,12 +1,13 @@
 # Quick 小桶精投：Jetson 分支更新说明
 
-本次从 Optimization 移植 quick 功能逻辑。Jetson 原有相机设备路径、图像话题、PX4 v1 话题、DDS UDP 端口、舵机配置、TensorRT `.engine` 模型路径和真机相机方向不变。默认 `quick_drop_profile=blue`，继续使用原有蓝盘 quick 投放。
+本次从 Optimization 移植 quick 功能逻辑。Jetson 原有相机设备路径、图像话题、PX4 v1 话题、DDS UDP 端口、舵机配置、TensorRT `.engine` 模型路径和真机相机方向不变。默认 `quick_drop_profile=bucket`，启动时可用 `quick_drop_profile:=blue` 选择原有蓝盘 quick 投放。
 
 ## 功能边界
 
 - `blue`：继续以蓝盘为目标，边视觉伺服边下降，并按原有条件发出一次全开双投。新增的 shadow 日志只记录投放时的估算数据，不参与投放决策。
 - `bucket`：搜索阶段联合识别小桶与蓝盘，下降阶段使用采集时刻的位姿投影和桶口尺寸确认。投放前复核目标身份、位姿和速度新鲜度、下降高度、前瓶落入小桶与后瓶落入蓝盘的预测误差；条件失效则继续对心或请求人工接管。
 - `bucket_calibration_valid: false` 是默认值：小桶自动释放禁用。在此状态下，bucket 模式仅可能在独立的蓝盘回退门禁满足时投放蓝盘，不能据此宣称小桶精投成功。
+- quick launch 会把 profile 同时传入 mission、vision 和 PX4 bridge；bucket 模式下，bridge 只有收到 0.10 秒内有效姿态四元数时才发布 `/drone/pose`，避免过期姿态参与世界坐标投影。
 
 当前已收到的现场数据：桶口距地面 **0.40 m**、桶口内径 **14 cm**、投放物最大外径 **6.3 cm**，相机光轴朝正下方。真机 quick launch 的桶口高度默认值已同步为 0.40 m。以前述机体 O 点为参考，前舱脱离点为前方 **4.5 cm**、右偏 **0**，后舱为后方 **4.5 cm**、右偏 **0**；镜头水平偏移为 **0**。
 
@@ -37,7 +38,7 @@ ROS_LOG_DIR=/tmp/quick_launch_check ros2 launch drone_bringup quick_flight.launc
 
 ## 模式与标定
 
-启动脚本默认使用 `blue`：
+启动脚本默认使用 `bucket`：
 
 ```bash
 ./scripts/start_quick_mission_real.sh
@@ -46,6 +47,9 @@ ROS_LOG_DIR=/tmp/quick_launch_check ros2 launch drone_bringup quick_flight.launc
 仅在现场量测和静态投放验证完成后，才启用小桶自动精投。在 `src/drone_mission/config/mission_params_quick.yaml` 中复核 O 点、前后物品脱离点、释放延迟、落点偏差和不确定度，并把 `bucket_calibration_valid` 设为 `true`。在 `src/drone_vision/config/vision_params_quick.yaml` 中复核相机相对 PX4 机体参考点的安装偏移和姿态；当前 launch 默认将已报告的桶口高度 0.40 m 同时传给视觉与任务节点，也可显式用启动参数覆盖。上面两份配置的新增字段只用于 bucket 功能，不更改现有设备或话题。
 
 ```bash
+./scripts/start_quick_mission_real.sh quick_drop_profile:=blue
+
+# 如需显式选择 bucket 并覆盖桶口高度：
 ./scripts/start_quick_mission_real.sh quick_drop_profile:=bucket bucket_rim_height:=0.40
 ```
 

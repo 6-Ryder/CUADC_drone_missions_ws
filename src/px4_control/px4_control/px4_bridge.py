@@ -174,6 +174,7 @@ class PX4Bridge(Node):
         self._target_yaw: float = 0.0
         self._target_speed: Optional[float] = None
         self._current_yaw: float = 0.0
+        self._last_attitude_time: Optional[float] = None
         self._smoothed_yaw: float = 0.0  # 平滑后的 yaw setpoint, 避免与物理 yaw 冲突
         self._setpoint_lock = threading.Lock()
 
@@ -236,6 +237,7 @@ class PX4Bridge(Node):
         self.get_logger().info("PX4 Bridge 已启动 (等待 DDS 连接...)")
 
     def _declare_params(self):
+        self.declare_parameter("quick_drop_profile", "blue")
         self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
         self.declare_parameter("takeoff_height", 5.0)
         self.declare_parameter("waypoint_tolerance", 0.5)
@@ -288,12 +290,17 @@ class PX4Bridge(Node):
         self._attitude = msg
         q = msg.q  # [w, x, y, z] Hamilton convention
         if len(q) >= 4:
+            if (not all(math.isfinite(float(v)) for v in q[:4])
+                    or sum(float(v) * float(v) for v in q[:4]) <= 1e-12):
+                self._last_attitude_time = None
+                return
             self._current_telemetry.attitude = Attitude(
                 q_w=float(q[0]), q_x=float(q[1]), q_y=float(q[2]), q_z=float(q[3]),
             )
             # 从四元数计算 yaw (VehicleAttitude 消息没有单独的 yaw 字段)
             w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
             self._current_yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+            self._last_attitude_time = time.monotonic()
 
     def _land_cb(self, msg: VehicleLandDetected):
         self._land_detected = msg
@@ -381,6 +388,10 @@ class PX4Bridge(Node):
         """发布 World 坐标系下的无人机位姿."""
         if self._odom is None:
             return
+        if self.get_parameter("quick_drop_profile").value == "bucket":
+            attitude_time = self._last_attitude_time
+            if attitude_time is None or time.monotonic() - attitude_time > 0.10:
+                return
         pos = self._odom.position
         att = self._attitude
         q = att.q if att and len(att.q) >= 4 else [1.0, 0.0, 0.0, 0.0]

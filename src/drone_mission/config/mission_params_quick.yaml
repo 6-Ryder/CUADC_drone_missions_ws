@@ -141,7 +141,7 @@
 
     # --- 快速投放策略 (quick_drop_mode) ---
     quick_drop_mode: true                 # 启用快速投放策略
-    quick_drop_profile: "blue"            # 启动脚本会覆盖此值；默认保留蓝盘 quick
+    quick_drop_profile: "bucket"          # 默认桶盘配对；quick_flight launch 可覆盖为 blue
     bucket_calibration_valid: false       # 测量与试投完成前保持 false；bucket 仍可能蓝盘兜底投放
     # 以下几何为现场静态量测的中值；延迟/落点误差仍是占位值。
     # 桶口高度由 quick_flight.launch.py 的 bucket_rim_height 启动参数覆盖；

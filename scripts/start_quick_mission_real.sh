@@ -4,15 +4,15 @@
 #
 # 与 start_full_real_mission.sh 相同的结构: 脚本持有唯一 MicroXRCEAgent,
 # launch 只启动任务节点。区别仅是 launch 换 quick_flight.launch.py
-# (mission_params_quick.yaml + servo_params_quick.yaml)。默认 blue 保留
-# 2.4m 蓝盘投放；可选择 bucket 桶盘配对投放；两者均一次全开双投。
-# 默认场地方向为北偏东 30°；真机不会生成 SDF，必须确认实体场地方向一致。
+# (mission_params_quick.yaml + servo_params_quick.yaml)。默认 bucket 桶盘配对投放；
+# 可选择 blue 使用原有 2.4m 蓝盘投放；两者均一次全开双投。
+# 默认场地方向为北偏东 54°；真机不会生成 SDF，必须确认实体场地方向一致.
 #
 # 用法:
 #   # 现场终端直接运行快速投放全流程
 #   ./scripts/start_quick_mission_real.sh
 #   ./scripts/start_quick_mission_real.sh camera_device:=/dev/video0
-#   ./scripts/start_quick_mission_real.sh quick_drop_profile:=bucket
+#   ./scripts/start_quick_mission_real.sh quick_drop_profile:=blue
 #
 #   # 仅启动 Agent (可选: 飞控晚于 Jetson 上电超过 60s 时用于自启)
 #   ./scripts/start_quick_mission_real.sh --agent-only
@@ -51,8 +51,8 @@ MODE="mission"
 LAUNCH_ARGS=()
 LAYOUT_HEADING_DEG="54.0"
 HAS_LAYOUT_HEADING=0
-# 可改为 bucket；命令行 quick_drop_profile:=... 优先。小桶精投仍需有效标定。
-QUICK_DROP_PROFILE="blue"
+# 可改为 blue；命令行 quick_drop_profile:=... 优先。小桶精投仍需有效标定。
+QUICK_DROP_PROFILE="bucket"
 HAS_QUICK_PROFILE=0
 for arg in "$@"; do
   case "$arg" in
