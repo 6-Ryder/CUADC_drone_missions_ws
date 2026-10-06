@@ -409,6 +409,62 @@ def test_bucket_servo_uses_camera_to_rim_distance_from_measured_heights():
                         40.0 * 1.235 / 400.0, abs_tol=1e-9)
 
 
+def test_bucket_continuous_servo_speed_cap_decreases_with_height():
+    for altitude, expected_cap in ((4.5, 0.25), (3.0, 0.14),
+                                   (1.9, 0.065), (1.65, 0.065)):
+        fsm = _Fsm({
+            "quick_drop_profile": "bucket",
+            "precision_align_continuous_enable": True,
+            "precision_align_ground_kp": 0.40,
+            "precision_align_max_speed": 0.25,
+            "bucket_servo_mid_max_speed": 0.14,
+            "precision_align_fine_max_speed": 0.065,
+            "bucket_home_body_height": 0.40,
+            "bucket_camera_down": 0.365,
+            "bucket_rim_height": 0.40,
+            "bucket_front_forward": 0.0,
+            "bucket_front_right": 0.0,
+            "camera_fx": 400.0,
+            "camera_fy": 400.0,
+        })
+        controller = PrecisionAlignController(fsm)
+        controller.reset()
+        controller.step(markers=[], cylinders=[{
+            "confidence": 0.9,
+            "center_u": 1000.0,
+            "center_v": 480.0,
+            "world_position_valid": False,
+        }], drop_height=1.6, altitude_m=altitude,
+            descent_speed=0.12, allow_release=False)
+        forward, right, down = fsm.fc.body_commands[-1]
+        assert math.isclose(math.hypot(forward, right), expected_cap, abs_tol=1e-9)
+        assert down == 0.12
+
+
+def test_blue_continuous_servo_keeps_original_speed_cap_at_low_height():
+    fsm = _Fsm({
+        "quick_drop_profile": "blue",
+        "precision_align_continuous_enable": True,
+        "precision_align_ground_kp": 0.40,
+        "precision_align_max_speed": 0.25,
+        "bucket_servo_mid_max_speed": 0.14,
+        "precision_align_fine_max_speed": 0.065,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+    controller.step(markers=[], cylinders=[{
+        "confidence": 0.9,
+        "center_u": 1000.0,
+        "center_v": 480.0,
+        "world_position_valid": False,
+    }], drop_height=1.6, altitude_m=1.65,
+        descent_speed=0.12, allow_release=False)
+    forward, right, _down = fsm.fc.body_commands[-1]
+    assert math.isclose(math.hypot(forward, right), 0.25, abs_tol=1e-9)
+
+
 def test_continuous_step_keeps_horizontal_servo_and_descent_in_one_command():
     fsm = _Fsm({
         "precision_align_continuous_enable": True,
