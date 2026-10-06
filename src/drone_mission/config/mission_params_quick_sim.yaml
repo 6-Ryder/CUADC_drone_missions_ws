@@ -42,7 +42,7 @@
     area1_right_min: -4.0
     area1_right_max: 4.0
     area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
-    area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
+    area1_search_altitude: 4.5    # 相对起飞点；与真机同步，扫描补足降低高度后的视场
 
     # --- Area 2: 侦察区 ---
     # local: forward=[55,60], right=[-3,4]  (左边界右移1m: 实飞左偏 1m 补偿)

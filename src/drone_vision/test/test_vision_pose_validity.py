@@ -4,6 +4,8 @@ import math
 import time
 from types import SimpleNamespace
 
+import numpy as np
+import pytest
 from geometry_msgs.msg import PoseStamped
 
 from drone_vision.coordinate_transforms import CoordinateTransformer
@@ -113,3 +115,39 @@ def test_near_zero_quaternion_revokes_a_previously_fresh_projection():
     assert not node._pose_is_fresh(now_monotonic=time.monotonic())
     assert node._project_world_xy(640.0, 480.0) is None
     assert projector.calls == 0
+
+
+def test_bucket_projection_is_independent_of_px4_vertical_origin():
+    results = []
+    for origin in (-7.817544460296631, 0.0):
+        node = bare_pipeline(last_pose=time.monotonic(), pose_valid=True)
+        node._bucket_projection = True
+        node._bucket_ground_z = origin - 0.40
+        node._frame_pose = (0.0, 0.0, origin + 5.6,
+                            math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0)
+        node._coord_xform = CoordinateTransformer(
+            np.array([[539.9, 0, 320], [0, 539.9, 240], [0, 0, 1]]),
+            camera_body_offset=(0.0, 0.0, 0.365))
+        results.append(node._project_world_xy(600.0, 450.0, 0.40))
+
+    assert results[0] is not None
+    assert results[0] == pytest.approx(results[1])
+
+
+def test_bucket_pose_height_uses_anchored_ground_not_world_z():
+    node = bare_pipeline(last_pose=None, pose_valid=False)
+    node._bucket_projection = True
+    node._bucket_ground_z = None
+    node.get_parameter = lambda name: SimpleNamespace(value={
+        "bucket_home_body_height": 0.40,
+        "vision_pose_max_age_s": 0.5,
+    }[name])
+    pose = PoseStamped()
+    pose.pose.orientation.w = 1.0
+    pose.pose.position.z = -7.817544460296631
+    node._pose_cb(pose)
+    assert node._current_altitude == pytest.approx(0.40)
+
+    pose.pose.position.z += 5.6
+    node._pose_cb(pose)
+    assert node._current_altitude == pytest.approx(6.0)

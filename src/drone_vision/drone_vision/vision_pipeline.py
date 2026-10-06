@@ -696,7 +696,10 @@ class VisionPipelineNode(Node):
                 and hasattr(self, "_pose_history")
                 and (not self._pose_history or pose_stamp > self._pose_history[-1][0])):
             self._pose_history.append((pose_stamp, pose))
-        self._current_altitude = msg.pose.position.z
+        self._current_altitude = (
+            pose[2] - self._bucket_ground_z
+            if self._bucket_projection else pose[2]
+        )
         q = msg.pose.orientation
         world_yaw = math.atan2(
             2.0 * (q.w * q.z + q.x * q.y),
@@ -767,7 +770,11 @@ class VisionPipelineNode(Node):
         offset = math.hypot(
             result[0] - pose[0], result[1] - pose[1],
         )
-        return result if offset <= max(pose[2] * 1.5, 3.0) else None
+        # PX4 World z has an arbitrary origin; bucket projection already
+        # anchors the target plane to the observed takeoff ground.
+        height = (pose[2] - ground_z
+                  if getattr(self, "_bucket_projection", False) else pose[2])
+        return result if offset <= max(height * 1.5, 3.0) else None
 
     def _new_cylinder_array(self) -> CylinderArray:
         msg = CylinderArray()

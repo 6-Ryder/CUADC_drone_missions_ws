@@ -30,7 +30,7 @@
 set -eo pipefail
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_ID="$(date +%Y%m%d_%H%M%S)"
+RUN_ID="$(date +%Y%m%d_%H%M%S_%N)_$$"
 LOG_DIR="$WORKSPACE_DIR/log/quick_real_mission_$RUN_ID"
 DDS_PORT="${DDS_PORT:-8888}"
 DDS_WAIT_SECONDS="${DDS_WAIT_SECONDS:-60}"
@@ -82,6 +82,12 @@ if [ "$HAS_QUICK_PROFILE" -eq 0 ]; then
   LAUNCH_ARGS+=("quick_drop_profile:=${QUICK_DROP_PROFILE}")
 fi
 
+# 自启和手动启动不得相互清理在用节点；在任何清理/DDS 操作前拒绝第二实例。
+# 子进程关闭 fd 9，防止 ROS daemon 等长期进程延长锁的生命周期。
+command -v flock >/dev/null || fail "未找到 flock，无法保证 quick 单实例运行"
+exec 9> "${TMPDIR:-/tmp}/drone_quick_real_${UID}.lock"
+flock -n 9 || fail "已有 quick 实例运行；请先停止原任务后再启动，避免中断在用节点"
+
 mkdir -p "$LOG_DIR/ros"
 export ROS_LOG_DIR="$LOG_DIR/ros"
 printf '%q ' "${LAUNCH_ARGS[@]}" > "$LOG_DIR/launch_arguments.txt"
@@ -90,7 +96,7 @@ printf '\n' >> "$LOG_DIR/launch_arguments.txt"
 # 自启环境下 stdout 不落盘 (cron→邮件 / systemd→journal), 这里把脚本全部
 # 输出镜像到 startup.log: 每次运行都在日志目录留下完整过程, 不再有"日志空"
 # 的盲区。终端行为不变 (tee 仍输出到原 stdout)。
-exec > >(tee -a "$LOG_DIR/startup.log") 2>&1
+exec > >(tee -a "$LOG_DIR/startup.log" 9>&-) 2>&1
 # 等待 tee 就绪 (fork 竞态: 极早期输出可能先进管道缓冲); 上限 1s.
 i=0
 until [ -f "$LOG_DIR/startup.log" ] || [ $i -ge 20 ]; do sleep 0.05; i=$((i + 1)); done
@@ -156,7 +162,7 @@ export ROS_DOMAIN_ID=0
 
 # ---- Step 0: 清理旧进程 ----
 # 同一 UDP 端口只能由一个 Agent 监听; 先清旧进程保证端口唯一。
-# (自动启动与现场终端并发时, 后启动者拥有端口, 行为确定)
+# 单实例锁已生效；这里只清理此前退出后残留的旧进程。
 step "Step 0/3 — 清理旧进程 (保证 UDP :$DDS_PORT 唯一)"
 pkill -9 -f "MicroXRCEAgent" 2>/dev/null || true
 pkill -9 -f "px4_bridge" 2>/dev/null || true
@@ -169,7 +175,7 @@ info "旧进程已清理"
 # ---- Step 1: MicroXRCEAgent (先于一切任务闸门, 保证 DDS 必然就绪) ----
 step "Step 1/3 — 启动 MicroXRCEAgent (Ethernet UDP :$DDS_PORT)"
 command -v MicroXRCEAgent >/dev/null || fail "未找到 MicroXRCEAgent (安装 micro-ros-agent 或放入 PATH)"
-MicroXRCEAgent udp4 -p "$DDS_PORT" > "$LOG_DIR/agent.log" 2>&1 &
+MicroXRCEAgent udp4 -p "$DDS_PORT" > "$LOG_DIR/agent.log" 2>&1 9>&- &
 AGENT_PID=$!
 echo "$AGENT_PID" > "$LOG_DIR/agent.pid"
 sleep 2
@@ -192,7 +198,7 @@ fi
 step "Step 2/3 — 等待 PX4 DDS 通信就绪"
 DDS_READY=false
 for i in $(seq 1 "$DDS_WAIT_SECONDS"); do
-  if ros2 topic list 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
+  if ros2 topic list 9>&- 2>/dev/null | grep -qx "/fmu/out/vehicle_status_v1"; then
     info "PX4 DDS 通信就绪 (耗时 ${i}s)"
     DDS_READY=true
     break
@@ -230,7 +236,7 @@ echo "│  通信:     PX4 Ethernet → Agent UDP:$DDS_PORT (脚本持有)   │
 echo "│  解锁:     遥控器 Arm Switch → is_armed() → 起飞           │"
 echo "│  Home:     解锁点 (0, 0)                                 │"
 echo "│  模式:     ${QUICK_DROP_PROFILE}                                             │"
-echo "│  投放:     5.6m 扫描 → 模式目标高度 → 一次全开双投          │"
+echo "│  投放:     配置搜索高度 → 模式目标高度 → 一次全开双投      │"
 echo "│  安全:     Agent 退出自动停止任务; 随时遥控器切 Offboard    │"
 echo "├──────────────────────────────────────────────────────────┤"
 echo "│  日志:     $LOG_DIR                                      │"
@@ -238,9 +244,9 @@ echo "└───────────────────────�
 echo ""
 
 ros2 launch drone_bringup quick_flight.launch.py "${LAUNCH_ARGS[@]}" \
-  > "$LOG_DIR/mission.log" 2>&1 &
+  > "$LOG_DIR/mission.log" 2>&1 9>&- &
 LAUNCH_PID=$!
-tail -f "$LOG_DIR/mission.log" & TAIL_PID=$!
+tail -f "$LOG_DIR/mission.log" 9>&- & TAIL_PID=$!
 
 # Agent 是任务唯一数据源: 意外退出时停止任务 (与旧 launch exit guard 等价).
 # 使用精确 PID 而非 pkill 模式匹配, 避免误伤并发 launch 实例或其他进程.
@@ -248,7 +254,7 @@ tail -f "$LOG_DIR/mission.log" & TAIL_PID=$!
   if kill -0 "$$" 2>/dev/null && kill -0 "$LAUNCH_PID" 2>/dev/null; then
     warn "MicroXRCEAgent 已退出, 停止任务节点 (避免 DDS 断开后继续飞行)"
     kill -INT "$LAUNCH_PID" 2>/dev/null || true
-  fi ) &
+  fi ) 9>&- &
 WATCHDOG_PID=$!
 
 set +e

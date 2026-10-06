@@ -6,7 +6,7 @@
 # 与 start_full_simulation.sh 的区别:
 #   - Step 4 换 quick_sitl.launch.py (mission_params_quick_sim.yaml +
 #     servo_params_quick.yaml)
-#   - 任务流程: 5.6m 扫描(只认蓝底) → 2.4m 单次降高 → 放宽对心 → 一次全开双投
+#   - 任务流程: 配置搜索高度扫描(只认蓝底) → 2.4m 单次降高 → 放宽对心 → 一次全开双投
 #
 # 启动顺序:
 #   1. MicroXRCEAgent  (PX4 ↔ ROS2 DDS 桥梁, UDP 8888)
@@ -250,7 +250,7 @@ echo "│    → 正在启动 ROS2 节点...                                    
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  任务流程 (FSM quick):                                            │"
 echo "│    INIT → ARM → TAKEOFF → TRANSIT → CYLINDER_SEARCH(marker)     │"
-echo "│    → SELECT → APPROACH(5.6m) → DESCEND(2.4m) → DROP(单次双投)    │"
+echo "│    → SELECT → APPROACH(配置搜索高度) → DESCEND(2.4m) → DROP(单次双投)    │"
 echo "│    → ASCEND → RECON_PATROL → RETURN → PRECISION_LAND → COMPLETE  │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  日志目录: $LOG_DIR                                              │"

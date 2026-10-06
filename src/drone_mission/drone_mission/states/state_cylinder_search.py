@@ -11,6 +11,7 @@ CYLINDER_SEARCH 状态 — 悬停搜索圆筒 + 视觉检测 + 半径排序.
   - 若超时但已有目标, 使用已累计目标继续投放
 """
 
+import math
 import time
 from typing import Optional, List
 
@@ -32,6 +33,7 @@ class CylinderSearchState:
         self._last_cylinder_count: int = 0
         self._min_cylinders_required: int = 2
         self._target_progress: Optional[ProgressMonitor] = None
+        self._last_bucket_diagnostic = 0.0
 
     def enter(self):
         self._fsm.logger.log_state("TRANSIT_TO_DROP_ZONE", "CYL_SEARCH", "开始搜索圆筒")
@@ -40,6 +42,7 @@ class CylinderSearchState:
         self._scan_wp_idx = 0
         self._detection_stable_count = 0
         self._last_cylinder_count = 0
+        self._last_bucket_diagnostic = 0.0
         if hasattr(self._fsm, "clear_known_cylinders"):
             self._fsm.clear_known_cylinders()
         self._min_cylinders_required = int(
@@ -98,6 +101,30 @@ class CylinderSearchState:
             known = [c for c in known_cylinders
                      if is_small_bucket_candidate(c)
                      and pair_bucket_marker(c, known_cylinders, remembered_markers) is not None]
+            now_monotonic = time.monotonic()
+            if now_monotonic - self._last_bucket_diagnostic >= 2.0:
+                details = []
+                for c in known_cylinders:
+                    nearest = min((math.hypot(c["world_x"] - m["world_x"],
+                                              c["world_y"] - m["world_y"])
+                                   for m in remembered_markers), default=math.inf)
+                    details.append(
+                        f"id={c.get('id', '?')} r={c.get('radius', math.nan):.3f} "
+                        f"small_frames={len(c.get('small_radius_samples', []))} "
+                        f"small={int(is_small_bucket_candidate(c))} "
+                        f"disc_distance={nearest:.3f}")
+                visible_radii = [round(float(getattr(c, "radius", math.nan)), 3)
+                                 for c in valid]
+                self._fsm.get_logger().info(
+                    f"BUCKET_SEARCH: visible_cyl={len(valid)} "
+                    f"world_cyl={sum(bool(getattr(c, 'world_position_valid', False)) for c in valid)} "
+                    f"visible_disc={len(markers)} "
+                    f"world_disc={sum(bool(getattr(m, 'world_position_valid', False)) for m in markers)} "
+                    f"memory_cyl={len(known_cylinders)} memory_disc={len(remembered_markers)} "
+                    f"small={sum(is_small_bucket_candidate(c) for c in known_cylinders)} "
+                    f"paired={len(known)} required={self._min_cylinders_required} "
+                    f"visible_r={visible_radii} targets=[{'; '.join(details)}]")
+                self._last_bucket_diagnostic = now_monotonic
         elif (
             self._fsm.get_param("quick_drop_mode", False)
             and self._fsm.get_param("quick_drop_profile", "blue") != "bucket"
@@ -230,9 +257,13 @@ class CylinderSearchState:
         return None
 
     def exit(self):
-        if hasattr(self._fsm, "get_known_cylinders"):
+        if hasattr(self._fsm, "get_known_drop_targets"):
             cyl_count = len(self._fsm.get_known_drop_targets())
+        elif hasattr(self._fsm, "get_known_cylinders"):
+            cyl_count = len(self._fsm.get_known_cylinders())
         else:
             cyl_count = len(self._fsm.get_cylinders())
-        self._fsm.logger.log_state("CYL_SEARCH", "SELECT_TARGET",
-                                   f"搜索完成, 累计 {cyl_count} 个投放候选")
+        # The FSM owns the real transition (selection, retry or takeover).
+        self._fsm.get_logger().info(
+            f"CYL_SEARCH: 退出搜索, 原始目标记忆 {cyl_count} 个, "
+            f"合格投放候选 {self._last_cylinder_count} 个")

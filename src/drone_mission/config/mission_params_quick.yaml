@@ -45,7 +45,7 @@
     area1_right_min: -4.0
     area1_right_max: 4.0
     area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
-    area1_search_altitude: 5.6    # 投放区视觉识别/目标建图高度, 高处保证相机视场覆盖
+    area1_search_altitude: 4.5    # 相对起飞点；降低搜索高度增大小桶像素尺寸，扫描补足视场
 
     # --- Area 2: 侦察区 ---
     # local: forward=[55,60], right=[-3,4]  (左边界右移1m: 实飞左偏 1m 补偿)
@@ -76,7 +76,7 @@
     drop_servo_descend_fast: 0.45  # 伺服下降: >3m 垂直速度 (m/s, 真机保守档)
     drop_servo_descend_slow: 0.28  # 伺服下降: ≤3m 垂直速度 (m/s, 真机保守档)
     drop_confirmation_timeout: 5.0  # 必须大于舵机层 3s 总预算 (s)
-    drop_align_pixel_tolerance: 40.0 # 投放前目标中心允许像素误差 (5.6m 粗对心, 640 宽图像)
+    drop_align_pixel_tolerance: 40.0 # 投放前目标中心允许像素误差 (4.5m 粗对心, 640 宽图像)
     # ── 低空视觉校准: 梯度下降探测 (quick 下不使用, 继承真机基线) ──
     drop_visual_align_probe_step: 0.40 # 单次探测步长 (m), 信号大于噪声(~30px)
     drop_visual_align_probe_speed: 0.30 # 探测移动速度 (m/s)
