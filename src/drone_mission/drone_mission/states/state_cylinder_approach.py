@@ -16,6 +16,7 @@ import math
 from typing import Optional
 
 from drone_utils.progress_monitor import ProgressMonitor
+from drone_mission.precision_align_controller import PrecisionAlignController
 
 class CylinderApproachState:
     """圆筒对心逼近状态 — 使用位置匹配而非 ID (vision 每帧重新分配 ID)."""
@@ -29,6 +30,9 @@ class CylinderApproachState:
         self._converged: bool = False
         self._memory_arrival_count: int = 0
         self._progress: Optional[ProgressMonitor] = None
+        self._bucket_aligner = PrecisionAlignController(fsm)
+        self._target_pixel_uv: Optional[tuple] = None
+        self._last_visual_stamp: float = 0.0
 
     def enter(self):
         self._fsm.logger.log_state("SELECT_TARGET", "APPROACH", "开始逼近圆筒")
@@ -37,6 +41,7 @@ class CylinderApproachState:
         self._target_lost_count = 0
         self._converged = False
         self._memory_arrival_count = 0
+        self._last_visual_stamp = 0.0
         self._progress = ProgressMonitor(
             window_s=float(self._fsm.get_param("navigation_progress_window", 30.0)),
             min_improvement=float(
@@ -61,6 +66,17 @@ class CylinderApproachState:
             # 回退: 直接选第一个圆柱
             c = targets[0]
             self._target_world_xy = self._world_xy(c)
+
+        bucket_mode = (self._fsm.get_param("quick_drop_mode", False)
+                       and self._fsm.get_param("quick_drop_profile", "blue") == "bucket")
+        if bucket_mode:
+            gate = getattr(self._fsm, "_quick_bucket_gate", None)
+            self._target_pixel_uv = getattr(gate, "bucket_pixel_uv", None)
+            self._bucket_aligner.reset(self._target_world_xy, self._target_pixel_uv)
+            self._fsm.get_logger().info(
+                f"APPROACH: 视觉目标 pixel={self._target_pixel_uv}, "
+                f"粗略 World={self._target_world_xy}")
+            return
 
         if self._target_world_xy is None:
             self._fsm.get_logger().warn("APPROACH: 目标没有有效 World 坐标")
@@ -156,6 +172,9 @@ class CylinderApproachState:
         return best
 
     def execute(self) -> Optional[str]:
+        if (self._fsm.get_param("quick_drop_mode", False)
+                and self._fsm.get_param("quick_drop_profile", "blue") == "bucket"):
+            return self._execute_bucket_visual()
         if self._target_world_xy is None:
             self._fsm.get_logger().error("APPROACH: 没有有效投放目标")
             self._fsm.request_takeover("APPROACH: no valid drop target")
@@ -239,6 +258,74 @@ class CylinderApproachState:
                         "APPROACH: target made no progress after retry"
                     )
 
+        return None
+
+    def _execute_bucket_visual(self) -> Optional[str]:
+        """Track the selected rim in image space; use World only for coarse recovery."""
+        now = time.time()
+        stamp = float(getattr(self._fsm, "_cylinder_capture_stamp", 0.0))
+        fresh = 0 < stamp <= now and now - stamp <= 0.25
+        cx = float(self._fsm.get_param("camera_cx", 320.0))
+        cy = float(self._fsm.get_param("camera_cy", 240.0))
+        candidates = []
+        if fresh:
+            for target in self._fsm.get_cylinders():
+                conf = float(self._field(target, "confidence", 0.0))
+                radius = float(self._field(target, "radius", math.nan))
+                u = float(self._field(target, "center_u", math.nan))
+                v = float(self._field(target, "center_v", math.nan))
+                if (math.isfinite(conf) and conf >= 0.35
+                        and math.isfinite(radius) and 0.03 <= radius <= 0.30
+                        and math.isfinite(u) and math.isfinite(v)):
+                    candidates.append(target)
+        hint = self._target_pixel_uv or (cx, cy)
+        target = min(candidates, key=lambda item: math.hypot(
+            float(self._field(item, "center_u")) - hint[0],
+            float(self._field(item, "center_v")) - hint[1]), default=None)
+        if target is not None:
+            u = float(self._field(target, "center_u"))
+            v = float(self._field(target, "center_v"))
+            if math.hypot(u - hint[0], v - hint[1]) > 120.0:
+                target = None
+        if target is None:
+            self._align_stable_count = 0
+            self._target_lost_count += 1
+            if self._target_lost_count > 100:
+                self._fsm.request_takeover("APPROACH: visual bucket target lost")
+                return None
+            if self._target_world_xy is not None and now - self._start_time < 2.0:
+                from px4_control.telemetry import world_to_ned
+                north, east, _ = world_to_ned(*self._target_world_xy, 0.0)
+                pos = self._fsm.bridge.get_current_position()
+                dn, de = north - pos.north, east - pos.east
+                distance = math.hypot(dn, de)
+                if math.isfinite(distance) and distance > 0.05:
+                    scale = min(1.0, 0.5 / distance)
+                    self._fsm.fc.goto_ned(
+                        pos.north + scale * dn, pos.east + scale * de,
+                        pos.down, speed=0.15)
+                    return None
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            return None
+
+        self._target_lost_count = 0
+        self._target_pixel_uv = (u, v)
+        gate = getattr(self._fsm, "_quick_bucket_gate", None)
+        if gate is not None:
+            gate.bucket_pixel_uv = self._target_pixel_uv
+        pos = self._fsm.bridge.get_current_position()
+        altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
+        self._bucket_aligner.step(
+            markers=[], cylinders=[target], drop_height=altitude,
+            altitude_m=altitude, descent_speed=0.0, allow_release=False)
+        status = self._bucket_aligner.last_status
+        if stamp > self._last_visual_stamp:
+            self._last_visual_stamp = stamp
+            tolerance = float(self._fsm.get_param("drop_align_pixel_tolerance", 35.0))
+            self._align_stable_count = (self._align_stable_count + 1
+                                        if status.pixel_error <= tolerance else 0)
+        if self._align_stable_count >= 10:
+            return "DESCEND_TO_DROP"
         return None
 
     def exit(self):

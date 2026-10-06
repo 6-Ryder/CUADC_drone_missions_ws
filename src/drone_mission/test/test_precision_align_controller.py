@@ -542,3 +542,18 @@ def test_unconfigured_tight_window_height_keeps_single_window():
     # 即便 1.5m 低于任何切换高度, 仍用精校段窗口 35 → aligned
     controller.step([], _window_target(center_u=640.0 + 33.0), drop_height=1.5)
     assert controller.last_status.stable_count == 1
+
+
+def test_bucket_ignores_world_gate_and_tracks_current_image():
+    fsm = _Fsm({
+        "quick_drop_profile": "bucket",
+        "precision_align_world_gate_enable": True,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset(target_hint_xy=(42.0, 5.0), target_hint_uv=(640.0, 480.0))
+    target = {
+        "confidence": 0.9, "center_u": 640.0, "center_v": 480.0,
+        "world_position_valid": False, "world_x": math.nan, "world_y": math.nan,
+    }
+    selected, source, reason = controller._choose_target([], [target])
+    assert (selected, source, reason) == (target, "cylinder", "tracking")

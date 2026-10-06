@@ -43,7 +43,8 @@ class CylinderSelector:
         self._selection_count: int = 0
         self._position_tolerance: float = 0.5  # 位置去重容差 (m)
 
-    def select(self, cylinders: list, preferred_radius_window=None) -> Optional[int]:
+    def select(self, cylinders: list, preferred_radius_window=None,
+               allow_pixel_only=False) -> Optional[int]:
         """
         选择下一个投放目标.
 
@@ -73,12 +74,14 @@ class CylinderSelector:
                 cx = getattr(c, 'world_x', math.nan)
                 cy = getattr(c, 'world_y', math.nan)
             if not world_valid or not (math.isfinite(cx) and math.isfinite(cy)):
-                continue
-            is_duplicate = any(
-                math.hypot(cx - px, cy - py) < self._position_tolerance
-                for px, py in self._selected_positions
-            )
-            if is_duplicate:
+                if allow_pixel_only:
+                    cx = cy = None
+                else:
+                    continue
+            if cx is not None and any(
+                math.hypot(cx - pos[0], cy - pos[1]) < self._position_tolerance
+                for pos in self._selected_positions if pos is not None
+            ):
                 continue
 
             radius = (c.radius if hasattr(c, 'radius') else
@@ -104,7 +107,7 @@ class CylinderSelector:
 
         # 记录
         self._selected_ids.add(cid)
-        self._selected_positions.append((cx, cy))
+        self._selected_positions.append((cx, cy) if cx is not None else None)
         self._selected_id_list.append(cid)
         self._selection_count += 1
 
