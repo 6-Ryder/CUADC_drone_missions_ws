@@ -271,6 +271,35 @@ def test_bucket_search_waits_for_small_opening_instead_of_first_paired_cylinder(
     assert state.execute() == "SELECT_TARGET"
 
 
+def test_bucket_search_reports_rejected_targets_even_when_eligible_count_stays_zero():
+    fsm = _SearchFSM({"quick_drop_mode": True, "quick_drop_profile": "bucket"})
+    fsm._known_cylinders[0].update(radius=0.10, small_radius_confirmed=False)
+    messages = []
+    fsm.get_logger = lambda: type("Log", (), {"info": staticmethod(messages.append)})()
+    state = _search_state(fsm)
+    state._last_cylinder_count = 0
+
+    assert state.execute() is None
+    diagnostic = next((m for m in messages if "BUCKET_SEARCH:" in m), "")
+    assert "small=0" in diagnostic
+    assert "paired=0" in diagnostic
+    assert "r=0.100" in diagnostic
+
+
+def test_search_exit_never_claims_target_selection_on_takeover():
+    fsm = _SearchFSM({"quick_drop_mode": True, "quick_drop_profile": "bucket"})
+    fsm.get_known_drop_targets = fsm.get_known_cylinders
+    events = []
+    messages = []
+    fsm.logger = type("Log", (), {"log_state": staticmethod(lambda *a: events.append(a))})()
+    fsm.get_logger = lambda: type("Log", (), {"info": staticmethod(messages.append)})()
+
+    _search_state(fsm).exit()
+
+    assert not any(len(event) >= 2 and event[1] == "SELECT_TARGET" for event in events)
+    assert messages
+
+
 def test_bucket_memory_keeps_small_rim_evidence_amid_disc_radius_outlier():
     fsm = _bare_fsm()
     fsm._known_cylinders = []
@@ -409,6 +438,11 @@ def _quick_params(name):
 
 def _servo_quick_params():
     return _load_parameters(ROOT / "drone_servo2/config/servo_params_quick.yaml")
+
+
+@pytest.mark.parametrize("name", ["mission_params_quick.yaml", "mission_params_quick_sim.yaml"])
+def test_quick_search_height_is_four_point_five_metres(name):
+    assert _quick_params(name)["area1_search_altitude"] == 4.5
 
 
 def test_quick_real_params_enable_strategy():

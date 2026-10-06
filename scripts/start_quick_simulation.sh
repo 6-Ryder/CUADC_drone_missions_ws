@@ -266,7 +266,7 @@ echo "│    → 正在启动 ROS2 节点...                                    
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  任务流程 (FSM quick):                                            │"
 echo "│    INIT → ARM → TAKEOFF → TRANSIT → CYLINDER_SEARCH             │"
-echo "│    → SELECT → APPROACH(5.6m) → DESCEND → DROP(单次双投)          │"
+echo "│    → SELECT → APPROACH(配置搜索高度) → DESCEND → DROP(双投)   │"
 echo "│    → ASCEND → RECON_PATROL → RETURN → PRECISION_LAND → COMPLETE  │"
 echo "├──────────────────────────────────────────────────────────────────┤"
 echo "│  日志目录: $LOG_DIR                                              │"
