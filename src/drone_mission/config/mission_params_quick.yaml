@@ -98,8 +98,9 @@
     precision_align_continuous_enable: true  # 快速投放: 下降到投放高度不中断同一目标锁
     precision_align_ground_kp: 0.40       # 地面误差(m) → 水平速度(m/s), 保持跨高度增益一致
     precision_align_max_speed: 0.25       # 粗调水平合速度上限 (m/s)
+    bucket_servo_mid_max_speed: 0.14      # bucket: 1.9m<h≤3.0m 水平合速度上限 (m/s)
     precision_align_fine_pixel_error: 90.0 # 进入精调速度限制的像素误差
-    precision_align_fine_max_speed: 0.065 # 精调水平合速度上限 (m/s)
+    precision_align_fine_max_speed: 0.065 # 精调及 bucket ≤1.9m 水平合速度上限 (m/s)
     precision_align_min_correction_speed: 0.012 # 保证小误差修正高于飞控响应死区
     precision_align_step_s: 0.18          # 粗调速度脉冲持续时间 (s)
     precision_align_fine_step_s: 0.12     # 精调短脉冲, 避免越过中心

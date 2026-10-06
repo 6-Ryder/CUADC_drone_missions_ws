@@ -1,11 +1,9 @@
 """
 CUADC-style low-altitude precision alignment.
 
-This controller is only for the final drop alignment after world-coordinate
-coarse positioning has already brought the drone near the selected target.
-It keeps the control problem in image space: normalized pixel error, EMA
-smoothing, P-only body velocity, short step/stop cycles, and consecutive
-stable-frame confirmation.
+This controller aligns the selected target from the current camera image.
+It uses normalized pixel error, EMA smoothing, P-only body velocity,
+continuous or short step/stop commands, and stable-frame confirmation.
 """
 
 import math
@@ -349,6 +347,7 @@ class PrecisionAlignController:
             right = ground_kp * ground_right_error_m
             forward, right = self._limit_vector(
                 forward, right, pixel_error, raw_tol, continuous=True,
+                altitude_m=altitude,
             )
             self._last_forward = forward
             self._last_right = right
@@ -370,6 +369,7 @@ class PrecisionAlignController:
             right = ground_kp * ground_right_error_m
             forward, right = self._limit_vector(
                 forward, right, pixel_error, raw_tol, continuous=True,
+                altitude_m=altitude,
             )
         else:
             gain = float(self._param("precision_align_gain", 1.25))
@@ -422,9 +422,18 @@ class PrecisionAlignController:
         pixel_error: float,
         raw_tol: float,
         continuous: bool = False,
+        altitude_m: Optional[float] = None,
     ) -> Tuple[float, float]:
         if continuous:
             max_speed = float(self._param("precision_align_max_speed", 0.25))
+            if (self._param("quick_drop_profile", "blue") == "bucket"
+                    and altitude_m is not None):
+                if altitude_m <= 1.9:
+                    max_speed = min(max_speed, float(self._param(
+                        "precision_align_fine_max_speed", 0.065)))
+                elif altitude_m <= 3.0:
+                    max_speed = min(max_speed, float(self._param(
+                        "bucket_servo_mid_max_speed", 0.14)))
         elif pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
             max_speed = float(self._param("precision_align_fine_max_speed", 0.065))
         else:
