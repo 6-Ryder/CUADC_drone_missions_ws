@@ -16,9 +16,7 @@ import time
 from typing import Optional, List
 
 from drone_utils.progress_monitor import ProgressMonitor
-from drone_mission.quick_bucket_gate import (
-    is_small_bucket_candidate, pair_bucket_marker,
-)
+from drone_mission.quick_bucket_gate import is_bucket_search_candidate
 
 class CylinderSearchState:
     """投放区圆筒搜索状态."""
@@ -99,8 +97,7 @@ class CylinderSearchState:
         if self._fsm.get_param("quick_drop_mode", False) and self._fsm.get_param("quick_drop_profile", "blue") == "bucket":
             remembered_markers = self._fsm.get_known_markers()
             known = [c for c in known_cylinders
-                     if is_small_bucket_candidate(c)
-                     and pair_bucket_marker(c, known_cylinders, remembered_markers) is not None]
+                     if is_bucket_search_candidate(c, time.time())]
             now_monotonic = time.monotonic()
             if now_monotonic - self._last_bucket_diagnostic >= 2.0:
                 details = []
@@ -110,8 +107,8 @@ class CylinderSearchState:
                                    for m in remembered_markers), default=math.inf)
                     details.append(
                         f"id={c.get('id', '?')} r={c.get('radius', math.nan):.3f} "
-                        f"small_frames={len(c.get('small_radius_samples', []))} "
-                        f"small={int(is_small_bucket_candidate(c))} "
+                        f"search_frames={len(c.get('bucket_search_samples', {}))} "
+                        f"eligible={int(is_bucket_search_candidate(c, time.time()))} "
                         f"disc_distance={nearest:.3f}")
                 visible_radii = [round(float(getattr(c, "radius", math.nan)), 3)
                                  for c in valid]
@@ -121,8 +118,7 @@ class CylinderSearchState:
                     f"visible_disc={len(markers)} "
                     f"world_disc={sum(bool(getattr(m, 'world_position_valid', False)) for m in markers)} "
                     f"memory_cyl={len(known_cylinders)} memory_disc={len(remembered_markers)} "
-                    f"small={sum(is_small_bucket_candidate(c) for c in known_cylinders)} "
-                    f"paired={len(known)} required={self._min_cylinders_required} "
+                    f"eligible={len(known)} required={self._min_cylinders_required} "
                     f"visible_r={visible_radii} targets=[{'; '.join(details)}]")
                 self._last_bucket_diagnostic = now_monotonic
         elif (
@@ -228,10 +224,8 @@ class CylinderSearchState:
             if (self._fsm.get_param("quick_drop_mode", False)
                     and self._fsm.get_param("quick_drop_profile", "blue") == "bucket"):
                 cylinders = self._fsm.get_known_cylinders()
-                markers = self._fsm.get_known_markers()
                 targets = [c for c in cylinders
-                           if is_small_bucket_candidate(c)
-                           and pair_bucket_marker(c, cylinders, markers) is not None]
+                           if is_bucket_search_candidate(c, time.time())]
             elif hasattr(self._fsm, "get_known_drop_targets"):
                 targets = self._fsm.get_known_drop_targets()
             else:

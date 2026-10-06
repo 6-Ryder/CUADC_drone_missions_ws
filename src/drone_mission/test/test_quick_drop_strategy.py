@@ -222,13 +222,16 @@ def test_quick_search_enters_requests_marker_only_vision():
     assert fsm.layout_frame.ned_to_local(north, east) == pytest.approx((32.5, 0.0))
 
 
-def test_bucket_search_runs_both_models_and_requires_unique_pair():
+def test_bucket_search_runs_both_models_without_requiring_blue_pair():
     fsm = _SearchFSM({
         "quick_drop_mode": True,
         "quick_drop_profile": "bucket",
         "min_drop_targets_required": 1,
     })
-    fsm._known_cylinders[0].update(world_x=1.0, world_y=1.0, radius=0.075)
+    now = time.time()
+    fsm._known_cylinders[0].update(
+        world_x=1.0, world_y=1.0, radius=0.075,
+        bucket_search_samples={now - 0.2: 0.075, now - 0.1: 0.075, now: 0.075})
     fsm.logger = type("TL", (), {"log_state": staticmethod(lambda *a: None)})()
     fsm.fc = type("FC", (), {
         "goto_ned": staticmethod(lambda *a, **kw: None),
@@ -244,10 +247,11 @@ def test_bucket_search_runs_both_models_and_requires_unique_pair():
     fsm._known_markers.append(dict(world_x=1.1, world_y=1.0))
     state = _search_state(fsm)
     for _ in range(5):
-        assert state.execute() is None
+        result = state.execute()
+    assert result == "SELECT_TARGET"
 
 
-def test_bucket_search_waits_for_small_opening_instead_of_first_paired_cylinder():
+def test_bucket_search_waits_for_three_frames_then_accepts_other_bucket_size():
     fsm = _SearchFSM({
         "quick_drop_mode": True,
         "quick_drop_profile": "bucket",
@@ -262,8 +266,13 @@ def test_bucket_search_waits_for_small_opening_instead_of_first_paired_cylinder(
         "world_position_valid": True,
         "world_x": 2.0,
         "world_y": 1.0,
-        "radius": 0.075,
+        "radius": 0.12,
         "observations": 2,
+        "bucket_search_samples": {
+            time.time() - 0.2: 0.12,
+            time.time() - 0.1: 0.12,
+            time.time(): 0.12,
+        },
     })
     fsm._known_markers.append({"world_x": 2.0, "world_y": 1.0})
     for _ in range(4):
@@ -281,8 +290,8 @@ def test_bucket_search_reports_rejected_targets_even_when_eligible_count_stays_z
 
     assert state.execute() is None
     diagnostic = next((m for m in messages if "BUCKET_SEARCH:" in m), "")
-    assert "small=0" in diagnostic
-    assert "paired=0" in diagnostic
+    assert "eligible=0" in diagnostic
+    assert "search_frames=0" in diagnostic
     assert "r=0.100" in diagnostic
 
 

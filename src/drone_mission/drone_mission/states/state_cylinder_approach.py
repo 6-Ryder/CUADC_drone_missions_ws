@@ -69,7 +69,9 @@ class CylinderApproachState:
         self._fsm.get_logger().info(
             f"APPROACH: 目标位置 World({self._target_world_xy[0]:.2f}, {self._target_world_xy[1]:.2f})"
         )
-        if hasattr(self._fsm, "is_in_drop_zone_world"):
+        bucket_mode = (self._fsm.get_param("quick_drop_mode", False)
+                       and self._fsm.get_param("quick_drop_profile", "blue") == "bucket")
+        if not bucket_mode and hasattr(self._fsm, "is_in_drop_zone_world"):
             if not self._fsm.is_in_drop_zone_world(
                 self._target_world_xy[0], self._target_world_xy[1], margin=0.5
             ):
@@ -84,7 +86,9 @@ class CylinderApproachState:
         from px4_control.telemetry import ned_to_world, world_to_ned
 
         tx, ty = self._target_world_xy
-        if hasattr(self._fsm, "is_in_drop_zone_world"):
+        bucket_mode = (self._fsm.get_param("quick_drop_mode", False)
+                       and self._fsm.get_param("quick_drop_profile", "blue") == "bucket")
+        if not bucket_mode and hasattr(self._fsm, "is_in_drop_zone_world"):
             if not self._fsm.is_in_drop_zone_world(tx, ty, margin=0.5):
                 raise ValueError(f"target outside drop zone: ({tx:.2f}, {ty:.2f})")
         pos = self._fsm.bridge.get_current_position()

@@ -43,7 +43,7 @@ class CylinderSelector:
         self._selection_count: int = 0
         self._position_tolerance: float = 0.5  # 位置去重容差 (m)
 
-    def select(self, cylinders: list) -> Optional[int]:
+    def select(self, cylinders: list, preferred_radius_window=None) -> Optional[int]:
         """
         选择下一个投放目标.
 
@@ -81,7 +81,8 @@ class CylinderSelector:
             if is_duplicate:
                 continue
 
-            radius = c.radius if hasattr(c, 'radius') else c.get('radius', 0)
+            radius = (c.radius if hasattr(c, 'radius') else
+                      c.get('bucket_search_radius', c.get('radius', 0)))
             conf = c.confidence if hasattr(c, 'confidence') else c.get('confidence', 0)
             available.append((cid, cx, cy, radius, conf))
 
@@ -89,7 +90,10 @@ class CylinderSelector:
             return None
 
         # 按半径排序
-        if self._min_radius_first:
+        if preferred_radius_window is not None:
+            low, high = preferred_radius_window
+            available.sort(key=lambda x: (not low <= x[3] <= high, x[3]))
+        elif self._min_radius_first:
             available.sort(key=lambda x: x[3])  # 升序
         else:
             available.sort(key=lambda x: -x[3])  # 降序

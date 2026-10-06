@@ -87,6 +87,15 @@ def is_small_bucket_candidate(bucket) -> bool:
     return math.isfinite(radius) and 0.06 <= radius <= 0.09
 
 
+def is_bucket_search_candidate(bucket, now: float) -> bool:
+    """Allow a plausible rim to be approached after three distinct recent frames."""
+    samples = bucket.get("bucket_search_samples", {}) if isinstance(bucket, dict) else {}
+    recent = [radius for stamp, radius in samples.items()
+              if 0 <= now - stamp <= 2.0 and math.isfinite(radius)
+              and 0.03 <= radius <= 0.30]
+    return len(recent) >= 3
+
+
 def pair_bucket_marker(bucket, cylinders, markers, max_separation=0.25):
     """Return one unique paired blue disc or None (coordinates are World ENU)."""
     bx, by = _xy(bucket)
@@ -110,7 +119,7 @@ def pair_bucket_marker(bucket, cylinders, markers, max_separation=0.25):
 class BucketReleaseGate:
     """One target's confirmation, brake and single-release permission."""
 
-    def __init__(self, bucket_ne: Tuple[float, float], disc_ne: Tuple[float, float],
+    def __init__(self, bucket_ne: Tuple[float, float], disc_ne: Optional[Tuple[float, float]],
                  calibration: Optional[Calibration]):
         self.bucket_ne = bucket_ne
         self.disc_ne = disc_ne
@@ -197,7 +206,7 @@ class BucketReleaseGate:
             self._fit_frames.clear()
             return GateResult("continue", "velocity")
 
-        marker_ok = self._fresh(marker, now, 0.4) and (
+        marker_ok = self.disc_ne is not None and self._fresh(marker, now, 0.4) and (
             math.hypot(marker.north - self.disc_ne[0],
                        marker.east - self.disc_ne[1]) <= BUCKET_IDENTITY_RADIUS_M)
         cylinder_ok = self._fresh(cylinder, now, 0.25) and (

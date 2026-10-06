@@ -219,12 +219,39 @@ class DropState:
         return (target.get(key, default) if isinstance(target, dict)
                 else getattr(target, key, default))
 
-    def _bucket_current_objects(self):
-        """Select fresh observations tied to the search-time paired targets."""
+    def _bucket_current_objects(self, require_unique=False):
+        """Find the selected rim; require unambiguous observations for release."""
         gate = getattr(self._fsm, "_quick_bucket_gate", None)
         if gate is None:
             return None, None
         now = time.time()
+        if gate.disc_ne is None:
+            # A blue disc is useful during servo, but only a current, unique
+            # disc/rim pair can establish the release fallback anchor.
+            cyl_stamp = self._fsm._cylinder_capture_stamp
+            mark_stamp = self._fsm._marker_capture_stamp
+            if (0 < cyl_stamp <= now and now - cyl_stamp <= 0.25
+                    and 0 < mark_stamp <= now and now - mark_stamp <= 0.40):
+                cylinders = []
+                markers = []
+                for target, selected in ((self._fsm.get_cylinders(), cylinders),
+                                         (self._fsm.get_markers(), markers)):
+                    for item in target:
+                        if not self._target_field(item, "world_position_valid", False):
+                            continue
+                        wx = float(self._target_field(item, "world_x", math.nan))
+                        wy = float(self._target_field(item, "world_y", math.nan))
+                        if math.isfinite(wx) and math.isfinite(wy):
+                            north, east, _ = world_to_ned(wx, wy, 0.0)
+                            selected.append((north, east))
+                near_rims = [point for point in cylinders
+                             if math.dist(point, gate.bucket_ne) <= BUCKET_IDENTITY_RADIUS_M]
+                pairs = [(rim, disc) for rim in near_rims for disc in markers
+                         if math.dist(rim, disc) <= 0.25
+                         and sum(math.dist(other, disc) <= 0.25
+                                 for other in cylinders) == 1]
+                if len(pairs) == 1:
+                    gate.disc_ne = pairs[0][1]
         selected = []
         for objects, stamp, expected_ne, max_age in (
             (self._fsm.get_cylinders(), self._fsm._cylinder_capture_stamp,
@@ -242,12 +269,34 @@ class DropState:
                     if not math.isfinite(wx) or not math.isfinite(wy):
                         continue
                     north, east, _ = world_to_ned(wx, wy, 0.0)
-                    if (math.hypot(north - expected_ne[0], east - expected_ne[1])
+                    if (expected_ne is not None
+                            and math.hypot(north - expected_ne[0], east - expected_ne[1])
                             <= BUCKET_IDENTITY_RADIUS_M):
                         matches.append((target, Observation(
                             stamp, north, east,
                             float(self._target_field(target, "radius", 0.0)))))
-            selected.append(matches[0] if len(matches) == 1 else (None, None))
+            selected.append((min(matches, key=lambda item: math.dist(
+                (item[1].north, item[1].east), expected_ne))
+                if matches and (not require_unique or len(matches) == 1)
+                else (None, None)))
+        if require_unique and selected[1][1] is not None:
+            rim = selected[0][1]
+            disc = selected[1][1]
+            nearby_rims = 0
+            for item in self._fsm.get_cylinders():
+                if not self._target_field(item, "world_position_valid", False):
+                    continue
+                wx = float(self._target_field(item, "world_x", math.nan))
+                wy = float(self._target_field(item, "world_y", math.nan))
+                if math.isfinite(wx) and math.isfinite(wy):
+                    north, east, _ = world_to_ned(wx, wy, 0.0)
+                    nearby_rims += math.hypot(north - disc.north, east - disc.east) <= 0.25
+            if (nearby_rims > 1 or
+                    (rim is not None and (
+                        math.hypot(rim.north - disc.north,
+                                   rim.east - disc.east) > 0.25
+                        or nearby_rims != 1))):
+                selected[1] = (None, None)
         return selected[0], selected[1]
 
     def _bucket_gate_result(self):
@@ -258,7 +307,7 @@ class DropState:
         velocity_frame = getattr(bridge, "_velocity_frame", getattr(odom, "velocity_frame", 0))
         if pose_frame != 1 or velocity_frame != 1:
             return GateResult("takeover", "unsupported_odometry_frame")
-        (_, cylinder), (_, marker) = self._bucket_current_objects()
+        (_, cylinder), (_, marker) = self._bucket_current_objects(require_unique=True)
         now = time.time()
         telemetry = self._fsm.bridge.get_telemetry()
         velocity = telemetry.velocity
