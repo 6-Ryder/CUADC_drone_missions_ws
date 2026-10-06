@@ -119,7 +119,8 @@ def pair_bucket_marker(bucket, cylinders, markers, max_separation=0.25):
 class BucketReleaseGate:
     """One target's confirmation, brake and single-release permission."""
 
-    def __init__(self, bucket_ne: Tuple[float, float], disc_ne: Optional[Tuple[float, float]],
+    def __init__(self, bucket_ne: Optional[Tuple[float, float]],
+                 disc_ne: Optional[Tuple[float, float]],
                  calibration: Optional[Calibration]):
         self.bucket_ne = bucket_ne
         self.disc_ne = disc_ne
@@ -209,7 +210,7 @@ class BucketReleaseGate:
         marker_ok = self.disc_ne is not None and self._fresh(marker, now, 0.4) and (
             math.hypot(marker.north - self.disc_ne[0],
                        marker.east - self.disc_ne[1]) <= BUCKET_IDENTITY_RADIUS_M)
-        cylinder_ok = self._fresh(cylinder, now, 0.25) and (
+        cylinder_ok = self.bucket_ne is not None and self._fresh(cylinder, now, 0.25) and (
             math.hypot(cylinder.north - self.bucket_ne[0],
                        cylinder.east - self.bucket_ne[1]) <= BUCKET_IDENTITY_RADIUS_M)
         if cylinder_ok:

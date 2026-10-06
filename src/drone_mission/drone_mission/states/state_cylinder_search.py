@@ -3,7 +3,7 @@ CYLINDER_SEARCH 状态 — 悬停搜索圆筒 + 视觉检测 + 半径排序.
 
 流程:
   1. 飞到投放区中心, 悬停在较高识别高度
-  2. 高处/扫描过程中累计圆筒世界坐标
+  2. 高处/扫描过程中累计圆筒图像观测；世界坐标仅供粗定位
   3. 累计到可投目标后选择目标 → SELECT_TARGET
 
 回退策略:
@@ -102,14 +102,12 @@ class CylinderSearchState:
             if now_monotonic - self._last_bucket_diagnostic >= 2.0:
                 details = []
                 for c in known_cylinders:
-                    nearest = min((math.hypot(c["world_x"] - m["world_x"],
-                                              c["world_y"] - m["world_y"])
-                                   for m in remembered_markers), default=math.inf)
                     details.append(
                         f"id={c.get('id', '?')} r={c.get('radius', math.nan):.3f} "
                         f"search_frames={len(c.get('bucket_search_samples', {}))} "
                         f"eligible={int(is_bucket_search_candidate(c, time.time()))} "
-                        f"disc_distance={nearest:.3f}")
+                        f"pixel=({c.get('center_u', math.nan):.0f},"
+                        f"{c.get('center_v', math.nan):.0f})")
                 visible_radii = [round(float(getattr(c, "radius", math.nan)), 3)
                                  for c in valid]
                 self._fsm.get_logger().info(
@@ -119,6 +117,7 @@ class CylinderSearchState:
                     f"world_disc={sum(bool(getattr(m, 'world_position_valid', False)) for m in markers)} "
                     f"memory_cyl={len(known_cylinders)} memory_disc={len(remembered_markers)} "
                     f"eligible={len(known)} required={self._min_cylinders_required} "
+                    f"world_reference_only=1 "
                     f"visible_r={visible_radii} targets=[{'; '.join(details)}]")
                 self._last_bucket_diagnostic = now_monotonic
         elif (

@@ -74,9 +74,10 @@ class PrecisionAlignController:
     def last_status(self) -> PrecisionAlignStatus:
         return self._last_status
 
-    def reset(self, target_hint_xy: Optional[Tuple[float, float]] = None) -> None:
+    def reset(self, target_hint_xy: Optional[Tuple[float, float]] = None,
+              target_hint_uv: Optional[Tuple[float, float]] = None) -> None:
         self._target_hint_xy = target_hint_xy or self._selected_memory_xy()
-        self._locked_pixel_uv = None
+        self._locked_pixel_uv = target_hint_uv
         self._locked_world_xy = None
         self._locked_source = "none"
         self._smooth_dx = None
@@ -129,7 +130,8 @@ class PrecisionAlignController:
         selected_positions = getattr(self._fsm.cylinder_selector, "_selected_positions", [])
         if not selected_positions:
             return None
-        return selected_positions[-1]
+        point = selected_positions[-1]
+        return point if point is not None and all(math.isfinite(v) for v in point) else None
 
     def _camera_geometry(self) -> Tuple[float, float, float, float]:
         cx = float(self._param("camera_cx", 640.0))
@@ -477,13 +479,6 @@ class PrecisionAlignController:
         ]
 
         if source_preference == "bucket":
-            hint = self._selected_memory_xy()
-            def associated(item):
-                point = self._world_xy(item)
-                return (hint is not None and point is not None
-                        and math.dist(point, hint) <= 0.35)
-            cylinder_candidates = [item for item in cylinder_candidates if associated(item[0])]
-            marker_candidates = [item for item in marker_candidates if associated(item[0])]
             candidates = cylinder_candidates or marker_candidates
         elif source_preference == "marker":
             candidates = marker_candidates
@@ -499,9 +494,9 @@ class PrecisionAlignController:
         # 记忆世界坐标门控开关 (默认关闭 = 一切以视觉像素为准).
         # 开启后, 未锁定时距搜索期记忆点超过 world_gate 的候选直接拒绝,
         # 距离还作为弱项参与评分 (权重 0.08).
-        world_gate_enabled = bool(
+        world_gate_enabled = (not bucket_mode and bool(
             self._param("precision_align_world_gate_enable", False)
-        )
+        ))
         world_gate = float(
             self._param("precision_align_target_world_gate", 1.5)
         )

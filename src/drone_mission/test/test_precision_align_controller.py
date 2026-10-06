@@ -614,3 +614,18 @@ def test_world_gate_on_rejects_every_candidate_when_all_are_off_hint():
 
     assert selected is None
     assert reason == "all_candidates_rejected"
+
+
+def test_bucket_ignores_world_gate_and_tracks_current_image():
+    fsm = _Fsm({
+        "quick_drop_profile": "bucket",
+        "precision_align_world_gate_enable": True,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset(target_hint_xy=(42.0, 5.0), target_hint_uv=(640.0, 480.0))
+    target = {
+        "confidence": 0.9, "center_u": 640.0, "center_v": 480.0,
+        "world_position_valid": False, "world_x": math.nan, "world_y": math.nan,
+    }
+    selected, source, reason = controller._choose_target([], [target])
+    assert (selected, source, reason) == (target, "cylinder", "tracking")

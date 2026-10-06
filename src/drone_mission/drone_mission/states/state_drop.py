@@ -17,10 +17,9 @@ from typing import Optional
 
 from drone_mission.drop_visual_aligner import DropVisualAligner
 from drone_mission.quick_bucket_gate import (
-    BUCKET_IDENTITY_RADIUS_M, GateResult, Observation,
+    GateResult, Observation,
 )
 from drone_mission.quick_release_geometry import impact_ned
-from px4_control.telemetry import world_to_ned
 from drone_mission.precision_align_controller import (
     PrecisionAlignController,
     PrecisionAlignResult,
@@ -115,7 +114,11 @@ class DropState:
         drop_h = (1.6 if self._bucket_mode()
                   else self._fsm.get_param("drop_descend_height", 2.0))
         self._fsm.get_logger().info(f"DESCEND: 降高至 {drop_h}m")
-        self._precision_aligner.reset(self._selected_memory_xy())
+        gate = getattr(self._fsm, "_quick_bucket_gate", None)
+        self._precision_aligner.reset(
+            self._selected_memory_xy(),
+            target_hint_uv=getattr(gate, "bucket_pixel_uv", None)
+            if self._bucket_mode() else None)
 
         pos = self._fsm.bridge.get_current_position()
         self._descent_initial_error = abs(pos.down - self._fsm.fc.altitude_to_ned(drop_h))
@@ -219,85 +222,107 @@ class DropState:
         return (target.get(key, default) if isinstance(target, dict)
                 else getattr(target, key, default))
 
+    def _bucket_image_observation(self, target, stamp, plane_height, pos, yaw):
+        """Project a current pixel relative to the aircraft, not search World."""
+        u = float(self._target_field(target, "center_u", math.nan))
+        v = float(self._target_field(target, "center_v", math.nan))
+        fx = float(self._fsm.get_param("camera_fx", 400.0))
+        fy = float(self._fsm.get_param("camera_fy", 400.0))
+        altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
+        distance = (altitude
+                    + float(self._fsm.get_param("bucket_home_body_height", 0.0))
+                    - float(self._fsm.get_param("bucket_camera_down", 0.0))
+                    - plane_height)
+        if (not all(math.isfinite(value) for value in
+                    (u, v, fx, fy, altitude, distance, pos.north, pos.east, yaw))
+                or fx <= 0 or fy <= 0 or distance <= 0):
+            return None
+        du = u - float(self._fsm.get_param("camera_cx", 320.0))
+        dv = v - float(self._fsm.get_param("camera_cy", 240.0))
+        forward = (float(self._fsm.get_param(
+            "precision_align_image_y_to_forward_sign", -1.0))
+            * dv * distance / fy)
+        right = du * distance / fx
+        north = pos.north + forward * math.cos(yaw) - right * math.sin(yaw)
+        east = pos.east + forward * math.sin(yaw) + right * math.cos(yaw)
+        return Observation(stamp, north, east,
+                           float(self._target_field(target, "radius", 0.0)))
+
     def _bucket_current_objects(self, require_unique=False):
-        """Find the selected rim; require unambiguous observations for release."""
+        """Select a fresh image target; World projection never rejects it."""
         gate = getattr(self._fsm, "_quick_bucket_gate", None)
         if gate is None:
-            return None, None
+            return (None, None), (None, None)
         now = time.time()
-        if gate.disc_ne is None:
-            # A blue disc is useful during servo, but only a current, unique
-            # disc/rim pair can establish the release fallback anchor.
-            cyl_stamp = self._fsm._cylinder_capture_stamp
-            mark_stamp = self._fsm._marker_capture_stamp
-            if (0 < cyl_stamp <= now and now - cyl_stamp <= 0.25
-                    and 0 < mark_stamp <= now and now - mark_stamp <= 0.40):
-                cylinders = []
-                markers = []
-                for target, selected in ((self._fsm.get_cylinders(), cylinders),
-                                         (self._fsm.get_markers(), markers)):
-                    for item in target:
-                        if not self._target_field(item, "world_position_valid", False):
-                            continue
-                        wx = float(self._target_field(item, "world_x", math.nan))
-                        wy = float(self._target_field(item, "world_y", math.nan))
-                        if math.isfinite(wx) and math.isfinite(wy):
-                            north, east, _ = world_to_ned(wx, wy, 0.0)
-                            selected.append((north, east))
-                near_rims = [point for point in cylinders
-                             if math.dist(point, gate.bucket_ne) <= BUCKET_IDENTITY_RADIUS_M]
-                pairs = [(rim, disc) for rim in near_rims for disc in markers
-                         if math.dist(rim, disc) <= 0.25
-                         and sum(math.dist(other, disc) <= 0.25
-                                 for other in cylinders) == 1]
-                if len(pairs) == 1:
-                    gate.disc_ne = pairs[0][1]
-        selected = []
-        for objects, stamp, expected_ne, max_age in (
-            (self._fsm.get_cylinders(), self._fsm._cylinder_capture_stamp,
-             gate.bucket_ne, 0.25),
-            (self._fsm.get_markers(), self._fsm._marker_capture_stamp,
-             gate.disc_ne, 0.40),
-        ):
-            matches = []
-            if 0 < stamp <= now and now - stamp <= max_age:
-                for target in objects:
-                    if not self._target_field(target, "world_position_valid", False):
-                        continue
-                    wx = float(self._target_field(target, "world_x", math.nan))
-                    wy = float(self._target_field(target, "world_y", math.nan))
-                    if not math.isfinite(wx) or not math.isfinite(wy):
-                        continue
-                    north, east, _ = world_to_ned(wx, wy, 0.0)
-                    if (expected_ne is not None
-                            and math.hypot(north - expected_ne[0], east - expected_ne[1])
-                            <= BUCKET_IDENTITY_RADIUS_M):
-                        matches.append((target, Observation(
-                            stamp, north, east,
-                            float(self._target_field(target, "radius", 0.0)))))
-            selected.append((min(matches, key=lambda item: math.dist(
-                (item[1].north, item[1].east), expected_ne))
-                if matches and (not require_unique or len(matches) == 1)
-                else (None, None)))
-        if require_unique and selected[1][1] is not None:
-            rim = selected[0][1]
-            disc = selected[1][1]
-            nearby_rims = 0
-            for item in self._fsm.get_cylinders():
-                if not self._target_field(item, "world_position_valid", False):
+        pos = self._fsm.bridge.get_current_position()
+        yaw = float(getattr(self._fsm.bridge, "_current_yaw", 0.0))
+        if not math.isfinite(yaw):
+            yaw = 0.0  # Release gate independently requires a fresh finite yaw.
+        cx = float(self._fsm.get_param("camera_cx", 320.0))
+        cy = float(self._fsm.get_param("camera_cy", 240.0))
+
+        def image_candidates(objects, stamp, max_age, plane, min_conf):
+            if not 0 < stamp <= now or now - stamp > max_age:
+                return []
+            result = []
+            for item in objects:
+                conf = float(self._target_field(item, "confidence", 0.0))
+                u = float(self._target_field(item, "center_u", math.nan))
+                v = float(self._target_field(item, "center_v", math.nan))
+                if not (math.isfinite(conf) and conf >= min_conf
+                        and math.isfinite(u) and math.isfinite(v)):
                     continue
-                wx = float(self._target_field(item, "world_x", math.nan))
-                wy = float(self._target_field(item, "world_y", math.nan))
-                if math.isfinite(wx) and math.isfinite(wy):
-                    north, east, _ = world_to_ned(wx, wy, 0.0)
-                    nearby_rims += math.hypot(north - disc.north, east - disc.east) <= 0.25
-            if (nearby_rims > 1 or
-                    (rim is not None and (
-                        math.hypot(rim.north - disc.north,
-                                   rim.east - disc.east) > 0.25
-                        or nearby_rims != 1))):
-                selected[1] = (None, None)
-        return selected[0], selected[1]
+                observation = self._bucket_image_observation(
+                    item, stamp, plane, pos, yaw)
+                if observation is not None:
+                    result.append((item, observation, (u, v)))
+            return result
+
+        rims = image_candidates(
+            self._fsm.get_cylinders(), self._fsm._cylinder_capture_stamp, 0.25,
+            float(self._fsm.get_param("bucket_rim_height", 0.4)), 0.35)
+        rims = [entry for entry in rims
+                if math.isfinite(entry[1].radius)
+                and 0.03 <= entry[1].radius <= 0.30]
+        hint = getattr(gate, "bucket_pixel_uv", None) or (cx, cy)
+        rims.sort(key=lambda entry: math.dist(entry[2], hint))
+        rim = rims[0] if rims and math.dist(rims[0][2], hint) <= 120.0 else None
+        if rim is not None and require_unique:
+            nearby = sum(math.dist(entry[2], rim[2]) <= 40.0 for entry in rims)
+            if nearby != 1:
+                rim = None
+        if rim is not None:
+            gate.bucket_ne = (rim[1].north, rim[1].east)
+            gate.bucket_pixel_uv = rim[2]
+
+        discs = image_candidates(
+            self._fsm.get_markers(), self._fsm._marker_capture_stamp, 0.40,
+            0.0, 0.35)
+        disc_hint = getattr(gate, "disc_pixel_uv", None)
+        if disc_hint is None:
+            disc_hint = rim[2] if rim is not None else (cx, cy)
+        discs.sort(key=lambda entry: math.dist(entry[2], disc_hint))
+        disc = discs[0] if discs and math.dist(discs[0][2], disc_hint) <= 120.0 else None
+        if disc is not None:
+            associated = [entry for entry in rims
+                          if math.hypot(entry[1].north - disc[1].north,
+                                        entry[1].east - disc[1].east) <= 0.25]
+            near_discs = [entry for entry in discs
+                          if rim is not None and
+                          math.hypot(entry[1].north - rim[1].north,
+                                     entry[1].east - rim[1].east) <= 0.25]
+            if rim is not None and (len(associated) != 1 or len(near_discs) != 1):
+                disc = None
+            elif rim is None and gate.disc_ne is None:
+                disc = None
+            elif require_unique and sum(
+                    math.dist(entry[2], disc[2]) <= 40.0 for entry in discs) != 1:
+                disc = None
+        if disc is not None:
+            gate.disc_ne = (disc[1].north, disc[1].east)
+            gate.disc_pixel_uv = disc[2]
+        return ((rim[0], rim[1]) if rim else (None, None),
+                (disc[0], disc[1]) if disc else (None, None))
 
     def _bucket_gate_result(self):
         gate = self._fsm._quick_bucket_gate

@@ -724,6 +724,9 @@ class MissionFSM(Node):
 
     def _remember_cylinders(self, cylinders: list) -> None:
         """Accumulate drop-zone cylinder positions across the search scan."""
+        if self.quick_bucket_enabled():
+            self._remember_bucket_cylinders(cylinders)
+            return
         min_conf = 0.35
         merge_dist = float(self.get_param("cylinder_memory_merge_distance", 0.75))
         now = time.time()
@@ -739,16 +742,11 @@ class MissionFSM(Node):
             raw_y = float(self._cyl_field(cyl, "world_y", math.nan))
             if not (math.isfinite(raw_x) and math.isfinite(raw_y)):
                 continue
-            bucket_mode = self.quick_bucket_enabled()
-            target_xy = ((raw_x, raw_y) if bucket_mode else
-                         self.validate_drop_target_world_xy(raw_x, raw_y))
+            target_xy = self.validate_drop_target_world_xy(raw_x, raw_y)
             if target_xy is None:
                 continue
             cx, cy = target_xy
             radius = float(self._cyl_field(cyl, "radius", 0.0))
-            if bucket_mode and (not math.isfinite(radius)
-                                or not 0.03 <= radius <= 0.30):
-                continue
 
             best = None
             best_dist = float("inf")
@@ -792,16 +790,60 @@ class MissionFSM(Node):
                 samples.append((now, radius))
             best["small_radius_samples"] = samples[-30:]
             best["small_radius_confirmed"] = len(samples) >= 5
-            if bucket_mode:
-                capture = self._cylinder_capture_stamp or now
-                recent = {stamp: value for stamp, value in
-                          best.get("bucket_search_samples", {}).items()
-                          if 0 <= now - stamp <= 2.0}
-                if 0 < capture <= now:
-                    recent.setdefault(capture, radius)
-                best["bucket_search_samples"] = recent
-                if recent:
-                    best["bucket_search_radius"] = statistics.median(recent.values())
+
+    def _remember_bucket_cylinders(self, cylinders: list) -> None:
+        """Track recent image targets; high-altitude world projection is advisory."""
+        now = time.time()
+        capture = self._cylinder_capture_stamp or now
+        for cyl in cylinders:
+            conf = float(self._cyl_field(cyl, "confidence", 0.0))
+            radius = float(self._cyl_field(cyl, "radius", math.nan))
+            u = float(self._cyl_field(cyl, "center_u", math.nan))
+            v = float(self._cyl_field(cyl, "center_v", math.nan))
+            if (not math.isfinite(conf) or conf < 0.35
+                    or not math.isfinite(radius) or not 0.03 <= radius <= 0.30
+                    or not math.isfinite(u) or not math.isfinite(v)):
+                continue
+            tracker_id = int(self._cyl_field(cyl, "id", -1))
+            best = None
+            best_distance = math.inf
+            for known in self._known_cylinders:
+                distance = math.hypot(known["center_u"] - u, known["center_v"] - v)
+                limit = 90.0 if known["tracker_id"] == tracker_id else 35.0
+                if distance <= limit and distance < best_distance:
+                    best, best_distance = known, distance
+            if best is None:
+                best = {
+                    "id": self._next_known_cylinder_id,
+                    "tracker_id": tracker_id,
+                    "center_u": u, "center_v": v,
+                    "world_position_valid": False,
+                    "world_x": math.nan, "world_y": math.nan,
+                    "radius": radius, "confidence": conf,
+                    "observations": 0, "last_seen": now,
+                }
+                self._known_cylinders.append(best)
+                self._next_known_cylinder_id += 1
+            best["center_u"], best["center_v"] = u, v
+            best["tracker_id"] = tracker_id
+            best["confidence"] = max(best["confidence"], conf)
+            best["observations"] += 1
+            best["last_seen"] = now
+            if bool(self._cyl_field(cyl, "world_position_valid", False)):
+                wx = float(self._cyl_field(cyl, "world_x", math.nan))
+                wy = float(self._cyl_field(cyl, "world_y", math.nan))
+                if math.isfinite(wx) and math.isfinite(wy):
+                    best["world_position_valid"] = True
+                    best["world_x"], best["world_y"] = wx, wy
+            samples = {stamp: value for stamp, value in
+                       best.get("bucket_search_samples", {}).items()
+                       if 0 <= now - stamp <= 2.0}
+            if 0 < capture <= now:
+                samples.setdefault(capture, radius)
+            best["bucket_search_samples"] = samples
+            if samples:
+                best["bucket_search_radius"] = statistics.median(samples.values())
+                best["radius"] = best["bucket_search_radius"]
 
     def _remember_markers(self, markers: list) -> None:
         """Accumulate blue drop-marker positions as fallback drop targets."""
@@ -1084,7 +1126,8 @@ class MissionFSM(Node):
 
         target_id = self._cylinder_selector.select(
             targets, preferred_radius_window=(0.06, 0.09)
-            if self.quick_bucket_enabled() else None)
+            if self.quick_bucket_enabled() else None,
+            allow_pixel_only=self.quick_bucket_enabled())
         if target_id is None:
             max_drops = int(self.get_param("max_drops", 2))
             if self._drop_success_count < max_drops:
@@ -1098,7 +1141,9 @@ class MissionFSM(Node):
         if self.quick_bucket_enabled():
             bucket = next(c for c in targets if int(c["id"]) == target_id)
             self._quick_bucket_pair = (bucket, None)
-            bucket_n, bucket_e, _ = world_to_ned(bucket["world_x"], bucket["world_y"], 0.0)
+            bucket_ne = None
+            if bucket["world_position_valid"]:
+                bucket_ne = world_to_ned(bucket["world_x"], bucket["world_y"], 0.0)[:2]
             from drone_mission.quick_bucket_gate import Calibration
             calibration = None
             if self.get_param("bucket_calibration_valid", False):
@@ -1125,7 +1170,9 @@ class MissionFSM(Node):
                     self.request_takeover("SELECT_TARGET: invalid bucket calibration")
                     return
             self._quick_bucket_gate = BucketReleaseGate(
-                (bucket_n, bucket_e), None, calibration)
+                bucket_ne, None, calibration)
+            self._quick_bucket_gate.bucket_pixel_uv = (
+                bucket["center_u"], bucket["center_v"])
             self._quick_release_intent = None
         self.get_logger().info(f"SELECT_TARGET: 选中圆筒 ID={target_id}")
         self._task_logger.log("target_selected", {
