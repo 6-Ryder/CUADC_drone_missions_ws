@@ -32,6 +32,14 @@ class CylinderSearchState:
         self._min_cylinders_required: int = 2
         self._target_progress: Optional[ProgressMonitor] = None
         self._last_bucket_diagnostic = 0.0
+        self._blue_descent_active = False
+        self._blue_descent_done = False
+        self._blue_pixel_uv = None
+        self._blue_recent_stamps = []
+        self._blue_last_stamp = 0.0
+        self._blue_last_seen = 0.0
+        self._blue_descent_started_at = 0.0
+        self._search_altitude = None
 
     def enter(self):
         self._fsm.logger.log_state("TRANSIT_TO_DROP_ZONE", "CYL_SEARCH", "开始搜索圆筒")
@@ -41,6 +49,14 @@ class CylinderSearchState:
         self._detection_stable_count = 0
         self._last_cylinder_count = 0
         self._last_bucket_diagnostic = 0.0
+        self._blue_descent_active = False
+        self._blue_descent_done = False
+        self._blue_pixel_uv = None
+        self._blue_recent_stamps = []
+        self._blue_last_stamp = 0.0
+        self._blue_last_seen = 0.0
+        self._blue_descent_started_at = 0.0
+        self._search_altitude = None
         if hasattr(self._fsm, "clear_known_cylinders"):
             self._fsm.clear_known_cylinders()
         self._min_cylinders_required = int(
@@ -159,7 +175,15 @@ class CylinderSearchState:
             self._fsm.get_logger().info(
                 f"CYL_SEARCH: 投放候选累计稳定 ({known_count} 个), 进入选择"
             )
+            if self._blue_descent_active:
+                self._fsm.fc.stop_velocity()
             return "SELECT_TARGET"
+
+        if (self._fsm.get_param("quick_drop_mode", False)
+                and self._fsm.get_param("quick_drop_profile", "blue") == "bucket"
+                and self._fsm.get_param("bucket_blue_predescent_enable", True)
+                and self._blue_predescent_tick(markers)):
+            return None
 
         if self._target_progress is not None:
             missing_targets = float(max(0, self._min_cylinders_required - known_count))
@@ -189,11 +213,120 @@ class CylinderSearchState:
 
         return None
 
+    def _blue_predescent_tick(self, markers: list) -> bool:
+        """Use fresh blue pixels to approach a better rim viewing height."""
+        if self._blue_descent_done:
+            return False
+        now = time.time()
+        stamp = float(getattr(self._fsm, "_marker_capture_stamp", 0.0))
+        fresh = 0 < stamp <= now and now - stamp <= 0.40
+        cx = float(self._fsm.get_param("camera_cx", 320.0))
+        cy = float(self._fsm.get_param("camera_cy", 240.0))
+        width = float(self._fsm.get_param("precision_align_image_width", 640.0))
+        height = float(self._fsm.get_param("precision_align_image_height", 480.0))
+        candidates = []
+        if fresh:
+            for marker in markers:
+                confidence = float(getattr(marker, "confidence", 0.0))
+                u = float(getattr(marker, "center_u", math.nan))
+                v = float(getattr(marker, "center_v", math.nan))
+                if (math.isfinite(confidence) and confidence >= 0.35
+                        and math.isfinite(u) and math.isfinite(v)
+                        and 0 <= u < width and 0 <= v < height):
+                    candidates.append((u, v))
+        hint = self._blue_pixel_uv or (cx, cy)
+        target = min(candidates, key=lambda uv: math.dist(uv, hint), default=None)
+        if (target is not None and self._blue_pixel_uv is not None
+                and math.dist(target, self._blue_pixel_uv) > 120.0):
+            target = None
+
+        if target is None and not self._blue_descent_active:
+            self._blue_recent_stamps = []
+            self._blue_pixel_uv = None
+            return False
+        pos = self._fsm.bridge.get_current_position()
+        altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
+        floor = 3.0
+        if self._blue_descent_active and altitude <= floor:
+            self._finish_blue_predescent(now, altitude)
+            return True
+        if (self._blue_descent_active
+                and now - self._blue_descent_started_at >= 15.0):
+            self._finish_blue_predescent(now, altitude)
+            return True
+        if (not self._blue_descent_active
+                and abs(altitude - float(self._fsm.get_param(
+                    "area1_search_altitude", 4.5))) > 0.25):
+            return False
+
+        if target is None:
+            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            if now - self._blue_last_seen > 2.0:
+                self._finish_blue_predescent(now, altitude)
+            return True
+
+        self._blue_pixel_uv = target
+        self._blue_last_seen = now
+        if stamp > self._blue_last_stamp:
+            self._blue_last_stamp = stamp
+            self._blue_recent_stamps = [s for s in self._blue_recent_stamps
+                                        if stamp - s <= 1.0]
+            self._blue_recent_stamps.append(stamp)
+        if not self._blue_descent_active:
+            if len(self._blue_recent_stamps) < 3:
+                return False
+            self._blue_descent_active = True
+            self._blue_descent_started_at = now
+            self._scan_phase = 0
+            self._fsm.get_logger().info(
+                "CYL_SEARCH: 蓝盘三帧稳定，开始视觉引导预降高至 3.0 m")
+
+        # The blue disc is on the ground; bucket rim height and front-bottle
+        # offset apply only after a cylinder is selected.
+        plane_distance = max(
+            altitude + float(self._fsm.get_param("bucket_home_body_height", 0.0))
+            - float(self._fsm.get_param("bucket_camera_down", 0.0)), 0.3)
+        gain = float(self._fsm.get_param("precision_align_ground_kp", 0.40))
+        fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
+        fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
+        forward = (gain * float(self._fsm.get_param(
+            "precision_align_image_y_to_forward_sign", -1.0))
+            * (target[1] - cy) * plane_distance / fy)
+        right = (gain * float(self._fsm.get_param(
+            "precision_align_image_x_to_right_sign", 1.0))
+            * (target[0] - cx) * plane_distance / fx)
+        max_speed = float(self._fsm.get_param("precision_align_max_speed", 0.25))
+        speed = math.hypot(forward, right)
+        if speed > max_speed > 0.0:
+            forward *= max_speed / speed
+            right *= max_speed / speed
+        in_view = (abs(target[0] - cx) <= 0.35 * width
+                   and abs(target[1] - cy) <= 0.35 * height)
+        descent = (float(self._fsm.get_param("drop_servo_descend_slow", 0.28))
+                   if in_view else 0.0)
+        self._fsm.fc.set_velocity_body(forward, right, descent)
+        return True
+
+    def _finish_blue_predescent(self, now: float, altitude: float) -> None:
+        self._blue_descent_active = False
+        self._blue_descent_done = True
+        self._search_altitude = altitude
+        self._start_time = now
+        self._scan_phase = 0
+        self._target_progress = ProgressMonitor(
+            window_s=float(self._fsm.get_param("search_progress_window", 30.0)),
+            min_improvement=1.0,
+        )
+        self._fsm.get_logger().info(
+            f"CYL_SEARCH: 蓝盘预降高结束 alt={altitude:.2f}m，继续搜索圆筒")
+        self._fsm.fc.stop_velocity()
+
     def _start_scan(self):
         """启动投放区慢速扫描."""
         self._scan_phase = 1
         forward_min, forward_max, right_min, right_max = self._fsm.zone_bounds("area1")
-        alt = self._fsm.get_param("area1_search_altitude", 5.0)
+        alt = (self._search_altitude if self._search_altitude is not None
+               else self._fsm.get_param("area1_search_altitude", 5.0))
         center_forward = (forward_min + forward_max) / 2.0
         start_north, start_east = self._fsm.layout_frame.local_to_ned(
             center_forward, right_min

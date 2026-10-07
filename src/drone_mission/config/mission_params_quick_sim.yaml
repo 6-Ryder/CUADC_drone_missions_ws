@@ -96,6 +96,7 @@
     precision_align_ground_kp: 0.40       # 地面误差(m) → 水平速度(m/s), 保持跨高度增益一致
     precision_align_max_speed: 0.25       # 粗调水平合速度上限 (m/s)
     bucket_servo_mid_max_speed: 0.14      # bucket: 1.9m<h≤3.0m 水平合速度上限 (m/s)
+    bucket_blue_predescent_enable: true   # bucket: 蓝盘引导 4.5→3.0m 预降高，继续识别圆筒
     precision_align_fine_pixel_error: 90.0 # 进入精调速度限制的像素误差
     precision_align_fine_max_speed: 0.065 # 精调及 bucket ≤1.9m 水平合速度上限 (m/s)
     precision_align_min_correction_speed: 0.012 # 保证小误差修正高于飞控响应死区

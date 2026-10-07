@@ -321,6 +321,7 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_ground_kp", 0.40)
         self.declare_parameter("precision_align_max_speed", 0.25)
         self.declare_parameter("bucket_servo_mid_max_speed", 0.14)
+        self.declare_parameter("bucket_blue_predescent_enable", True)
         self.declare_parameter("precision_align_fine_pixel_error", 90.0)
         self.declare_parameter("precision_align_fine_max_speed", 0.065)
         self.declare_parameter("precision_align_min_correction_speed", 0.012)
