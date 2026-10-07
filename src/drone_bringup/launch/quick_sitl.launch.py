@@ -64,10 +64,6 @@ def generate_launch_description():
         "bucket_rim_height", default_value="0.3",
         description="bucket rim height above ground in metres",
     )
-    bucket_sim_calibration_arg = DeclareLaunchArgument(
-        "bucket_sim_calibration_valid", default_value="false",
-        description="Enable nominal bucket release calibration for SITL only",
-    )
 
     # ---- 包路径 ----
     pkg_control = get_package_share_directory("px4_control")
@@ -163,9 +159,6 @@ def generate_launch_description():
             "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
             "bucket_rim_height": ParameterValue(
                 LaunchConfiguration("bucket_rim_height"), value_type=float),
-            "bucket_calibration_valid": ParameterValue(
-                LaunchConfiguration("bucket_sim_calibration_valid"),
-                value_type=bool),
         }],
         arguments=["--ros-args", "--log-level", "info"],
     )
@@ -197,7 +190,6 @@ def generate_launch_description():
         vehicle_status_topic_arg,
         quick_profile_arg,
         bucket_rim_arg,
-        bucket_sim_calibration_arg,
         px4_bridge_node,
         vision_delayed,
         servo_delayed,

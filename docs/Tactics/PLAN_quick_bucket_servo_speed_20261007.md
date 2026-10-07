@@ -1,5 +1,7 @@
 # Quick bucket 降高伺服速度核对（2026-10-07）
 
+> 历史速度方案。下文关于 15 秒精投预算、2.2–2.5 m 桶径停降及 `bucket_calibration_valid` 释放锁的说明，已被 [圆筒视觉与 16 秒保底方案](PLAN_quick_bucket_cylinder_only_final_release_20261007.md) 取代；三段水平速度上限仍在使用。
+
 ## 当前行为
 
 搜索与视觉接近约在起飞点相对高度 4.5 m 悬停；进入下降后持续用圆筒图像计算机体前、右速度。控制器把平滑像素误差按当前镜头至桶口距离、相机焦距换算成水平米误差，乘以 `precision_align_ground_kp=0.40`。因此相同像素误差在低空通常产生较小速度，但 bucket 连续伺服始终可达到 `precision_align_max_speed=0.25 m/s`；现有 `precision_align_fine_max_speed=0.065 m/s` 只用于非连续伺服。

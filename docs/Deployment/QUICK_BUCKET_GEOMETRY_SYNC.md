@@ -1,6 +1,6 @@
 # Quick bucket 高度几何同步说明
 
-**当前默认（2026-10-05）：** Optimization 工作空间的 quick 真机/仿真脚本、launch 和任务/视觉 quick YAML 已统一默认 `bucket`。`bucket_calibration_valid` 与 SITL 的 `bucket_sim_calibration_valid` 仍为 `false`，默认运行不会获得小桶自动释放许可；可在满足独立门禁时执行配对蓝盘兜底。当前任务与控制流程见 [Quick bucket 当前流程](../Tactics/QUICK_BUCKET_CURRENT_FLOW.md)。
+> 本文记录 2026-09-27 至 2026-10-05 的几何配置过程。旧蓝盘兜底门禁与 `bucket_sim_calibration_valid` 启动参数已停用；当前 bucket 依据圆筒视觉对心或 16 秒超时投放。运行逻辑见 [Quick bucket 当前流程](../Tactics/QUICK_BUCKET_CURRENT_FLOW.md)。下文量测数据仍保留供试投核对。
 
 2026-09-27：将 Jetson 分支 `9f8d05e` 的 bucket 高度修正同步到 Optimization。此次仅修改 bucket 投影、视觉伺服距离和投放落点计算；起飞状态、PX4 通信、真机相机设备及话题未改。`quick_drop_profile` 仍默认 `blue`，`bucket_calibration_valid` 仍默认 `false`。
 

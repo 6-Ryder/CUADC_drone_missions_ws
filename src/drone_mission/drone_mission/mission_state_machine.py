@@ -228,7 +228,6 @@ class MissionFSM(Node):
         self._hazards_timestamp: float = 0.0
         self._cylinder_capture_stamp: float = 0.0
         self._marker_capture_stamp: float = 0.0
-        self._quick_bucket_pair = None
         self._quick_bucket_gate = None
         self._quick_release_intent = None
 
@@ -1142,37 +1141,7 @@ class MissionFSM(Node):
         self._current_drop_cyl_id = target_id
         if self.quick_bucket_enabled():
             bucket = next(c for c in targets if int(c["id"]) == target_id)
-            self._quick_bucket_pair = (bucket, None)
-            bucket_ne = None
-            if bucket["world_position_valid"]:
-                bucket_ne = world_to_ned(bucket["world_x"], bucket["world_y"], 0.0)[:2]
-            from drone_mission.quick_bucket_gate import Calibration
-            calibration = None
-            if self.get_param("bucket_calibration_valid", False):
-                calibration = Calibration(
-                    self.get_param("bucket_front_forward", 0.04),
-                    self.get_param("bucket_rear_forward", -0.04),
-                    self.get_param("bucket_front_right", 0.0),
-                    self.get_param("bucket_rear_right", 0.0),
-                    self.get_param("bucket_front_delay", 0.0),
-                    self.get_param("bucket_rear_delay", 0.0),
-                    self.get_param("bucket_rim_height", 0.3),
-                    self.get_param("bucket_front_uncertainty", 0.03),
-                    self.get_param("bucket_rear_uncertainty", 0.10),
-                    self.get_param("bucket_disc_uncertainty", 0.10),
-                    self.get_param("bucket_front_bias_north", 0.0),
-                    self.get_param("bucket_front_bias_east", 0.0),
-                    self.get_param("bucket_rear_bias_north", 0.0),
-                    self.get_param("bucket_rear_bias_east", 0.0),
-                    self.get_param("bucket_home_body_height", 0.0),
-                    self.get_param("bucket_front_down", 0.0),
-                    self.get_param("bucket_rear_down", 0.0),
-                )
-                if not calibration.valid_for_bucket():
-                    self.request_takeover("SELECT_TARGET: invalid bucket calibration")
-                    return
-            self._quick_bucket_gate = BucketReleaseGate(
-                bucket_ne, None, calibration)
+            self._quick_bucket_gate = BucketReleaseGate()
             self._quick_bucket_gate.bucket_pixel_uv = (
                 bucket["center_u"], bucket["center_v"])
             self._quick_release_intent = None
@@ -1533,7 +1502,6 @@ class MissionFSM(Node):
         self._known_markers.clear()
         self._next_known_cylinder_id = 1
         self._next_known_marker_id = 1001
-        self._quick_bucket_pair = None
         self._quick_bucket_gate = None
         self._quick_release_intent = None
 
@@ -1541,7 +1509,6 @@ class MissionFSM(Node):
         """投放未执行或失败时释放当前选择, 允许重新搜索/重试."""
         self._cylinder_selector.release_last_selection()
         self._current_drop_cyl_id = -1
-        self._quick_bucket_pair = None
         self._quick_bucket_gate = None
         self._quick_release_intent = None
 
