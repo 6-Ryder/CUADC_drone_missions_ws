@@ -613,3 +613,22 @@ def test_bucket_ignores_world_gate_and_tracks_current_image():
     }
     selected, source, reason = controller._choose_target([], [target])
     assert (selected, source, reason) == (target, "cylinder", "tracking")
+
+
+def test_bucket_low_altitude_servo_does_not_switch_to_blue_marker():
+    fsm = _Fsm({
+        "quick_drop_profile": "bucket",
+        "precision_align_continuous_enable": True,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+    controller.step(markers=[{
+        "confidence": 0.99,
+        "center_u": 800.0,
+        "center_v": 480.0,
+    }], cylinders=[], drop_height=1.6, altitude_m=1.6,
+        descent_speed=0.0, allow_release=False)
+    assert controller.last_status.source == "bucket"
+    assert controller.last_status.reason == "no_candidates"
+    assert fsm.fc.body_commands == []
+    assert fsm.fc.stop_count == 1

@@ -488,7 +488,7 @@ class PrecisionAlignController:
         ]
 
         if source_preference == "bucket":
-            candidates = cylinder_candidates or marker_candidates
+            candidates = cylinder_candidates
         elif source_preference == "marker":
             candidates = marker_candidates
         elif source_preference == "cylinder":

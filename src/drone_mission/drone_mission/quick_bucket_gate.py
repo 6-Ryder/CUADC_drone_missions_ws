@@ -126,6 +126,11 @@ class BucketReleaseGate:
         self.disc_ne = disc_ne
         self.calibration = calibration
         self.started_at = None
+        # Final visual alignment starts only once the aircraft reaches release height.
+        self.final_align_started_at = None
+        self.visual_center_frames = {}
+        self.visual_brake_at = None
+        self.timeout_brake_at = None
         self._radii = {}
         self.radius_confirmed = False
         self.radius_failed = False

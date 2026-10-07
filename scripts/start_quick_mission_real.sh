@@ -4,7 +4,7 @@
 #
 # 与 start_full_real_mission.sh 相同的结构: 脚本持有唯一 MicroXRCEAgent,
 # launch 只启动任务节点。区别仅是 launch 换 quick_flight.launch.py
-# (mission_params_quick.yaml + servo_params_quick.yaml)。默认 bucket 桶盘配对投放；
+# (mission_params_quick.yaml + servo_params_quick.yaml)。默认 bucket 圆筒视觉投放；
 # 可选择 blue 使用原有 2.4m 蓝盘投放；两者均一次全开双投。
 # 默认场地方向为北偏东 54°；真机不会生成 SDF，必须确认实体场地方向一致.
 #
@@ -51,7 +51,7 @@ MODE="mission"
 LAUNCH_ARGS=()
 LAYOUT_HEADING_DEG="54.0"
 HAS_LAYOUT_HEADING=0
-# 可改为 blue；命令行 quick_drop_profile:=... 优先。小桶精投仍需有效标定。
+# 可改为 blue；命令行 quick_drop_profile:=... 优先。bucket 为圆筒视觉/16s 保底投放。
 QUICK_DROP_PROFILE="bucket"
 HAS_QUICK_PROFILE=0
 for arg in "$@"; do

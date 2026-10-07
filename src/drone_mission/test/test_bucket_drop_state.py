@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from drone_mission.quick_bucket_gate import GateResult
+from drone_mission.quick_bucket_gate import GateResult, Observation
 from drone_mission.states.state_drop import DropState
 
 
@@ -28,9 +28,20 @@ class Gate:
         self.disc_ne = (1.0, 2.0)
         self.calibration = object()
         self.started_at = None
+        self.radius_confirmed = False
+        self.radius_failed = False
+        self.released = False
+
+    def start(self, now):
+        if self.started_at is None:
+            self.started_at = now
+
+    def observe_radius(self, _cylinder, _now):
+        return False
 
     def commit_release(self):
         self.committed += 1
+        self.released = True
 
 
 def state(intent="small_bucket"):
@@ -50,7 +61,7 @@ def state(intent="small_bucket"):
             get_telemetry=lambda: SimpleNamespace(
                 velocity=SimpleNamespace(vn=0.0, ve=0.0, vd=0.0),
                 timestamp=10.0),
-            get_current_position=lambda: SimpleNamespace(down=-1.6),
+            get_current_position=lambda: SimpleNamespace(north=0.0, east=0.0, down=-1.6),
             _current_yaw=0.0,
         ),
         fc=SimpleNamespace(ned_to_altitude=lambda down: -down),
@@ -59,7 +70,7 @@ def state(intent="small_bucket"):
         start_drop_service=lambda target: calls.append(target),
     )
     handler = DropState(fsm)
-    handler._bucket_current_objects = lambda: ((None, None), (None, None))
+    handler._bucket_current_objects = lambda **_kwargs: ((None, None), (None, None))
     handler.set_sub_state("EXECUTE_DROP")
     handler.enter()
     return handler, fsm, calls
@@ -120,10 +131,11 @@ def test_blue_shadow_runs_after_original_service_request():
     assert isinstance(events[1][1], float)
 
 
-def test_bucket_descend_holds_on_one_missing_frame_then_takes_over(monkeypatch):
+def test_bucket_descend_holds_brief_loss_then_continues_vertical_descent(monkeypatch):
     handler, fsm, _calls = state()
     fsm.bridge.get_current_position = lambda: SimpleNamespace(down=-4.4)
-    fsm.fc.set_velocity_body = lambda *_args: None
+    commands = []
+    fsm.fc.set_velocity_body = lambda *args: commands.append(args)
     reasons = []
     fsm.request_takeover = reasons.append
     handler._start_time = 0.0
@@ -136,4 +148,154 @@ def test_bucket_descend_holds_on_one_missing_frame_then_takes_over(monkeypatch):
 
     clock[0] = 7.0
     assert handler._execute_bucket_descend() is None
-    assert reasons == ["DESCEND: no fresh paired target above 2.4m"]
+    assert reasons == []
+    assert commands[-1] == (0.0, 0.0, 0.45)
+
+
+def _visual_gate_setup(monkeypatch, intent=None):
+    handler, fsm, calls = state(intent)
+    clock = [10.0]
+    monkeypatch.setattr("drone_mission.states.state_drop.time.time", lambda: clock[0])
+    monkeypatch.setattr("drone_mission.states.state_drop.time.monotonic", lambda: clock[0])
+    fsm.bridge._pose_frame = 1
+    fsm.bridge._velocity_frame = 1
+    fsm.bridge._last_odom_time = 10.0
+    fsm.bridge._last_attitude_time = 10.0
+    fsm.bridge.get_telemetry = lambda: SimpleNamespace(
+        velocity=SimpleNamespace(vn=0.0, ve=0.0, vd=0.0),
+        timestamp=clock[0])
+    fsm.get_param = lambda key, default=None: {
+        "quick_drop_mode": True,
+        "quick_drop_profile": "bucket",
+        "bucket_home_body_height": 0.40,
+        "bucket_camera_down": 0.365,
+        "bucket_rim_height": 0.40,
+        "bucket_front_forward": 0.045,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+    }.get(key, default)
+    return handler, fsm, calls, clock
+
+
+def test_fresh_centered_cylinder_releases_without_blue_or_calibration(monkeypatch):
+    handler, fsm, _calls, clock = _visual_gate_setup(monkeypatch)
+    fsm._quick_bucket_gate.calibration = None
+    fsm._quick_bucket_gate.final_align_started_at = 10.0
+    centered_v = 240.0 - 0.045 * 400.0 / 1.235
+    cylinder = SimpleNamespace(center_u=320.0, center_v=centered_v)
+    handler._bucket_current_objects = lambda **_kwargs: (
+        (cylinder, Observation(clock[0], 1.0, 2.0, 0.075)),
+        (None, None),
+    )
+    for instant in (10.0, 10.1):
+        clock[0] = instant
+        fsm.bridge._last_odom_time = instant
+        fsm.bridge._last_attitude_time = instant
+        assert handler._bucket_gate_result().action == "continue"
+    clock[0] = 10.2
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = clock[0]
+    assert handler._bucket_gate_result().action == "brake"
+    clock[0] = 10.6
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = clock[0]
+    result = handler._bucket_gate_result()
+    assert result.action == "release"
+    assert result.reason == "cylinder_visual"
+
+
+def test_sixteen_second_timeout_releases_without_current_visual_targets(monkeypatch):
+    handler, fsm, calls, clock = _visual_gate_setup(monkeypatch, "cylinder_timeout")
+    fsm._quick_bucket_gate.final_align_started_at = 0.0
+    clock[0] = 16.0
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = clock[0]
+    assert handler._bucket_gate_result().action == "brake"
+    clock[0] = 16.4
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = clock[0]
+    result = handler._bucket_gate_result()
+    assert result.action == "release"
+    assert result.reason == "cylinder_timeout"
+    assert handler.execute() is None
+    assert calls == [3]
+
+
+def test_timeout_does_not_release_below_safe_height(monkeypatch):
+    handler, fsm, calls, clock = _visual_gate_setup(monkeypatch, "cylinder_timeout")
+    fsm._quick_bucket_gate.final_align_started_at = 0.0
+    fsm.bridge.get_current_position = lambda: SimpleNamespace(north=0.0, east=0.0, down=-1.4)
+    reasons = []
+    fsm.request_takeover = reasons.append
+    clock[0] = 17.0
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = clock[0]
+    assert handler._bucket_gate_result().action == "takeover"
+    assert handler.execute() is None
+    assert reasons == ["DROP: below_safe_altitude"]
+    assert calls == []
+
+
+def test_final_bucket_stage_times_out_into_actual_drop_without_blue(monkeypatch):
+    handler, fsm, calls, clock = _visual_gate_setup(monkeypatch)
+    commands = []
+    release_logs = []
+    fsm._task_logger.log = lambda name, payload: release_logs.append((name, payload))
+    fsm.fc.set_velocity_body = lambda *args: commands.append(args)
+    fsm._quick_bucket_gate.calibration = None
+    fsm._quick_bucket_gate.bucket_ne = None
+    fsm._quick_bucket_gate.disc_ne = None
+    handler._bucket_current_objects = lambda **_kwargs: ((None, None), (None, None))
+    handler.set_sub_state("DESCEND_TO_DROP")
+    handler._start_time = 10.0
+
+    assert handler.execute() is None
+    assert fsm._quick_bucket_gate.final_align_started_at == 10.0
+    assert calls == []
+
+    clock[0] = 26.0
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = 26.0
+    assert handler.execute() is None
+    assert commands[-1] == (0.0, 0.0, 0.0)
+
+    clock[0] = 26.4
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = 26.4
+    assert handler.execute() == "EXECUTE_DROP"
+    assert fsm._quick_release_intent == "cylinder_timeout"
+    handler.set_sub_state("EXECUTE_DROP")
+    handler.enter()
+    assert handler.execute() is None
+    assert calls == [3]
+    assert fsm._quick_bucket_gate.committed == 1
+    assert release_logs[0][0] == "quick_bucket_release_gate"
+    assert release_logs[0][1]["visual_timeout_fallback"] is True
+    assert release_logs[0][1]["front_residual_m"] is None
+
+
+def test_timeout_brakes_until_horizontal_velocity_is_low(monkeypatch):
+    handler, fsm, _calls, clock = _visual_gate_setup(monkeypatch)
+    gate = fsm._quick_bucket_gate
+    gate.final_align_started_at = 0.0
+    clock[0] = 16.0
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = 16.0
+    assert handler._bucket_gate_result().action == "brake"
+    fsm.bridge.get_telemetry = lambda: SimpleNamespace(
+        velocity=SimpleNamespace(vn=0.2, ve=0.0, vd=0.0), timestamp=clock[0])
+    clock[0] = 16.4
+    fsm.bridge._last_odom_time = fsm.bridge._last_attitude_time = 16.4
+    assert handler._bucket_gate_result().action == "brake"
+
+
+def test_release_log_failure_does_not_cancel_approved_drop():
+    handler, fsm, calls = state()
+    fsm._task_logger.log = lambda *_args: (_ for _ in ()).throw(OSError("disk full"))
+    handler._bucket_gate_result = lambda: GateResult("release", "small_bucket")
+    assert handler.execute() is None
+    assert calls == [3]
+    assert fsm._quick_bucket_gate.committed == 1
+
+
+def test_bucket_control_does_not_read_marker_detection():
+    handler, fsm, _calls = state()
+    fsm.get_cylinders = lambda: []
+    fsm.get_markers = lambda: (_ for _ in ()).throw(RuntimeError("marker unavailable"))
+    fsm._cylinder_capture_stamp = 0.0
+    assert DropState._bucket_current_objects(
+        handler, include_markers=False) == ((None, None), (None, None))
