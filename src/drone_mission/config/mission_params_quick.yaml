@@ -1,5 +1,5 @@
 # 无人机自主任务飞行 — 快速投放策略参数 (真机)
-# 默认 bucket: 圆筒视觉伺服降至约 1.6m + 圆筒对心/16s 超时投放；可选 blue 基线
+# 默认 bucket: 圆筒视觉伺服降至 1.1m + 圆筒对心/16s 超时投放；可选 blue 基线
 # 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
 # 原点: 起飞点 H (world: 4, 10, 0)
 # 飞行方向: 向北 (NED north 正方向)
@@ -73,8 +73,8 @@
     drop_descend_height: 2.4      # 单次降高高度 (取消两级降高, 原 2.8+1.5)
     drop_descend_speed: 0.8       # 降高速度提速 (原 0.5)
     # ── 边伺服边下降 (quick: 降高同时像素 P 控制水平对心, 复用降落区伺服参数) ──
-    drop_servo_descend_fast: 0.45  # 伺服下降: >3m 垂直速度 (m/s, 真机保守档)
-    drop_servo_descend_slow: 0.28  # 伺服下降: ≤3m 垂直速度 (m/s, 真机保守档)
+    drop_servo_descend_fast: 0.45  # blue 伺服下降 >3m；bucket 选桶后的四档速度在 state_drop.py
+    drop_servo_descend_slow: 0.28  # blue 伺服下降及 bucket 蓝盘预降高使用
     drop_confirmation_timeout: 5.0  # 必须大于舵机层 3s 总预算 (s)
     drop_align_pixel_tolerance: 40.0 # 投放前目标中心允许像素误差 (4.5m 粗对心, 640 宽图像)
     # ── 低空视觉校准: 梯度下降探测 (quick 下不使用, 继承真机基线) ──
@@ -126,7 +126,7 @@
     precision_align_reacquire_after_lost: 12   # 丢失 N 帧后清除像素锁定, 近中心重捕获
     precision_align_max_lost_frames: 48       # 丢失超限后放弃当前目标
     precision_align_drop_height_tolerance: 0.50 # 进入精校/投放的高度误差 (m), SITL 稳态~0.42m, 需留余量
-    precision_align_final_descent_enable: false # blue 基线不二次降高；bucket 独立降至 1.65m
+    precision_align_final_descent_enable: false # blue 基线不二次降高；bucket 独立降至 1.1m
     precision_align_final_drop_height: 1.5      # 未使用 (final_descent 关闭)
     precision_align_final_descent_speed: 0.25   # 未使用 (final_descent 关闭)
     precision_align_fallback_max_pixel_error: 60.0 # quick 兜底: 超时重试耗尽后像素 ≤60px 才直接投
