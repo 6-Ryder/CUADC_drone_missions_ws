@@ -87,7 +87,7 @@
     drop_visual_align_lock_tolerance: 2.0 # 目标锁定容差 (m), 锁定后只接受世界坐标在此范围内的目标
     # ── 低空视觉精校: CUADC 风格像素闭环 (quick 放宽判定) ──
     precision_align_enable: true          # true=使用新精校控制器, false=回退 DropVisualAligner
-    precision_align_target_source: "marker" # quick: 只追蓝底标识
+    precision_align_target_source: "marker" # blue 基线；bucket 低空固定只追圆筒
     precision_align_image_width: 1280.0
     precision_align_image_height: 960.0
     precision_align_alpha: 0.55           # EMA 平滑系数, 兼顾检测抖动和闭环响应
@@ -103,13 +103,13 @@
     precision_align_step_s: 0.18          # 粗调速度脉冲持续时间 (s)
     precision_align_fine_step_s: 0.12     # 精调短脉冲, 避免越过中心
     precision_align_hover_s: 0.15         # 每步后短暂停稳并获取新观测 (s); 与真机一致
-    precision_align_timeout: 15.0         # quick: 单阶段对心最长等待 (原 25.0)
+    precision_align_timeout: 15.0         # blue 基线对心超时；bucket 最终阶段独立计时 16s
     precision_align_max_retries: 1        # 超时/丢失后仅一次原地重置 (原 2)
     precision_align_image_x_to_right_sign: 1.0   # +1: 图像右侧目标 → 机体右移
     precision_align_image_y_to_forward_sign: -1.0 # CUADC 标定: 图像下侧目标 → 机体后退
     precision_align_threshold_norm_x: 0.06 # quick: 放宽防跳变阈值 (原 0.008 会卡死判定)
     precision_align_threshold_norm_y: 0.06 # quick: 放宽防跳变阈值
-    precision_align_raw_pixel_tolerance: 80.0 # quick: 2.4m 对心窗口 (1280 宽 = 真机 40px 等比)
+    precision_align_raw_pixel_tolerance: 80.0 # blue 基线 2.4m 对心窗口 (SITL 1280px)
     precision_align_final_raw_pixel_tolerance: 80.0 # 不启用两级窗口, 兜底值
     precision_align_tight_window_height: 0.0  # quick: 两级窗口永不切换 (只用 raw 窗口)
     precision_align_smooth_pixel_tolerance: 80.0 # quick: EMA 平滑安全网放宽 (等比 40px)
@@ -123,7 +123,7 @@
     precision_align_reacquire_after_lost: 12   # 丢失 N 帧后清除像素锁定, 近中心重捕获
     precision_align_max_lost_frames: 48       # 丢失超限后放弃当前目标
     precision_align_drop_height_tolerance: 0.50 # 进入精校/投放的高度误差 (m), SITL 稳态~0.42m, 需留余量
-    precision_align_final_descent_enable: false # quick: 取消两级降高, 直接 2.4m 对心投放
+    precision_align_final_descent_enable: false # blue 基线不二次降高；bucket 独立降至 1.65m
     precision_align_final_drop_height: 1.5      # 未使用 (final_descent 关闭)
     precision_align_final_descent_speed: 0.25   # 未使用 (final_descent 关闭)
     precision_align_fallback_max_pixel_error: 120.0 # quick 兜底: 超时重试耗尽后像素 ≤120px (等比 60px) 才直接投

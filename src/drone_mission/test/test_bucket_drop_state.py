@@ -24,27 +24,15 @@ class Logger:
 class Gate:
     def __init__(self):
         self.committed = 0
-        self.bucket_ne = (1.0, 2.0)
-        self.disc_ne = (1.0, 2.0)
-        self.calibration = object()
-        self.started_at = None
-        self.radius_confirmed = False
-        self.radius_failed = False
+        self.visual_center_frames = {}
         self.released = False
-
-    def start(self, now):
-        if self.started_at is None:
-            self.started_at = now
-
-    def observe_radius(self, _cylinder, _now):
-        return False
 
     def commit_release(self):
         self.committed += 1
         self.released = True
 
 
-def state(intent="small_bucket"):
+def state(intent="cylinder_visual"):
     logger = Logger()
     calls = []
     fsm = SimpleNamespace(
@@ -79,7 +67,7 @@ def state(intent="small_bucket"):
 def test_entry_never_sends_service_and_execute_rechecks():
     handler, fsm, calls = state()
     assert calls == []
-    handler._bucket_gate_result = lambda: GateResult("release", "small_bucket", 0.01, 0.1)
+    handler._bucket_gate_result = lambda: GateResult("release", "cylinder_visual", 3.0)
     assert handler.execute() is None
     assert calls == [3]
     assert fsm._quick_bucket_gate.committed == 1
@@ -181,12 +169,11 @@ def _visual_gate_setup(monkeypatch, intent=None):
 
 def test_fresh_centered_cylinder_releases_without_blue_or_calibration(monkeypatch):
     handler, fsm, _calls, clock = _visual_gate_setup(monkeypatch)
-    fsm._quick_bucket_gate.calibration = None
     fsm._quick_bucket_gate.final_align_started_at = 10.0
     centered_v = 240.0 - 0.045 * 400.0 / 1.235
     cylinder = SimpleNamespace(center_u=320.0, center_v=centered_v)
     handler._bucket_current_objects = lambda **_kwargs: (
-        (cylinder, Observation(clock[0], 1.0, 2.0, 0.075)),
+        (cylinder, Observation(clock[0], 0.075)),
         (None, None),
     )
     for instant in (10.0, 10.1):
@@ -239,9 +226,6 @@ def test_final_bucket_stage_times_out_into_actual_drop_without_blue(monkeypatch)
     release_logs = []
     fsm._task_logger.log = lambda name, payload: release_logs.append((name, payload))
     fsm.fc.set_velocity_body = lambda *args: commands.append(args)
-    fsm._quick_bucket_gate.calibration = None
-    fsm._quick_bucket_gate.bucket_ne = None
-    fsm._quick_bucket_gate.disc_ne = None
     handler._bucket_current_objects = lambda **_kwargs: ((None, None), (None, None))
     handler.set_sub_state("DESCEND_TO_DROP")
     handler._start_time = 10.0
@@ -266,7 +250,7 @@ def test_final_bucket_stage_times_out_into_actual_drop_without_blue(monkeypatch)
     assert fsm._quick_bucket_gate.committed == 1
     assert release_logs[0][0] == "quick_bucket_release_gate"
     assert release_logs[0][1]["visual_timeout_fallback"] is True
-    assert release_logs[0][1]["front_residual_m"] is None
+    assert release_logs[0][1]["pixel_error_px"] is None
 
 
 def test_timeout_brakes_until_horizontal_velocity_is_low(monkeypatch):
@@ -286,7 +270,7 @@ def test_timeout_brakes_until_horizontal_velocity_is_low(monkeypatch):
 def test_release_log_failure_does_not_cancel_approved_drop():
     handler, fsm, calls = state()
     fsm._task_logger.log = lambda *_args: (_ for _ in ()).throw(OSError("disk full"))
-    handler._bucket_gate_result = lambda: GateResult("release", "small_bucket")
+    handler._bucket_gate_result = lambda: GateResult("release", "cylinder_visual")
     assert handler.execute() is None
     assert calls == [3]
     assert fsm._quick_bucket_gate.committed == 1
@@ -297,5 +281,5 @@ def test_bucket_control_does_not_read_marker_detection():
     fsm.get_cylinders = lambda: []
     fsm.get_markers = lambda: (_ for _ in ()).throw(RuntimeError("marker unavailable"))
     fsm._cylinder_capture_stamp = 0.0
-    assert DropState._bucket_current_objects(
-        handler, include_markers=False) == ((None, None), (None, None))
+    assert DropState._bucket_current_objects(handler) == (
+        (None, None), (None, None))

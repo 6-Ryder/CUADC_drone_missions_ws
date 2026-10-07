@@ -8,7 +8,7 @@ import pytest
 
 from drone_mission.cylinder_selector import CylinderSelector
 from drone_mission.mission_state_machine import MissionFSM, MissionState
-from drone_mission.quick_bucket_gate import BucketReleaseGate, Calibration, Observation
+from drone_mission.quick_bucket_gate import BucketReleaseGate
 from drone_mission.states.state_cylinder_search import CylinderSearchState
 from drone_mission.states.state_cylinder_approach import CylinderApproachState
 from drone_mission.states.state_drop import DropState
@@ -52,7 +52,7 @@ def mission(profile="bucket"):
     fsm._current_state = MissionState.CYLINDER_SEARCH
     fsm._current_drop_cyl_id = -1
     fsm._drop_success_count = 0
-    fsm._quick_bucket_gate = fsm._quick_bucket_pair = None
+    fsm._quick_bucket_gate = None
     fsm._cylinder_selector = CylinderSelector()
     fsm._layout_frame = LayoutFrame(0.0)
     fsm.zone_bounds = lambda _prefix: (30.0, 35.0, -4.0, 4.0)
@@ -230,7 +230,7 @@ def test_outside_zone_cylinder_alone_can_enter_approach_after_three_frames(clock
     assert handler.execute() == "SELECT_TARGET"
     fsm._handle_select_target()
     assert fsm._current_state == MissionState.CYLINDER_APPROACH
-    assert fsm._quick_bucket_gate.disc_ne is None
+    assert fsm._quick_bucket_gate.bucket_pixel_uv == (320.0, 240.0)
 
 
 def test_bucket_image_without_world_projection_can_be_selected(clock):
@@ -284,9 +284,36 @@ def test_bucket_world_reference_only_gives_bounded_coarse_move(clock):
     assert not any(event[0] == "takeover" for event in fsm._task_logger.events)
 
 
+def test_old_ballistic_calibration_cannot_block_visual_bucket_selection(clock):
+    fsm = mission()
+    original = fsm.get_param
+    fsm.get_param = lambda key, default=None: (
+        True if key == "bucket_calibration_valid" else
+        0.5 if key == "bucket_front_uncertainty" else
+        original(key, default))
+    three_frames(fsm, [detection(y=32.0)])
+    fsm._handle_select_target()
+    assert fsm._current_state == MissionState.CYLINDER_APPROACH
+    assert not any(event[0] == "takeover" for event in fsm._task_logger.events)
+
+
+def test_low_bucket_servo_uses_pixels_without_local_world_projection(clock):
+    fsm = mission()
+    fsm._quick_bucket_gate = BucketReleaseGate()
+    target = image_only_detection()
+    fsm._cylinders = [target]
+    fsm._cylinder_capture_stamp = 100.85
+    fsm._bridge.get_current_position = lambda: (_ for _ in ()).throw(
+        RuntimeError("local position unavailable"))
+    handler = DropState(fsm)
+    (selected, observation), _ = handler._bucket_current_objects()
+    assert selected is target
+    assert observation.stamp == 100.85
+
+
 def test_bucket_descent_uses_current_pixels_when_high_world_is_wrong(clock):
     fsm = mission()
-    gate = BucketReleaseGate((100.0, 100.0), None, None)
+    gate = BucketReleaseGate()
     gate.bucket_pixel_uv = (320.0, 240.0)
     fsm._quick_bucket_gate = gate
     fsm._cylinders = [image_only_detection()]
@@ -298,40 +325,7 @@ def test_bucket_descent_uses_current_pixels_when_high_world_is_wrong(clock):
     assert handler._execute_bucket_descend() is None
     assert steps[-1]["cylinders"] == fsm._cylinders
     assert steps[-1]["descent_speed"] > 0
-    assert gate.bucket_ne == pytest.approx((40.0, 2.0))
-
-
-def test_low_altitude_gate_uses_current_image_instead_of_high_world(clock):
-    fsm = mission()
-    previous_get_param = fsm.get_param
-    geometry = {"bucket_home_body_height": 0.40,
-                "bucket_camera_down": 0.365, "bucket_rim_height": 0.40}
-    fsm.get_param = lambda key, default=None: geometry.get(
-        key, previous_get_param(key, default))
-    fsm._bridge.get_current_position = lambda: SimpleNamespace(
-        north=40.0, east=2.0, down=-1.6)
-    fsm._bridge._current_yaw = 0.0
-    calibration = Calibration(
-        0.045, -0.045, 0.0, 0.0, 0.0, 0.0, 0.40,
-        0.025, 0.025, 0.10, home_body_height=0.40,
-        front_down=0.345, rear_down=0.345)
-    gate = BucketReleaseGate((100.0, 100.0), None, calibration)
-    gate.bucket_pixel_uv = (320.0, 225.4)
-    gate.start(100.0)
-    gate.radius_confirmed = True
-    fsm._quick_bucket_gate = gate
-    fsm._cylinder_capture_stamp = fsm._marker_capture_stamp = 100.85
-    fsm._cylinders = [image_only_detection(v=225.4)]
-    fsm._markers = [image_only_detection(radius=0.5, v=225.4)]
-    handler = DropState(fsm)
-    (_, cylinder), (_, marker) = handler._bucket_current_objects(require_unique=True)
-    result = gate.evaluate(
-        now=100.9, altitude=1.6, north=40.0, east=2.0,
-        yaw=0.0, vn=0.0, ve=0.0, vd=0.0, telemetry_stamp=100.85,
-        cylinder=cylinder, marker=marker)
-    assert gate.bucket_ne[0] == pytest.approx(40.045, abs=0.002)
-    assert result.front_residual < 0.015
-    assert result.reason == "collecting_bucket_frames"
+    assert gate.bucket_pixel_uv == (320.0, 240.0)
 
 
 def test_image_only_bucket_runs_search_approach_and_descend(clock):
@@ -443,60 +437,12 @@ def test_outside_zone_selected_target_reaches_cylinder_only_descent_servo(clock)
 
 def test_duplicate_current_detections_allow_servo_but_not_release_observation(clock):
     fsm = mission()
-    fsm._quick_bucket_gate = BucketReleaseGate((40.0, 2.0), None, None)
+    fsm._quick_bucket_gate = BucketReleaseGate()
     fsm._cylinder_capture_stamp = 100.85
     fsm._cylinders = [detection(), detection(x=2.1)]
     handler = DropState(fsm)
     assert handler._bucket_current_objects()[0][0] is fsm._cylinders[0]
     assert handler._bucket_current_objects(require_unique=True)[0] == (None, None)
-
-
-def test_current_unique_blue_disc_can_become_release_anchor(clock):
-    fsm = mission()
-    gate = BucketReleaseGate((40.0, 2.0), None, None)
-    fsm._quick_bucket_gate = gate
-    fsm._cylinder_capture_stamp = fsm._marker_capture_stamp = 100.85
-    fsm._cylinders = [detection()]
-    fsm._markers = [detection(x=200.0, u=329.0)]
-    handler = DropState(fsm)
-    (_, cylinder), (_, marker) = handler._bucket_current_objects(require_unique=True)
-    assert cylinder is not None and marker is not None
-    assert gate.disc_ne == pytest.approx((40.0, 2.10125))
-
-
-def test_ambiguous_blue_discs_never_create_release_anchor(clock):
-    fsm = mission()
-    gate = BucketReleaseGate((40.0, 2.0), None, None)
-    fsm._quick_bucket_gate = gate
-    fsm._cylinder_capture_stamp = fsm._marker_capture_stamp = 100.85
-    fsm._cylinders = [detection()]
-    fsm._markers = [detection(x=2.1), detection(x=1.9)]
-    handler = DropState(fsm)
-    assert handler._bucket_current_objects(require_unique=True)[1] == (None, None)
-    assert gate.disc_ne is None
-
-
-def test_two_rims_near_one_disc_never_create_release_anchor(clock):
-    fsm = mission()
-    gate = BucketReleaseGate((40.0, 2.0), None, None)
-    fsm._quick_bucket_gate = gate
-    fsm._cylinder_capture_stamp = fsm._marker_capture_stamp = 100.85
-    fsm._cylinders = [detection(), detection(x=2.2)]
-    fsm._markers = [detection(x=2.1)]
-    handler = DropState(fsm)
-    assert handler._bucket_current_objects(require_unique=True)[1] == (None, None)
-    assert gate.disc_ne is None
-
-
-def test_missing_blue_disc_anchor_can_never_release(clock):
-    gate = BucketReleaseGate((40.0, 2.0), None, None)
-    gate.start(100.0)
-    result = gate.evaluate(now=100.9, altitude=1.6, north=40.0, east=2.0,
-                           yaw=0.0, vn=0.0, ve=0.0, vd=0.0,
-                           telemetry_stamp=100.85,
-                           cylinder=Observation(100.85, 40.0, 2.0),
-                           marker=Observation(100.85, 40.0, 2.0))
-    assert result.action != "release"
 
 
 def test_blue_profile_keeps_drop_zone_memory_filter(clock):

@@ -222,68 +222,27 @@ class DropState:
         return (target.get(key, default) if isinstance(target, dict)
                 else getattr(target, key, default))
 
-    def _bucket_image_observation(self, target, stamp, plane_height, pos, yaw):
-        """Project a current pixel relative to the aircraft, not search World."""
-        u = float(self._target_field(target, "center_u", math.nan))
-        v = float(self._target_field(target, "center_v", math.nan))
-        fx = float(self._fsm.get_param("camera_fx", 400.0))
-        fy = float(self._fsm.get_param("camera_fy", 400.0))
-        altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
-        distance = (altitude
-                    + float(self._fsm.get_param("bucket_home_body_height", 0.0))
-                    - float(self._fsm.get_param("bucket_camera_down", 0.0))
-                    - plane_height)
-        if (not all(math.isfinite(value) for value in
-                    (u, v, fx, fy, altitude, distance, pos.north, pos.east, yaw))
-                or fx <= 0 or fy <= 0 or distance <= 0):
-            return None
-        du = u - float(self._fsm.get_param("camera_cx", 320.0))
-        dv = v - float(self._fsm.get_param("camera_cy", 240.0))
-        forward = (float(self._fsm.get_param(
-            "precision_align_image_y_to_forward_sign", -1.0))
-            * dv * distance / fy)
-        right = du * distance / fx
-        north = pos.north + forward * math.cos(yaw) - right * math.sin(yaw)
-        east = pos.east + forward * math.sin(yaw) + right * math.cos(yaw)
-        return Observation(stamp, north, east,
-                           float(self._target_field(target, "radius", 0.0)))
-
-    def _bucket_current_objects(self, require_unique=False, include_markers=True):
-        """Select a fresh image target; World projection never rejects it."""
+    def _bucket_current_objects(self, require_unique=False):
+        """Select a fresh cylinder by image pixels, without world projection."""
         gate = getattr(self._fsm, "_quick_bucket_gate", None)
         if gate is None:
             return (None, None), (None, None)
         now = time.time()
-        pos = self._fsm.bridge.get_current_position()
-        yaw = float(getattr(self._fsm.bridge, "_current_yaw", 0.0))
-        if not math.isfinite(yaw):
-            yaw = 0.0  # Release gate independently requires a fresh finite yaw.
         cx = float(self._fsm.get_param("camera_cx", 320.0))
         cy = float(self._fsm.get_param("camera_cy", 240.0))
-
-        def image_candidates(objects, stamp, max_age, plane, min_conf):
-            if not 0 < stamp <= now or now - stamp > max_age:
-                return []
-            result = []
-            for item in objects:
-                conf = float(self._target_field(item, "confidence", 0.0))
-                u = float(self._target_field(item, "center_u", math.nan))
-                v = float(self._target_field(item, "center_v", math.nan))
-                if not (math.isfinite(conf) and conf >= min_conf
-                        and math.isfinite(u) and math.isfinite(v)):
-                    continue
-                observation = self._bucket_image_observation(
-                    item, stamp, plane, pos, yaw)
-                if observation is not None:
-                    result.append((item, observation, (u, v)))
-            return result
-
-        rims = image_candidates(
-            self._fsm.get_cylinders(), self._fsm._cylinder_capture_stamp, 0.25,
-            float(self._fsm.get_param("bucket_rim_height", 0.4)), 0.35)
-        rims = [entry for entry in rims
-                if math.isfinite(entry[1].radius)
-                and 0.03 <= entry[1].radius <= 0.30]
+        stamp = float(self._fsm._cylinder_capture_stamp)
+        if not 0 < stamp <= now or now - stamp > 0.25:
+            return (None, None), (None, None)
+        rims = []
+        for item in self._fsm.get_cylinders():
+            confidence = float(self._target_field(item, "confidence", 0.0))
+            u = float(self._target_field(item, "center_u", math.nan))
+            v = float(self._target_field(item, "center_v", math.nan))
+            radius = float(self._target_field(item, "radius", math.nan))
+            if (math.isfinite(confidence) and confidence >= 0.35
+                    and all(math.isfinite(value) for value in (u, v, radius))
+                    and 0.03 <= radius <= 0.30):
+                rims.append((item, Observation(stamp, radius), (u, v)))
         hint = getattr(gate, "bucket_pixel_uv", None) or (cx, cy)
         rims.sort(key=lambda entry: math.dist(entry[2], hint))
         rim = rims[0] if rims and math.dist(rims[0][2], hint) <= 120.0 else None
@@ -292,41 +251,8 @@ class DropState:
             if nearby != 1:
                 rim = None
         if rim is not None:
-            gate.bucket_ne = (rim[1].north, rim[1].east)
             gate.bucket_pixel_uv = rim[2]
-
-        cylinder_result = (rim[0], rim[1]) if rim else (None, None)
-        if not include_markers:
-            return cylinder_result, (None, None)
-
-        discs = image_candidates(
-            self._fsm.get_markers(), self._fsm._marker_capture_stamp, 0.40,
-            0.0, 0.35)
-        disc_hint = getattr(gate, "disc_pixel_uv", None)
-        if disc_hint is None:
-            disc_hint = rim[2] if rim is not None else (cx, cy)
-        discs.sort(key=lambda entry: math.dist(entry[2], disc_hint))
-        disc = discs[0] if discs and math.dist(discs[0][2], disc_hint) <= 120.0 else None
-        if disc is not None:
-            associated = [entry for entry in rims
-                          if math.hypot(entry[1].north - disc[1].north,
-                                        entry[1].east - disc[1].east) <= 0.25]
-            near_discs = [entry for entry in discs
-                          if rim is not None and
-                          math.hypot(entry[1].north - rim[1].north,
-                                     entry[1].east - rim[1].east) <= 0.25]
-            if rim is not None and (len(associated) != 1 or len(near_discs) != 1):
-                disc = None
-            elif rim is None and gate.disc_ne is None:
-                disc = None
-            elif require_unique and sum(
-                    math.dist(entry[2], disc[2]) <= 40.0 for entry in discs) != 1:
-                disc = None
-        if disc is not None:
-            gate.disc_ne = (disc[1].north, disc[1].east)
-            gate.disc_pixel_uv = disc[2]
-        return (cylinder_result,
-                (disc[0], disc[1]) if disc else (None, None))
+        return ((rim[0], rim[1]) if rim else (None, None), (None, None))
 
     def _bucket_gate_result(self):
         gate = self._fsm._quick_bucket_gate
@@ -384,8 +310,7 @@ class DropState:
                 return GateResult("brake", "cylinder_timeout_brake")
             return GateResult("release", "cylinder_timeout")
 
-        (cyl_obj, cylinder), _ = self._bucket_current_objects(
-            require_unique=True, include_markers=False)
+        (cyl_obj, cylinder), _ = self._bucket_current_objects(require_unique=True)
         if math.hypot(vn, ve) > 0.08 or abs(vd) > 0.08:
             gate.visual_center_frames = {}
             gate.visual_brake_at = None
@@ -419,25 +344,25 @@ class DropState:
         if not math.isfinite(pixel_error) or pixel_error > 8.0:
             gate.visual_center_frames = {}
             gate.visual_brake_at = None
-            return GateResult("continue", "cylinder_not_centered")
+            return GateResult("continue", "cylinder_not_centered", pixel_error)
         frames = getattr(gate, "visual_center_frames", {})
         frames[cylinder.stamp] = now
         gate.visual_center_frames = {stamp: seen for stamp, seen in frames.items()
                                      if now - seen <= 1.0}
         if len(gate.visual_center_frames) < 3:
-            return GateResult("continue", "cylinder_stabilizing")
+            return GateResult("continue", "cylinder_stabilizing", pixel_error)
         brake_at = getattr(gate, "visual_brake_at", None)
         if brake_at is None:
             gate.visual_brake_at = now
-            return GateResult("brake", "cylinder_visual_brake")
+            return GateResult("brake", "cylinder_visual_brake", pixel_error)
         if now - brake_at < 0.30 or cylinder.stamp <= brake_at:
-            return GateResult("brake", "cylinder_visual_brake")
-        return GateResult("release", "cylinder_visual")
+            return GateResult("brake", "cylinder_visual_brake", pixel_error)
+        return GateResult("release", "cylinder_visual", pixel_error)
 
     def _execute_bucket_descend(self) -> Optional[str]:
         gate = getattr(self._fsm, "_quick_bucket_gate", None)
         if gate is None:
-            self._takeover("DESCEND: missing paired bucket gate")
+            self._takeover("DESCEND: missing bucket target state")
             return None
         pos = self._fsm.bridge.get_current_position()
         altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
@@ -446,12 +371,7 @@ class DropState:
             self._takeover("DESCEND: below bucket safety altitude")
             return None
         now = time.time()
-        (cyl_obj, cylinder), _ = self._bucket_current_objects(
-            include_markers=False)
-        if altitude <= 2.45:
-            gate.start(now)
-            if 2.2 <= altitude <= 2.5:
-                gate.observe_radius(cylinder, now)
+        (cyl_obj, _), _ = self._bucket_current_objects()
 
         # Enter the gate inside its 1.5–1.7 m release window. Holding at
         # 1.72 m can leave the vehicle hovering forever just above the gate.
@@ -493,11 +413,12 @@ class DropState:
                 descent_speed=0.0, allow_release=False)
         result = self._bucket_gate_result()
         if now - self._last_descend_log_time >= 0.75:
+            pixel_error = (f"{result.pixel_error_px:.1f}"
+                           if result.pixel_error_px is not None else "n/a")
             self._fsm.get_logger().info(
                 f"BUCKET_GATE: alt={altitude:.2f} action={result.action} "
-                f"reason={result.reason} radius_ok={gate.radius_confirmed} "
-                f"front={result.front_residual:.3f} "
-                f"rear={result.rear_residual:.3f}"
+                f"reason={result.reason} px={pixel_error} "
+                f"stable={len(gate.visual_center_frames)}"
             )
             self._last_descend_log_time = now
         if result.action == "takeover":
@@ -1070,7 +991,7 @@ class DropState:
                     f"DROP: release recheck rejected {result.reason}; resume servo")
                 return "DESCEND_TO_DROP"
             try:
-                (cyl_obj, cylinder), (_, marker) = self._bucket_current_objects()
+                (cyl_obj, cylinder), _ = self._bucket_current_objects()
                 telemetry = self._fsm.bridge.get_telemetry()
                 position = self._fsm.bridge.get_current_position()
                 velocity = telemetry.velocity
@@ -1085,24 +1006,15 @@ class DropState:
                         self._target_field(cyl_obj, "center_u"),
                         self._target_field(cyl_obj, "center_v")]
                         if cyl_obj is not None else None),
-                    "marker_capture_time": marker.stamp if marker else None,
+                    "pixel_error_px": result.pixel_error_px,
                     "final_align_elapsed_s": (release_time - align_started
                                               if align_started is not None else None),
                     "centered_frame_count": len(getattr(gate, "visual_center_frames", {})),
                     "visual_timeout_fallback": result.reason == "cylinder_timeout",
-                    "front_impact_ned": list(result.front_impact) if result.front_impact else None,
-                    "rear_impact_ned": list(result.rear_impact) if result.rear_impact else None,
-                    "front_residual_m": (result.front_residual
-                                         if math.isfinite(result.front_residual) else None),
-                    "rear_residual_m": (result.rear_residual
-                                        if math.isfinite(result.rear_residual) else None),
-                    "bucket_center_ned": list(gate.bucket_ne) if gate.bucket_ne else None,
-                    "disc_center_ned": list(gate.disc_ne) if gate.disc_ne else None,
                     "altitude_m": self._fsm.fc.ned_to_altitude(position.down),
                     "yaw_ned": getattr(self._fsm.bridge, "_current_yaw", None),
                     "velocity_ned": [velocity.vn, velocity.ve, velocity.vd],
                     "telemetry_time": telemetry.timestamp,
-                    "calibrated": gate.calibration is not None,
                 })
             except Exception as exc:
                 self._fsm.get_logger().warn(
@@ -1113,8 +1025,7 @@ class DropState:
             cyl_id = self._fsm._current_drop_cyl_id
             self._fsm.get_logger().info(
                 f"DROP_GATE: release={result.reason} cyl={cyl_id} "
-                f"front_residual={result.front_residual:.3f} "
-                f"rear_residual={result.rear_residual:.3f}")
+                f"pixel_error={result.pixel_error_px}")
             self._fsm.start_drop_service(cyl_id)
             self._drop_executed = True
             self._start_time = time.time()

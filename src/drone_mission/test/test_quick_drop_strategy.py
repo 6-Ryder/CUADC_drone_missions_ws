@@ -17,7 +17,6 @@ import pytest
 import yaml
 
 from drone_mission.mission_state_machine import MissionFSM
-from drone_mission.quick_bucket_gate import is_small_bucket_candidate
 from drone_mission.states.state_cylinder_search import CylinderSearchState
 from drone_mission.states.state_drop import DropState
 from drone_utils.layout_frame import LayoutFrame
@@ -325,7 +324,6 @@ def test_bucket_memory_keeps_small_rim_evidence_amid_disc_radius_outlier():
     target = fsm.get_known_cylinders()[0]
     assert target["radius"] > 0.09  # all-sample mean was misleading
     assert target["small_radius_confirmed"]
-    assert is_small_bucket_candidate(target)
 
 
 def test_default_search_does_not_request_marker_only():
