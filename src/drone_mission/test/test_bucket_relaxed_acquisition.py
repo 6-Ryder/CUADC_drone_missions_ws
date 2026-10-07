@@ -95,6 +95,13 @@ def feed(fsm, stamp, objects):
             sec=sec, nanosec=round((stamp-sec)*1e9))), cylinders=objects))
 
 
+def feed_marker(fsm, stamp, objects):
+    sec = int(stamp)
+    fsm._marker_cb(SimpleNamespace(
+        header=SimpleNamespace(stamp=SimpleNamespace(
+            sec=sec, nanosec=round((stamp-sec)*1e9))), cylinders=objects))
+
+
 def search(fsm):
     handler = CylinderSearchState(fsm)
     handler._start_time = time.time()
@@ -105,6 +112,111 @@ def search(fsm):
 def three_frames(fsm, objects):
     for stamp in (100.1, 100.2, 100.3):
         feed(fsm, stamp, objects)
+
+
+def test_bucket_blue_marker_starts_guided_descent_after_distinct_frames(clock):
+    fsm = mission()
+    handler = search(fsm)
+    marker = image_only_detection(u=365.0, v=240.0)
+    for stamp in (100.65, 100.75):
+        feed_marker(fsm, stamp, [marker])
+        assert handler.execute() is None
+        assert not any(event[0] == "velocity" for event in fsm._task_logger.events)
+    # Re-reading one camera frame at 20 Hz cannot count as another observation.
+    assert handler.execute() is None
+    assert not any(event[0] == "velocity" for event in fsm._task_logger.events)
+
+    feed_marker(fsm, 100.85, [marker])
+    assert handler.execute() is None
+    assert fsm._quick_bucket_gate is None
+    forward, right, down = [event[1] for event in fsm._task_logger.events
+                            if event[0] == "velocity"][-1]
+    assert forward == pytest.approx(0.0)
+    assert 0.0 < right <= 0.25
+    assert down == pytest.approx(0.28)
+
+
+def test_bucket_blue_guided_descent_stops_when_marker_is_stale(clock):
+    fsm = mission()
+    handler = search(fsm)
+    for stamp in (100.65, 100.75, 100.85):
+        feed_marker(fsm, stamp, [image_only_detection()])
+        handler.execute()
+    clock[0] += 0.5
+    assert handler.execute() is None
+    assert ("velocity", (0.0, 0.0, 0.0)) in fsm._task_logger.events
+    assert fsm._task_logger.events[-1] == ("velocity", (0.0, 0.0, 0.0))
+
+
+def test_bucket_blue_marker_near_image_edge_moves_without_descending(clock):
+    fsm = mission()
+    handler = search(fsm)
+    for stamp in (100.65, 100.75, 100.85):
+        feed_marker(fsm, stamp, [image_only_detection(u=620.0)])
+        handler.execute()
+    forward, right, down = [event[1] for event in fsm._task_logger.events
+                            if event[0] == "velocity"][-1]
+    assert forward == pytest.approx(0.0)
+    assert right == pytest.approx(0.25)
+    assert down == 0.0
+
+
+def test_bucket_blue_guidance_times_out_if_altitude_does_not_progress(clock):
+    fsm = mission()
+    handler = search(fsm)
+    for stamp in (100.65, 100.75, 100.85):
+        feed_marker(fsm, stamp, [image_only_detection()])
+        handler.execute()
+    clock[0] += 16.0
+    feed_marker(fsm, clock[0] - 0.05, [image_only_detection()])
+    assert handler.execute() is None
+    assert fsm._task_logger.events[-1][0] == "stop"
+    assert handler._blue_descent_done is True
+
+
+def test_bucket_guided_descent_selects_new_cylinder_before_floor(clock):
+    fsm = mission()
+    handler = search(fsm)
+    for stamp in (100.65, 100.75, 100.85):
+        feed_marker(fsm, stamp, [image_only_detection()])
+        handler.execute()
+    for stamp in (100.86, 100.87, 100.88):
+        feed(fsm, stamp, [image_only_detection(radius=0.10)])
+    for _ in range(4):
+        assert handler.execute() is None
+    assert handler.execute() == "SELECT_TARGET"
+    assert fsm._task_logger.events[-1][0] == "stop"
+    fsm._handle_select_target()
+    assert fsm._current_state == MissionState.CYLINDER_APPROACH
+
+
+def test_bucket_guided_descent_floor_scans_at_lower_height(clock):
+    fsm = mission()
+    altitude = [4.5]
+    fsm._bridge.get_current_position = lambda: SimpleNamespace(
+        north=40.0, east=2.0, down=-altitude[0])
+    fsm._fc.reached = lambda *_args: False
+    handler = search(fsm)
+    for stamp in (100.65, 100.75, 100.85):
+        feed_marker(fsm, stamp, [image_only_detection()])
+        handler.execute()
+    altitude[0] = 3.0
+    assert handler.execute() is None
+    assert fsm._task_logger.events[-1][0] == "stop"
+    clock[0] += 11.0
+    assert handler.execute() is None
+    goto_args = [event[1] for event in fsm._task_logger.events
+                 if event[0] == "goto"][-1]
+    assert goto_args[2] == pytest.approx(-3.0)
+
+
+def test_blue_profile_does_not_use_bucket_predescent(clock):
+    fsm = mission(profile="blue")
+    handler = search(fsm)
+    for stamp in (100.65, 100.75, 100.85):
+        feed_marker(fsm, stamp, [image_only_detection()])
+        assert handler.execute() is None
+    assert not any(event[0] == "velocity" for event in fsm._task_logger.events)
 
 
 @pytest.mark.parametrize("radius", [0.04, 0.075, 0.10, 0.125, 0.30])
