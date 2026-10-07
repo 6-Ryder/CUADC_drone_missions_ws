@@ -27,6 +27,11 @@ from drone_mission.precision_align_controller import (
 from drone_utils.progress_monitor import ProgressMonitor
 
 
+BUCKET_FINAL_HEIGHT_M = 1.1
+BUCKET_MIN_HEIGHT_M = 1.0
+BUCKET_MAX_RELEASE_HEIGHT_M = 1.2
+
+
 class DropState:
     """
     投放状态聚合 (DESCEND → DROP → ASCEND).
@@ -111,7 +116,7 @@ class DropState:
             self._enter_ascend()
 
     def _enter_descend(self):
-        drop_h = (1.6 if self._bucket_mode()
+        drop_h = (BUCKET_FINAL_HEIGHT_M if self._bucket_mode()
                   else self._fsm.get_param("drop_descend_height", 2.0))
         self._fsm.get_logger().info(f"DESCEND: 降高至 {drop_h}m")
         gate = getattr(self._fsm, "_quick_bucket_gate", None)
@@ -128,11 +133,17 @@ class DropState:
         if self._fsm.get_param("quick_drop_mode", False):
             # 快速模式: 边伺服边下降 — 不发纯垂直 goto, 下降中像素 P 控制水平对心
             self._servo_descend_active = True
-            self._fsm.get_logger().info(
-                "DESCEND: 快速模式边伺服边下降 "
-                f"(fast={float(self._fsm.get_param('drop_servo_descend_fast', 0.5)):.2f}, "
-                f"slow={float(self._fsm.get_param('drop_servo_descend_slow', 0.3)):.2f} m/s)"
-            )
+            if self._bucket_mode():
+                self._fsm.get_logger().info(
+                    "DESCEND: bucket 视觉伺服下降 "
+                    "(>3m 0.50, 3–1.9m 0.35, 1.9–1.35m 0.20, "
+                    "1.35–1.1m 0.12 m/s)")
+            else:
+                self._fsm.get_logger().info(
+                    "DESCEND: 快速模式边伺服边下降 "
+                    f"(fast={float(self._fsm.get_param('drop_servo_descend_fast', 0.5)):.2f}, "
+                    f"slow={float(self._fsm.get_param('drop_servo_descend_slow', 0.3)):.2f} m/s)"
+                )
             return
 
         # 保持水平位置, 降高
@@ -286,13 +297,13 @@ class DropState:
                     float(getattr(pos, "east", math.nan)), yaw,
                     vn, ve, vd, telemetry_stamp)):
             return GateResult("takeover", "nonfinite_telemetry")
-        if altitude < 1.5:
+        if altitude < BUCKET_MIN_HEIGHT_M:
             return GateResult("takeover", "below_safe_altitude")
         if not attitude_fresh:
             return GateResult("continue", "stale_attitude")
         if not 0 <= now - telemetry_stamp <= 0.10:
             return GateResult("continue", "stale_telemetry")
-        if not 1.5 <= altitude <= 1.7:
+        if not BUCKET_MIN_HEIGHT_M <= altitude <= BUCKET_MAX_RELEASE_HEIGHT_M:
             return GateResult("continue", "release_height")
 
         started = getattr(gate, "final_align_started_at", None)
@@ -366,16 +377,15 @@ class DropState:
             return None
         pos = self._fsm.bridge.get_current_position()
         altitude = float(self._fsm.fc.ned_to_altitude(pos.down))
-        if altitude < 1.5:
+        if altitude < BUCKET_MIN_HEIGHT_M:
             self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
             self._takeover("DESCEND: below bucket safety altitude")
             return None
         now = time.time()
         (cyl_obj, _), _ = self._bucket_current_objects()
 
-        # Enter the gate inside its 1.5–1.7 m release window. Holding at
-        # 1.72 m can leave the vehicle hovering forever just above the gate.
-        if altitude > 1.65:
+        # Enter the 1.0–1.2 m release window at the 1.1 m target.
+        if altitude > BUCKET_FINAL_HEIGHT_M:
             if cyl_obj is None:
                 last_seen = self._bucket_last_seen_at or self._start_time
                 if now - last_seen <= 2.0:
@@ -383,21 +393,15 @@ class DropState:
                 else:
                     # Continue the bounded vertical approach without inventing
                     # a horizontal target from the blue marker.
-                    descent = (float(self._fsm.get_param("drop_servo_descend_fast", 0.45))
-                               if altitude > 3.0 else
-                               (0.12 if altitude < 1.9 else
-                                float(self._fsm.get_param("drop_servo_descend_slow", 0.28))))
+                    descent = self._bucket_descent_speed(altitude)
                     self._fsm.fc.set_velocity_body(0.0, 0.0, descent)
                 return None
             self._bucket_last_seen_at = now
-            descent = (float(self._fsm.get_param("drop_servo_descend_fast", 0.45))
-                       if altitude > 3.0 else
-                       (0.12 if altitude < 1.9 else
-                        float(self._fsm.get_param("drop_servo_descend_slow", 0.28))))
+            descent = self._bucket_descent_speed(altitude)
             self._precision_aligner.step(
                 markers=[],
                 cylinders=[cyl_obj] if cyl_obj is not None else [],
-                drop_height=1.6, altitude_m=altitude,
+                drop_height=BUCKET_FINAL_HEIGHT_M, altitude_m=altitude,
                 descent_speed=descent, allow_release=False)
             return None
 
@@ -409,7 +413,7 @@ class DropState:
             self._precision_aligner.step(
                 markers=[],
                 cylinders=[cyl_obj] if cyl_obj is not None else [],
-                drop_height=1.6, altitude_m=altitude,
+                drop_height=BUCKET_FINAL_HEIGHT_M, altitude_m=altitude,
                 descent_speed=0.0, allow_release=False)
         result = self._bucket_gate_result()
         if now - self._last_descend_log_time >= 0.75:
@@ -431,6 +435,16 @@ class DropState:
             self._fsm._quick_release_intent = result.reason
             return "EXECUTE_DROP"
         return None
+
+    @staticmethod
+    def _bucket_descent_speed(altitude: float) -> float:
+        if altitude > 3.0:
+            return 0.50
+        if altitude > 1.9:
+            return 0.35
+        if altitude > 1.35:
+            return 0.20
+        return 0.12
 
     def execute(self) -> Optional[str]:
         if self._sub_state == "DESCEND_TO_DROP":

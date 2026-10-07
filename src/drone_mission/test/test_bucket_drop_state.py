@@ -49,7 +49,7 @@ def state(intent="cylinder_visual"):
             get_telemetry=lambda: SimpleNamespace(
                 velocity=SimpleNamespace(vn=0.0, ve=0.0, vd=0.0),
                 timestamp=10.0),
-            get_current_position=lambda: SimpleNamespace(north=0.0, east=0.0, down=-1.6),
+            get_current_position=lambda: SimpleNamespace(north=0.0, east=0.0, down=-1.1),
             _current_yaw=0.0,
         ),
         fc=SimpleNamespace(ned_to_altitude=lambda down: -down),
@@ -137,7 +137,55 @@ def test_bucket_descend_holds_brief_loss_then_continues_vertical_descent(monkeyp
     clock[0] = 7.0
     assert handler._execute_bucket_descend() is None
     assert reasons == []
-    assert commands[-1] == (0.0, 0.0, 0.45)
+    assert commands[-1] == (0.0, 0.0, 0.50)
+
+
+def test_bucket_descent_speed_steps_down_near_final_height():
+    handler, fsm, _calls = state()
+    altitude = [4.5]
+    fsm.bridge.get_current_position = lambda: SimpleNamespace(down=-altitude[0])
+    cylinder = SimpleNamespace(id=1, center_u=320.0, center_v=240.0)
+    handler._bucket_current_objects = lambda **_kwargs: (
+        (cylinder, Observation(10.0, 0.075)), (None, None))
+    handler._bucket_gate_result = lambda: GateResult("continue", "no_fresh_cylinder")
+    fsm.fc.set_velocity_body = lambda *_args: None
+    speeds = []
+    handler._precision_aligner.step = lambda **kwargs: speeds.append(kwargs["descent_speed"])
+
+    for height in (4.5, 2.5, 1.6, 1.2):
+        altitude[0] = height
+        assert handler._execute_bucket_descend() is None
+
+    assert speeds == [0.50, 0.35, 0.20, 0.12]
+
+
+def test_bucket_stops_and_starts_final_timer_at_1p1m(monkeypatch):
+    handler, fsm, _calls = state()
+    fsm.bridge.get_current_position = lambda: SimpleNamespace(down=-1.1)
+    commands = []
+    fsm.fc.set_velocity_body = lambda *args: commands.append(args)
+    fsm.request_takeover = lambda reason: (_ for _ in ()).throw(AssertionError(reason))
+    handler._bucket_gate_result = lambda: GateResult("continue", "no_fresh_cylinder")
+    monkeypatch.setattr("drone_mission.states.state_drop.time.time", lambda: 10.0)
+
+    assert handler._execute_bucket_descend() is None
+    assert fsm._quick_bucket_gate.final_align_started_at == 10.0
+    assert commands[-1] == (0.0, 0.0, 0.0)
+
+
+def test_bucket_gate_uses_1p0m_floor_and_1p0_to_1p2m_window(monkeypatch):
+    handler, fsm, _calls, _clock = _visual_gate_setup(monkeypatch)
+    fsm._quick_bucket_gate.final_align_started_at = 10.0
+    altitude = [0.99]
+    fsm.bridge.get_current_position = lambda: SimpleNamespace(
+        north=0.0, east=0.0, down=-altitude[0])
+
+    assert handler._bucket_gate_result().reason == "below_safe_altitude"
+    for height in (1.0, 1.1, 1.2):
+        altitude[0] = height
+        assert handler._bucket_gate_result().reason == "no_fresh_cylinder"
+    altitude[0] = 1.21
+    assert handler._bucket_gate_result().reason == "release_height"
 
 
 def _visual_gate_setup(monkeypatch, intent=None):
@@ -170,7 +218,7 @@ def _visual_gate_setup(monkeypatch, intent=None):
 def test_fresh_centered_cylinder_releases_without_blue_or_calibration(monkeypatch):
     handler, fsm, _calls, clock = _visual_gate_setup(monkeypatch)
     fsm._quick_bucket_gate.final_align_started_at = 10.0
-    centered_v = 240.0 - 0.045 * 400.0 / 1.235
+    centered_v = 240.0 - 0.045 * 400.0 / 0.735
     cylinder = SimpleNamespace(center_u=320.0, center_v=centered_v)
     handler._bucket_current_objects = lambda **_kwargs: (
         (cylinder, Observation(clock[0], 0.075)),
@@ -209,7 +257,7 @@ def test_sixteen_second_timeout_releases_without_current_visual_targets(monkeypa
 def test_timeout_does_not_release_below_safe_height(monkeypatch):
     handler, fsm, calls, clock = _visual_gate_setup(monkeypatch, "cylinder_timeout")
     fsm._quick_bucket_gate.final_align_started_at = 0.0
-    fsm.bridge.get_current_position = lambda: SimpleNamespace(north=0.0, east=0.0, down=-1.4)
+    fsm.bridge.get_current_position = lambda: SimpleNamespace(north=0.0, east=0.0, down=-0.9)
     reasons = []
     fsm.request_takeover = reasons.append
     clock[0] = 17.0
