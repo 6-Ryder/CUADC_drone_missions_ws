@@ -409,6 +409,25 @@ def test_bucket_servo_uses_camera_to_rim_distance_from_measured_heights():
                         40.0 * 1.235 / 400.0, abs_tol=1e-9)
 
 
+def test_bucket_low_altitude_servo_does_not_switch_to_blue_marker():
+    fsm = _Fsm({
+        "quick_drop_profile": "bucket",
+        "precision_align_continuous_enable": True,
+    })
+    controller = PrecisionAlignController(fsm)
+    controller.reset()
+    controller.step(markers=[{
+        "confidence": 0.99,
+        "center_u": 800.0,
+        "center_v": 480.0,
+    }], cylinders=[], drop_height=1.6, altitude_m=1.6,
+        descent_speed=0.0, allow_release=False)
+    assert controller.last_status.source == "bucket"
+    assert controller.last_status.reason == "no_candidates"
+    assert fsm.fc.body_commands == []
+    assert fsm.fc.stop_count == 1
+
+
 def test_bucket_continuous_servo_speed_cap_decreases_with_height():
     for altitude, expected_cap in ((4.5, 0.25), (3.0, 0.14),
                                    (1.9, 0.065), (1.65, 0.065)):

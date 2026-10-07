@@ -1,5 +1,5 @@
 # 无人机自主任务飞行 — 快速投放策略参数 (真机)
-# 默认 bucket: 桶盘配对 + 连续视觉伺服降至约 1.6m + 统一门禁 + 单次双投；可选 blue 基线
+# 默认 bucket: 圆筒视觉伺服降至约 1.6m + 圆筒对心/16s 超时投放；可选 blue 基线
 # 坐标系: PX4 NED (x=前/North, y=右/East, z=下, 负值=向上)
 # 原点: 起飞点 H (world: 4, 10, 0)
 # 飞行方向: 向北 (NED north 正方向)
@@ -143,8 +143,8 @@
 
     # --- 快速投放策略 (quick_drop_mode) ---
     quick_drop_mode: true                 # 启用快速投放策略
-    quick_drop_profile: "bucket"          # 默认桶盘配对；launch 可选 blue 基线
-    bucket_calibration_valid: false       # 未完成静态量测和试投前禁止小桶自动释放
+    quick_drop_profile: "bucket"          # 默认圆筒视觉投放；launch 可选 blue 基线
+    bucket_calibration_valid: false       # 旧落点模型未标定；当前圆筒视觉/超时投放不依赖此锁
     # 以下几何为现场静态量测的中值；释放延迟与落点误差仍须实测。
     bucket_rim_height: 0.40              # m；桶口距地高度
     bucket_home_body_height: 0.40        # m；装载时 O 点距起飞地面约 40 cm
@@ -164,7 +164,7 @@
     bucket_front_bias_east: 0.0         # m；占位值，须试投验证
     bucket_rear_bias_north: 0.0         # m；占位值，须试投验证
     bucket_rear_bias_east: 0.0          # m；占位值，须试投验证
-    drop_target_source: "marker"          # 只认蓝底标识作为投放目标
+    drop_target_source: "marker"          # blue 基线使用；bucket 低空伺服固定只跟踪圆筒
     drop_align_stall_threshold: 45.0      # 停滞阈值 (raw 40 + 5 兜底)
     drop_align_stall_stable_band: 5.0     # 停滞稳定带宽 (px)
     drop_align_stall_duration: 2.0        # 停滞判定时长 (s)
