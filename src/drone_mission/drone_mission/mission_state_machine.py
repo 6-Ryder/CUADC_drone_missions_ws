@@ -424,8 +424,6 @@ class MissionFSM(Node):
         self.declare_parameter("cylinder_approach_fast_speed", 0.30)
         self.declare_parameter("cylinder_approach_slow_speed", 0.15)
         self.declare_parameter("cylinder_approach_memory_speed", 0.25)
-        self.declare_parameter("cylinder_approach_pixel_gain", 0.65)
-        self.declare_parameter("cylinder_approach_max_step", 0.45)
         self.declare_parameter("camera_fx", 539.9)
         self.declare_parameter("camera_fy", 539.9)
         self.declare_parameter("camera_cx", 640.0)
