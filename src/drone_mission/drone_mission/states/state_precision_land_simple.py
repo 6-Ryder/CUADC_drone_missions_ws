@@ -356,7 +356,13 @@ class SimplePrecisionLandState:
         )
 
     def _latch_lost_transit_target(self, altitude: float) -> None:
-        """用本帧的带符号误差锁存目标的世界位置 (供丢失后继续接近).
+        """把本帧观测融合进目标估计器, 并锁存**融合后**的位置.
+
+        做两件事:
+          1. 估计器融合 —— 观测 = 载机位置 + 机体系偏移 (旋转到 NED), 即
+             "目标此刻看起来在哪"; 卡方门在这里拒掉单帧误检, 所以单帧远跳
+             不会再直接决定"丢失后继续接近"的落点.
+          2. 把融合结果锁存为 `_lost_transit` 的目标点 (丢失后飞向它).
 
         符号取自 ServoPid 已算好的 error_forward/error_right —— 那是"从载机
         指向目标"的机体系偏差, 已经过符号标定, 与伺服同向.
