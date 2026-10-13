@@ -40,6 +40,7 @@ def generate_launch_description():
     mission_param_file = os.path.join(
         pkg_mission, "config", "mission_params_real.yaml"
     )
+    pid_tuning_file = os.path.join(pkg_mission, "config", "pid_tuning.yaml")
 
     camera_device_arg = DeclareLaunchArgument(
         "camera_device",
@@ -157,6 +158,8 @@ def generate_launch_description():
                 "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
                 "image_top_faces_forward": True,  # 真机: 画面顶朝机头
             },
+            # 伺服 PID 调参文件必须排在最后一位, 才能压过上面所有来源
+            pid_tuning_file,
         ],
         additional_env={"RCUTILS_COLORIZED_OUTPUT": "1"},
     )

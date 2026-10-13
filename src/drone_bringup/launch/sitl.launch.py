@@ -69,6 +69,7 @@ def generate_launch_description():
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
     mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
+    pid_tuning_file = os.path.join(pkg_mission, "config", "pid_tuning.yaml")
 
     # ---- 启动参数 (模型路径由 vision_params.yaml 配置) ----
 
@@ -132,17 +133,22 @@ def generate_launch_description():
         name="mission_state_machine",
         output="screen",
         emulate_tty=True,
-        parameters=[mission_param_file, {
-            "home_x": LaunchConfiguration("home_x"),
-            "home_y": LaunchConfiguration("home_y"),
-            "home_z": LaunchConfiguration("home_z"),
-            "layout_heading_deg": ParameterValue(
-                LaunchConfiguration("layout_heading_deg"), value_type=float,
-            ),
-            "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
-            "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
-            "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
-        }],
+        parameters=[
+            mission_param_file,
+            {
+                "home_x": LaunchConfiguration("home_x"),
+                "home_y": LaunchConfiguration("home_y"),
+                "home_z": LaunchConfiguration("home_z"),
+                "layout_heading_deg": ParameterValue(
+                    LaunchConfiguration("layout_heading_deg"), value_type=float,
+                ),
+                "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
+                "rc_require_arm_signal": False,  # SITL 无物理遥控器, 代码强制解锁
+                "image_top_faces_forward": False,  # gz 相机: 画面底朝机头
+            },
+            # 伺服 PID 调参文件必须排在最后一位, 才能压过上面所有来源
+            pid_tuning_file,
+        ],
         arguments=["--ros-args", "--log-level", "info"],
     )
 
