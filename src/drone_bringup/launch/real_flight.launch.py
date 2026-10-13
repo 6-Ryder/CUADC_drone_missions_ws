@@ -25,7 +25,6 @@ from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -33,12 +32,18 @@ def generate_launch_description():
     pkg_vision = get_package_share_directory("drone_vision")
     pkg_servo = get_package_share_directory("drone_servo2")
     pkg_mission = get_package_share_directory("drone_mission")
+    pkg_bringup = get_package_share_directory("drone_bringup")
 
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
     mission_param_file = os.path.join(
         pkg_mission, "config", "mission_params_real.yaml"
+    )
+    # 机体几何 (相机安装 / 机体原点离地 / 投放点): 单一来源, 见该文件头说明.
+    # 真机与 SITL 各一份且**刻意不同** (仿真相机与机体原点重合), 不可合并.
+    airframe_param_file = os.path.join(
+        pkg_bringup, "config", "airframe_params_real.yaml"
     )
     pid_tuning_file = os.path.join(pkg_mission, "config", "pid_tuning.yaml")
 
@@ -111,6 +116,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             vision_param_file,
+            airframe_param_file,
             {
                 "camera_width": 640,
                 "camera_height": 480,
@@ -147,6 +153,7 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
             mission_param_file,
+            airframe_param_file,
             {
                 "sim_mode": False,
                 "home_x": LaunchConfiguration("home_x"),

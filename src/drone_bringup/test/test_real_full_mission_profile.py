@@ -167,3 +167,42 @@ def test_real_launch_loads_profile_without_mission_value_duplication():
         "rc_require_arm_signal",
         "image_top_faces_forward",
     }
+
+
+def _launch_loads(launch_name: str, filename: str) -> bool:
+    """launch 文件里是否引用了该参数文件名 (字形匹配).
+
+    这里刻意用字面量匹配而不是解析 AST 求值: 目的是钉住"这个 launch 确实加载了
+    这份配置", 简单的字符串出现足以表达, 且解析失败时会立刻报错而不是静默通过.
+    """
+    source = (WORKSPACE / "src/drone_bringup/launch" / launch_name).read_text(
+        encoding="utf-8")
+    return filename in source
+
+
+def test_full_launches_load_their_airframe_geometry():
+    """full 两条 launch 都必须加载对应机体的 airframe_params, 且两者不同.
+
+    机体几何 (相机安装 / 机体原点离地 / 投放点) 以前只存在于 quick 的配置里,
+    于是 full 任务**用代码默认值跑**(相机偏移 0.0)。接上之后 full 才拿到真机
+    几何; 这条测试防止它再次静默脱落。
+    """
+    assert _launch_loads("real_flight.launch.py", "airframe_params_real.yaml")
+    assert _launch_loads("sitl.launch.py", "airframe_params_sitl.yaml")
+    # 真机 launch 不得加载 SITL 的几何 (反之亦然) —— 仿真相机与机体原点重合,
+    # 灌进真机等于把偏移抹成 0.
+    assert not _launch_loads("real_flight.launch.py", "airframe_params_sitl.yaml")
+    assert not _launch_loads("sitl.launch.py", "airframe_params_real.yaml")
+
+
+def test_empty_defaults_are_not_silently_used_for_geometry():
+    """真机档的机体几何必须来自 airframe 文件, 而不是空的 profile 配置.
+
+    真机相机的安装偏移是几十厘米量级; 若某天它又变回"profile 里没有、代码默认
+    0.0", 像素→米的换算会系统性放大地面误差, 而且不会有任何报错。
+    """
+    real = _parameters(REAL_PROFILE)
+    for key in ("bucket_camera_down", "bucket_home_body_height",
+                "bucket_front_forward", "bucket_rear_forward"):
+        assert key not in real, (
+            f"{key} 应只存在于 airframe_params_real.yaml, 不应回到 profile")

@@ -63,12 +63,18 @@ def generate_launch_description():
     pkg_vision = get_package_share_directory("drone_vision")
     pkg_servo = get_package_share_directory("drone_servo2")
     pkg_mission = get_package_share_directory("drone_mission")
+    pkg_bringup = get_package_share_directory("drone_bringup")
 
     # ---- 参数文件路径 ----
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
     vision_param_file = os.path.join(pkg_vision, "config", "vision_params.yaml")
     servo_param_file = os.path.join(pkg_servo, "config", "servo_params.yaml")
     mission_param_file = os.path.join(pkg_mission, "config", "mission_params.yaml")
+    # 机体几何 (相机安装 / 机体原点离地 / 投放点): 单一来源, 见该文件头说明.
+    # 真机与 SITL 各一份且**刻意不同** (仿真相机与机体原点重合), 不可合并.
+    airframe_param_file = os.path.join(
+        pkg_bringup, "config", "airframe_params_sitl.yaml"
+    )
     pid_tuning_file = os.path.join(pkg_mission, "config", "pid_tuning.yaml")
 
     # ---- 启动参数 (模型路径由 vision_params.yaml 配置) ----
@@ -97,7 +103,7 @@ def generate_launch_description():
         executable="vision_pipeline",
         name="vision_pipeline",
         output="screen",
-        parameters=[vision_param_file, {
+        parameters=[vision_param_file, airframe_param_file, {
             "home_x": LaunchConfiguration("home_x"),
             "home_y": LaunchConfiguration("home_y"),
             "layout_heading_deg": ParameterValue(
@@ -135,6 +141,7 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
             mission_param_file,
+            airframe_param_file,
             {
                 "home_x": LaunchConfiguration("home_x"),
                 "home_y": LaunchConfiguration("home_y"),
