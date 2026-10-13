@@ -1,0 +1,103 @@
+# ════════════════════════════════════════════════════════════════════════
+#  伺服 PID 调参文件 —— 真机 PID 标定的唯一改动点
+# ════════════════════════════════════════════════════════════════════════
+#
+# 本文件覆盖全部视觉伺服增益. 真机试飞标定 PID 时, 只改这一个文件即可,
+# 不需要动 mission_params_*.yaml.
+#
+# 加载方式: 4 个 launch 都把本文件排在 parameters 列表最末位, 因此它压过
+# mission_params_*.yaml 与 launch 内联 dict. 改了没反应时先查下面"生效性自检".
+#
+# ── 生效性自检 (重要) ──────────────────────────────────────────────────
+# ROS 2 参数文件的顶层 node key 必须与节点名完全一致. 若写成
+# "mission_state_machine:" 而漏掉前导斜杠, ROS 2 会 **整份静默忽略** 本文件,
+# 不报错也不警告. 因此:
+#   1. mission_fsm 启动时会打印一行 "SERVO_PID 生效参数: ..." — 逐项列出
+#      实际加载到的增益. 地面调试时先确认这一行, 再判断飞行表现.
+#   2. 若该行显示的值与预期不符, 说明本文件未被加载, 此时不要起飞调参.
+#   3. tests/test_pid_tuning_contract.py 会断言 key 与覆盖率, 构建期拦截.
+#
+# ── 三个误差域 (为什么是三套增益而不是一套) ────────────────────────────
+# 控制系统按误差单位分为三域, 各自独立整定; 三域的积分时间 Ki 与微分时间
+# Kd 已按同一原则取齐 (Ti = Kp/Ki = 5 s, Td = Kd/Kp ≈ 0.12 s):
+#
+#   米制域   — 误差单位 m.    PrecisionAlignController 连续模式 (真机主用路径)
+#   归一化域 — 误差单位 图像高/宽的比例. PrecisionAlignController 步进模式
+#             (precision_align_continuous_enable=false 时的回退路径)
+#   像素域   — 误差单位 px.   投放内联伺服 + 两处降落伺服
+#
+# ── 参数整定依据 ──────────────────────────────────────────────────────
+# 被控对象: 速度指令 → 位置, 近似积分环节 (PX4 速度环 MPC_XY_VEL_I_ACC=0.4
+# 已把速度稳态误差消掉, 故外环看到的是 "纯积分 + 纯延迟").
+#
+# 延迟预算 ≈ 0.3-0.5 s (曝光 + 推理 + 发布 + DDS + PX4 响应).
+# 真机视觉 3-5 Hz, FSM tick 20 Hz —— 控制器按"新测量"推进积分/微分,
+# 不按 tick 推进, 否则同一份误差会被重复累加 4-7 次.
+#
+#   Kp: 沿用原纯 P 值. 这部分本就已经调稳, 不动.
+#   Ki: 取 Ti = 5 s. 规则: Ti ≥ 8-10 倍环路延迟. 延迟 0.5 s → Ti ≥ 4-5 s.
+#       Ti 再小会与延迟打架产生振荡; 再大则常值扰动收敛过慢.
+#   Kd: 取 Td ≈ 0.12 s, 明显小于 0.33 s 采样周期 (采样系统里 Td 接近采样
+#       周期会放大噪声). 配合 alpha=0.30 低通, 实测噪声抑制约 82%.
+#
+# ── 整定顺序 (真机试飞时按此顺序) ─────────────────────────────────────
+#   1. 先确认启动日志的 "SERVO_PID 生效参数" 一行与预期一致.
+#   2. Ki=Kd=0 跑一架次 → 应与你熟悉的原纯 P 行为一致 (基准).
+#   3. 只加 Ki (Kd 仍为 0), 从标称值减半起试 → 看常值偏差是否收敛变快、
+#      有无低频摆动. 出现摆动就把 Ki 再减半.
+#   4. 最后加 Kd (从标称值减半起试) → 看接近目标时是否更"收得住"、
+#      有无高频抖动. 抖动就减小 Kd 或减小 servo_derivative_alpha.
+#   5. 任一步出现异常, 直接回退该参数到上一架次的值, 不要同时改多个.
+#
+# ── 命名占用说明 (重要, 易踩) ─────────────────────────────────────────
+# servo_kp / servo_ki / servo_kd 这三个名字在 **另一个节点** 上也存在:
+# drone_vision 的 vision_pipeline 声明了同名参数 (vision_pipeline.py:290-292,
+# 值 0.5/0.02/0.1, 来自 vision_params.yaml:83-85), 服务于 B4 (2026-08-07)
+# 已停用的那个内嵌视觉伺服 PID.
+#
+# ROS 2 参数按节点隔离, 两者互不影响 —— 但由此产生两个陷阱:
+#   1. 往 vision_params.yaml 里写 servo_kp **不会**影响任务伺服, 反之亦然.
+#      调任务伺服只认本文件; 本文件顶层的 /mission_state_machine 也不会
+#      作用到视觉节点.
+#   2. 若某个 launch 误把本文件同时喂给 vision_pipeline 节点, 会静默把
+#      0.40/0.08/0.05 套到视觉节点上. 因此本文件**只能**接给
+#      mission_state_machine 节点.
+# tests/test_pid_tuning_contract.py 会断言这一点.
+#
+# ════════════════════════════════════════════════════════════════════════
+
+/mission_state_machine:
+  ros__parameters:
+
+    # ── 米制域: PrecisionAlignController 连续模式 (真机主用) ──────────
+    # 误差单位 m. 原 precision_align_ground_kp 的 P 值保持不变.
+    servo_kp: 0.40                 # 比例增益 [(m/s) per m]
+    servo_ki: 0.08                 # 积分增益 [(m/s) per (m·s)]  Ti = Kp/Ki = 5 s
+    servo_kd: 0.05                 # 微分增益 [(m/s) per (m/s)]  Td = Kd/Kp = 0.125 s
+    servo_max_speed: 0.25          # 水平合速度上限 [m/s] (原 precision_align_max_speed)
+    servo_min_speed: 0.012         # 最小有效修正速度 [m/s] (原 precision_align_min_correction_speed)
+
+    # ── 归一化域: PrecisionAlignController 步进模式 (非连续回退路径) ──
+    # 误差单位 = 图像高/宽的比例. 仅在 precision_align_continuous_enable=false 时生效.
+    servo_norm_kp: 1.25            # 原 precision_align_gain
+    servo_norm_ki: 0.25            # Ti = 5 s
+    servo_norm_kd: 0.15            # Td = 0.12 s
+
+    # ── 像素域: 投放内联伺服 + 降落伺服 ──────────────────────────────
+    # 误差单位 px. 原 landing_servo_kp_pixel 的 P 值保持不变.
+    servo_px_kp: 0.0025            # 比例增益 [(m/s) per px]
+    servo_px_ki: 0.0005            # 积分增益 [(m/s) per (px·s)]  Ti = 5 s
+    servo_px_kd: 0.0003            # 微分增益 [(m/s) per (px/s)]  Td = 0.12 s
+    servo_px_max_speed: 0.35       # 水平合速度上限 [m/s] (原 landing_servo_max_horizontal_vel)
+
+    # ── 两域共用: 抗饱和与滤波 ────────────────────────────────────────
+    # 积分项对输出速度的贡献上限 [m/s]. 硬钳位, 与"条件积分"配合:
+    # 后者阻止饱和发生, 前者限制最坏情况. 真机低空检测会成串丢失
+    # (lost_frames 最多计到 48 帧), 此值是丢帧期间的最后一道防线.
+    servo_integral_limit: 0.10
+    # 微分项一阶低通系数 (0,1]. 1.0=不滤波. 像素抖动约 30px 时
+    # 原始微分几乎全是噪声, 必须滤波. 越小滤波越强但相位滞后越大.
+    servo_derivative_alpha: 0.30
+    # 积分分离带, 单位与误差一致. 误差超过该值时停止积分, 避免大误差段
+    # 的积分在接近目标时变成过冲. 0 = 不启用 (默认, 由饱和判定已覆盖).
+    servo_integral_band: 0.0
