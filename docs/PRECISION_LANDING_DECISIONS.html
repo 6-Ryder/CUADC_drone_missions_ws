@@ -1,0 +1,407 @@
+<title>精准降落改造待决策项</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+
+<style>
+/* ─────────────────────────────────────────────────────────────────────
+   设计计划 (token)
+   色彩: 冷调纸面 + 蓝图墨蓝 + 仪表琥珀 —— 取自航空检查单/仪表铭牌的
+        现实材料 (琥珀=注意, 红=警告), 而非通用配色。
+   字体: 拉丁用 IBM Plex 家族 (技术文档血统), 中文用 Noto Sans SC;
+        数据/编号/参数名一律 Plex Mono。三个角色, 一个体系。
+   布局: 单栏决策登记册, 每条一项带左侧编号轨与优先级铭牌;
+        顶部放"最小解锁路径"告知牌。
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  --paper:      #f4f6f8;
+  --surface:    #ffffff;
+  --surface-2:  #e9eef3;
+  --ink:        #16222e;
+  --ink-2:      #4a5c6b;
+  --ink-3:      #7b8b98;
+  --rule:       #cdd8e1;
+  --rule-2:     #e3eaef;
+  --blueprint:  #0d3b66;
+  --amber:      #9a6100;
+  --amber-bg:   #fdf2dd;
+  --alert:      #a4123f;
+  --alert-bg:   #fdeaef;
+  --ready:      #1d6b4a;
+  --ready-bg:   #e6f3ec;
+  --shadow:     0 1px 2px rgba(13, 59, 102, .06), 0 6px 18px rgba(13, 59, 102, .05);
+
+  --f-body: "IBM Plex Sans", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  --f-disp: "IBM Plex Sans Condensed", "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --measure: 68ch;
+  --gut: clamp(1.1rem, 4vw, 3rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper:     #0f151b;
+    --surface:   #161e26;
+    --surface-2: #1e2833;
+    --ink:       #e8eef4;
+    --ink-2:     #a8b8c6;
+    --ink-3:     #78899a;
+    --rule:      #2c3a47;
+    --rule-2:    #22303b;
+    --blueprint: #8fc0ef;
+    --amber:     #e3ae5c;
+    --amber-bg:  #2c2314;
+    --alert:     #f08aa8;
+    --alert-bg:  #2e1720;
+    --ready:     #6fc79c;
+    --ready-bg:  #14261e;
+    --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper:     #0f151b;
+  --surface:   #161e26;
+  --surface-2: #1e2833;
+  --ink:       #e8eef4;
+  --ink-2:     #a8b8c6;
+  --ink-3:     #78899a;
+  --rule:      #2c3a47;
+  --rule-2:    #22303b;
+  --blueprint: #8fc0ef;
+  --amber:     #e3ae5c;
+  --amber-bg:  #2c2314;
+  --alert:     #f08aa8;
+  --alert-bg:  #2e1720;
+  --ready:     #6fc79c;
+  --ready-bg:  #14261e;
+  --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.62;
+  padding-inline: var(--gut);
+  padding-block: clamp(1.5rem, 4vw, 3.5rem) 4rem;
+}
+.wrap { max-width: 62rem; margin: 0 auto; display: flex; flex-direction: column; gap: 2.6rem; }
+.prose { max-width: var(--measure); }
+
+/* ── 页头 ───────────────────────────────────────────────────────────── */
+header { display: flex; flex-direction: column; gap: .9rem; }
+.eyebrow {
+  font-family: var(--f-mono); font-size: .72rem; font-weight: 500;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3);
+}
+h1 {
+  font-family: var(--f-disp); font-weight: 700; text-wrap: balance;
+  font-size: clamp(1.9rem, 5vw, 2.9rem); line-height: 1.1;
+  letter-spacing: -.01em; margin: 0; color: var(--blueprint);
+}
+.lede { font-size: 1.06rem; color: var(--ink-2); margin: 0; max-width: var(--measure); }
+.meta {
+  display: flex; flex-wrap: wrap; gap: .4rem .5rem; align-items: center;
+  font-family: var(--f-mono); font-size: .76rem; color: var(--ink-2);
+  border-top: 1px solid var(--rule); padding-top: .9rem;
+}
+.meta b { font-weight: 600; color: var(--ink); }
+.meta span { color: var(--ink-3); }
+
+/* ── 告知牌 ─────────────────────────────────────────────────────────── */
+.callout {
+  background: var(--amber-bg); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+  border-left: 4px solid var(--amber);
+  padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: .55rem;
+}
+.callout h2 {
+  font-family: var(--f-disp); font-size: 1.05rem; font-weight: 700;
+  margin: 0; color: var(--amber); letter-spacing: .01em;
+}
+.callout p { margin: 0; font-size: .95rem; color: var(--ink); max-width: var(--measure); }
+.callout ol { margin: .2rem 0 0; padding-left: 1.3rem; font-size: .95rem; display: flex; flex-direction: column; gap: .3rem; }
+
+/* ── 决策登记册 ─────────────────────────────────────────────────────── */
+section { display: flex; flex-direction: column; gap: 1.1rem; }
+h2.sect {
+  font-family: var(--f-disp); font-size: 1.35rem; font-weight: 700; margin: 0;
+  color: var(--blueprint); display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap;
+}
+h2.sect small { font-family: var(--f-mono); font-size: .74rem; font-weight: 400; color: var(--ink-3); letter-spacing: .05em; }
+
+.items { display: flex; flex-direction: column; gap: 1rem; }
+.item {
+  background: var(--surface); border: 1px solid var(--rule-2);
+  box-shadow: var(--shadow);
+  display: grid; grid-template-columns: 3.6rem 1fr; align-items: stretch;
+}
+.item .rail {
+  background: var(--surface-2); border-right: 1px solid var(--rule-2);
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding: .95rem .3rem; gap: .5rem;
+}
+.item .id {
+  font-family: var(--f-mono); font-weight: 600; font-size: .95rem; color: var(--blueprint);
+}
+.item .body { padding: 1rem 1.15rem 1.15rem; display: flex; flex-direction: column; gap: .7rem; }
+.item h3 {
+  font-family: var(--f-disp); font-size: 1.12rem; font-weight: 700; margin: 0;
+  line-height: 1.3; text-wrap: balance;
+}
+.item h3 .as {
+  font-family: var(--f-body); font-size: .92rem; font-weight: 400; color: var(--ink-2);
+}
+dl { margin: 0; display: grid; grid-template-columns: 5.6rem 1fr; gap: .35rem .9rem; font-size: .95rem; }
+dt { font-family: var(--f-mono); font-size: .74rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding-top: .22rem; }
+dd { margin: 0; color: var(--ink); }
+dd.soft { color: var(--ink-2); }
+dl .wide { grid-column: 2; }
+
+/* 铭牌 */
+.plate {
+  font-family: var(--f-mono); font-size: .66rem; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: .16rem .42rem; border: 1px solid currentColor; white-space: nowrap;
+}
+.plate.now { color: var(--alert); background: var(--alert-bg); }
+.plate.mid { color: var(--amber); background: var(--amber-bg); }
+.plate.low { color: var(--ink-3); background: var(--surface-2); }
+.rail .plate { writing-mode: vertical-rl; letter-spacing: .16em; padding: .42rem .16rem; }
+
+/* 参数名 */
+code, .p {
+  font-family: var(--f-mono); font-size: .88em;
+  background: var(--surface-2); padding: .06em .34em; border-radius: 2px;
+  color: var(--ink); word-break: break-word;
+}
+
+/* ── 状态表 ─────────────────────────────────────────────────────────── */
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+caption { text-align: left; font-family: var(--f-mono); font-size: .74rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding-bottom: .5rem; }
+th, td { text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--rule-2); vertical-align: top; }
+th { font-family: var(--f-mono); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule-2); box-shadow: var(--shadow); }
+
+/* ── 页脚 ───────────────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--rule); padding-top: 1rem;
+  font-size: .88rem; color: var(--ink-2); display: flex; flex-direction: column; gap: .5rem;
+}
+footer .src { font-family: var(--f-mono); font-size: .8rem; color: var(--ink-3); }
+
+@media (max-width: 34rem) {
+  .item { grid-template-columns: 1fr; }
+  .item .rail {
+    flex-direction: row; justify-content: flex-start; gap: .7rem;
+    border-right: 0; border-bottom: 1px solid var(--rule-2); padding: .55rem .9rem;
+  }
+  .rail .plate { writing-mode: horizontal-tb; letter-spacing: .1em; }
+  dl { grid-template-columns: 1fr; gap: .15rem; }
+  dt { padding-top: .5rem; }
+  dl .wide { grid-column: 1; }
+}
+@media print {
+  body { background: #fff; padding: 0; font-size: 10.5pt; }
+  .wrap { gap: 1.4rem; max-width: none; }
+  .item, .scroll, .callout { box-shadow: none; break-inside: avoid; }
+  .lede, footer { max-width: none; }
+}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">视觉精准降落改造 · 决策登记</div>
+    <h1>精准降落改造待决策项</h1>
+    <p class="lede">
+      代码侧我能独立完成的部分已经收口：本会话 27 个提交全部推送、四套测试通过。下面这六件事
+      <b>我无法替你决定</b>——它们要么需要现场实测数据，要么会改动已验证的真机行为，要么要动飞控固件。
+      每条都写明：现在是什么状态、需要你做什么、不做会怎样。
+    </p>
+    <div class="meta">
+      <span>分支</span><b>Optimization</b>
+      <span>·</span>
+      <span>提交</span><b>27</b>
+      <span>·</span>
+      <span>验证级别</span><b>L1 × 18 · L0 × 7 · L4 × 0</b>
+      <span>·</span>
+      <span>整理于</span><b>2026-10-13</b>
+    </div>
+  </header>
+
+  <div class="callout">
+    <h2>只想做最少的事？只做 U2</h2>
+    <p>
+      六项里只有 <b>U2（一组实测数据）</b> 是真的卡住整条链的。拿到它之后：
+    </p>
+    <ol>
+      <li>我按实测抖动标定估计器的两个门限；</li>
+      <li>门限确定后，U1 的开关才有一个有依据的默认值；</li>
+      <li>再做一次飞行，从日志里读四个数（成熟帧数、门拒绝计数与残差、继续接近是否触发、落点误差）；</li>
+      <li>到这一步，才算<b>验证</b>——目前全部 27 个提交<b>没有一条达到 L4</b>。</li>
+    </ol>
+    <p>U3、U6 可以一直搁置：它们不影响上面任何一步。</p>
+  </div>
+
+  <section>
+    <h2 class="sect">决策登记册 <small>U1–U6，按阻塞程度排序</small></h2>
+
+    <div class="items">
+
+      <article class="item">
+        <div class="rail"><span class="id">U2</span><span class="plate now">最阻塞</span></div>
+        <div class="body">
+          <h3>一组实测数据 <span class="as">—— 用于标定估计器的门宽</span></h3>
+          <dl>
+            <dt>现状</dt>
+            <dd>估计器的两个关键参数是<b>推算值</b>，不是实测值：<code>landing_estimator_meas_unc_tan2</code>
+              默认 <code>5e-4</code>（由「约 9 像素抖动」反推）、<code>landing_estimator_acc_psd</code>
+              默认 <code>0.01</code>（由「丢线 2 秒后愿意接受 0.3 米位移」反推）。</dd>
+            <dt>需要你</dt>
+            <dd><b>① 悬停时的检测抖动</b>：让飞机在 H 标识正上方悬停 30–60 秒，记录检测中心像素坐标，
+              给出标准差（最好分高度档：约 1 / 2 / 3 / 5 米各一次）。<br>
+              <b>② 典型丢帧分布</b>：同一段日志里相邻检测帧的时间间隔统计（均值、最大值）。</dd>
+            <dt>不做</dt>
+            <dd class="soft">U1 的门无法打开——门限猜错时，「门太紧」会让真测量被拒，表现为目标看起来丢失、
+              飞机悬停兜底。那是安全但不理想的结局，所以不会带着猜的值默认打开。</dd>
+            <dt>形式</dt>
+            <dd class="soft">一张表格或一段日志摘录都可以；我只需要数值，不需要你分析。</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="item">
+        <div class="rail"><span class="id">U1</span><span class="plate mid">中</span></div>
+        <div class="body">
+          <h3>是否打开伺服的「异常帧剔除」 <span class="as">—— 一个开关</span></h3>
+          <dl>
+            <dt>现状</dt>
+            <dd>机制已实现、已测试，默认<b>关闭</b>（<code>landing_servo_estimator_gate_enable=false</code>）。
+              开启后，与滤波器预测严重不符的帧不再驱动伺服。</dd>
+            <dt>证据</dt>
+            <dd>台面仿真（<code>scripts/landing_desk_sim.py</code>）：单帧误检基本无害（约 1.2 厘米，回路自己吸收）；
+              持续误检的额外偏移有界，最多约 18 厘米；<b>开关把它降低 70–90%</b>。
+              但该模型<b>复现不出</b>记录里那种戏剧性振荡——所以证据支持「有用且无害」，
+              不足以支持「打开就解决」。</dd>
+            <dt>需要你</dt>
+            <dd>决定：现在打开、等 U2 数据后打开、还是先不打开。</dd>
+            <dt>不做</dt>
+            <dd class="soft">保持现状：低空误检仍会全权驱动伺服。</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="item">
+        <div class="rail"><span class="id">U3</span><span class="plate low">可搁置</span></div>
+        <div class="body">
+          <h3>是否接受「改飞控配置 + 重刷固件」 <span class="as">—— 解锁两项能力</span></h3>
+          <dl>
+            <dt>现状</dt>
+            <dd>ROS2 侧读不到机体角速度：<code>dds_topics.yaml</code> 第 56 行的
+              <code>/fmu/out/vehicle_angular_velocity</code> 是<b>注释掉的</b>（同文件只启用了姿态与里程计）。
+              该 DDS 话题清单在构建时被生成成头文件编进固件，所以加话题＝重刷。</dd>
+            <dt>解锁</dt>
+            <dd>① 振动/机动时自动给相机测量降权（对应 9/27 那次陀螺 245× 阈值的事故形态）；
+              ② PX4 原生精准降落流水线（另需同时打开出向的 <code>landing_target_pose</code>）。</dd>
+            <dt>代价</dt>
+            <dd>飞控是<b>冻结基线</b>（params_v4），换镜像意味着整套参数与标定要重新复验。</dd>
+            <dt>不做</dt>
+            <dd class="soft">这两项搁置。<b>其余所有已交付的改动都不需要动固件</b>——全部在 ROS2 侧。</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="item">
+        <div class="rail"><span class="id">U4</span><span class="plate mid">中</span></div>
+        <div class="body">
+          <h3>仿真是否复现真机的降落路径 <span class="as">—— 影响仿真的可信度</span></h3>
+          <dl>
+            <dt>现状</dt>
+            <dd>真机 quick 档与 SITL <b>刻意不同</b>：<code>landing_blind_stable_frames</code>
+              真机为 1、SITL 为 10，且 SITL 保留了真机已关闭的圆形几何交接（有测试注明「SITL 档独立」）。</dd>
+            <dt>需要你</dt>
+            <dd>决定是否把 SITL 对齐到真机档。对齐后仿真<b>可能开始失败</b>——但那正是真机那条路径的回归，
+              而现在它在仿真里看不见，而历史失败正集中在那一带。</dd>
+            <dt>不做</dt>
+            <dd class="soft">保持现状：真机降落路径的改动只能靠真机发现。</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="item">
+        <div class="rail"><span class="id">U5</span><span class="plate low">低</span></div>
+        <div class="body">
+          <h3>是否投入做「误检注入」的 SITL 场景</h3>
+          <dl>
+            <dt>现状</dt>
+            <dd>台面仿真已给出 L1 级证据。我判定<b>不再往下做</b>，理由记在
+              <code>docs/PRECISION_LANDING_PLAN.md</code> §4：那条失败机理（悬停→检测恢复→再下降→再丢失的自持循环）
+              已于 2026-08-15 由 B1+A 修复，且已在本分支。</dd>
+            <dt>需要你</dt>
+            <dd>只有当你认为还需要第二层验证时才投入；否则跳过。</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="item">
+        <div class="rail"><span class="id">U6</span><span class="plate low">低</span></div>
+        <div class="body">
+          <h3>核对 CUAV 7-Nano 板型</h3>
+          <dl>
+            <dt>需要</dt>
+            <dd>板型的准确 <code>.px4board</code> 名称。之后我可以自己查：该板是否编入了
+              <code>CONFIG_MODULES_LANDING_TARGET_ESTIMATOR</code>。</dd>
+            <dt>影响</dt>
+            <dd class="soft">只决定「路径 B（PX4 原生精准降落）」是否可行，不影响上面任何一项。</dd>
+          </dl>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sect">代码侧现状 <small>已完成，但未验证</small></h2>
+    <div class="scroll">
+      <table>
+        <caption>四套测试基线（失败均为既有的生成代码 lint，不是回归）</caption>
+        <thead>
+          <tr><th>包</th><th>通过</th><th>失败</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>drone_mission</td><td class="num">279</td><td class="num">2</td><td>降落状态机、投放、任务 FSM</td></tr>
+          <tr><td>drone_utils</td><td class="num">114</td><td class="num">2</td><td>伺服 PID、降落剖面、估计器、位姿历史</td></tr>
+          <tr><td>drone_bringup</td><td class="num">86</td><td class="num">2</td><td>launch 与参数装配契约</td></tr>
+          <tr><td>drone_vision</td><td class="num">87</td><td class="num">2</td><td>视觉管线与检测契约</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose" style="font-size:.93rem; color:var(--ink-2); margin:0;">
+      本会话交付的主线：视觉测量的<b>采集时刻</b>贯通（含给降落目标消息加时间戳）、降落目标的<b>龄期门</b>、
+      目标<b>状态估计器</b>（卡方离群门 + 播种保护 + 丢线重置）、丢失后<b>继续飞向最后已知位置</b>、
+      近地<b>降速调度</b>、搜索高度<b>命令式化</b>、盲降<b>时间界</b>、参数完整性<b>双向契约</b>、
+      机体几何<b>独立成文件</b>。台面仿真顺带抓出并修掉一个真实缺陷：同一份测量被重复融合 4–7 次。
+    </p>
+  </section>
+
+  <footer>
+    <div>
+      <b>术语</b>：<b>L0</b> 静态审阅 · <b>L1</b> 单元测试 · <b>L4</b> 硬件在环/真机。
+      <b>台面仿真</b>指 <code>scripts/landing_desk_sim.py</code>——在电脑里跑真实的降落控制代码，
+      载机用一阶模型近似；它验证控制律，<b>不</b>验证 PX4 动力学。
+      <b>门限</b>指估计器判断「这一帧检测是否可信」的两个参数。
+    </div>
+    <div class="src">
+      仓库内权威来源：docs/PRECISION_LANDING_PLAN.md（进度与决策）·
+      docs/PRECISION_LANDING_AUTHORITY.md（调研与证据）
+    </div>
+  </footer>
+
+</div>
