@@ -48,7 +48,11 @@ class _Bridge:
         self.land_calls = 0
         self.force_disarm_calls = 0
         self._armed = True
-        self._pos = type("P", (), {"down": -self._alt})()
+        # 与 px4_control.telemetry.Position 同形: 降落链路会读 north/east
+        # (丢失后继续飞向最后已知位置的锁存点), 只给 down 不够.
+        self._pos = type("P", (), {"north": 0.0, "east": 0.0,
+                                   "down": -self._alt})()
+        self._current_yaw = 0.0
 
     def is_landed(self):
         return self._landed
@@ -358,6 +362,80 @@ def test_servo_integrates_by_measurement_interval_not_tick_count():
     for _ in range(5):
         state._execute_servo(has_target=True)
     assert state._servo_pid.integral[1] == pytest.approx(0.002 * 50.0 * 0.33)
+
+
+def test_lost_target_transits_to_last_known_position_in_metres():
+    """丢失目标后继续飞向最后已知位置, 且偏移量按米计 (不是像素).
+
+    先在有效帧锁存, 再丢目标: 状态应给出朝该点的横向速度而非 (0,0).
+    断言同时钉住量级 —— 若把 ServoPidStatus 的**像素**误差直接当米用,
+    得到的锁存点会差 2-3 个数量级 (这里 50px @ 5.0m/400 ≈ 0.625m).
+    """
+    fsm = _SimpleFSM({
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.5,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+    })
+    fsm._target = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    state._execute_servo(has_target=True)
+    latched = state._lost_transit.target
+    assert latched is not None
+    # du=50px, 高度 5.0m, fx=400 → 右向偏移 ≈ 0.625 m (east, yaw=0)
+    assert latched[0] == pytest.approx(0.0, abs=1e-6)
+    assert latched[1] == pytest.approx(50.0 * 5.0 / 400.0, abs=1e-6)
+
+    # 丢失目标: 不再悬停, 而是朝锁存点横向移动, 且不下降
+    fsm._target = None
+    state._execute_servo(has_target=False)
+    forward, right, descent = fsm.fc.calls[-1]
+    assert right > 0.0
+    assert forward == pytest.approx(0.0, abs=1e-9)
+    assert descent == 0.0
+    assert right <= float(fsm.get_param("landing_lost_transit_max_speed", 0.15))
+
+
+def test_lost_target_holds_position_below_transit_min_altitude():
+    """近地丢目标不做横向机动 (对齐 ArduPilot PLND_ALT_MIN 的取舍).
+
+    离地很近时的未知横向移动风险大于收益: 此时应保持原位, 由既有的
+    丢失计时器决定兜底.
+    """
+    fsm = _SimpleFSM({
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.2,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "landing_lost_transit_min_altitude": 0.75,
+    })
+    fsm.bridge._pos = type("P", (), {"north": 0.0, "east": 0.0, "down": -0.4})()
+    fsm._target = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    state._execute_servo(has_target=True)
+    fsm._target = None
+    state._execute_servo(has_target=False)
+
+    assert fsm.fc.calls[-1] == (0.0, 0.0, 0.0)
+
+
+def test_lost_target_transit_reset_on_enter():
+    """换相进入降落时必须清锁存, 否则上一段的点会继续驱动."""
+    fsm = _SimpleFSM({})
+    state = SimplePrecisionLandState(fsm)
+    state._lost_transit.latch(0.0, 0.0, 0.0, 1.0, 1.0)
+    assert state._lost_transit.has_target is True
+
+    state.enter()
+    assert state._lost_transit.has_target is False
 
 
 def test_servo_rejects_low_confidence_target_and_holds_position():

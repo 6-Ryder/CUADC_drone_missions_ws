@@ -452,6 +452,13 @@ class MissionFSM(Node):
         self.declare_parameter("landing_descent_medium", 0.25)
         self.declare_parameter("landing_descent_slow", 0.12)
         self.declare_parameter("landing_blind_descent_speed", 0.30)
+        # 丢失目标后继续飞向"最后已知位置" (PX4 precland 水平接近段语义).
+        # 速度取保守值: 这段是在没有测量的情况下飞行.
+        self.declare_parameter("landing_lost_transit_max_speed", 0.15)
+        self.declare_parameter("landing_lost_transit_tolerance", 0.15)
+        # 低于此高度不再横向接近, 只保持垂直 (对齐 ArduPilot PLND_ALT_MIN=0.75:
+        # 近地丢目标不再重试, 避免在离地很近时做未知的横向机动).
+        self.declare_parameter("landing_lost_transit_min_altitude", 0.75)
         self.declare_parameter("landing_blind_timeout", 45.0)
         self.declare_parameter("landing_search_progress_window", 15.0)
         self.declare_parameter("landing_touchdown_max_altitude", 0.10)

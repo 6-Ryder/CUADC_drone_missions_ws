@@ -25,6 +25,7 @@ import math
 import time
 from typing import Optional
 
+from drone_utils.lost_target_transit import LostTargetTransit
 from drone_utils.servo_pid import ServoPid
 
 
@@ -53,6 +54,13 @@ class SimplePrecisionLandState:
         self._px4_land_requested: bool = False
         # 像素域伺服 PID, 跨帧持久; enter() 时 reset 清积分/微分历史
         self._servo_pid = self._new_servo_pid()
+        # 丢失目标后继续飞向最后已知位置 (见 _lost_transit_command)
+        self._lost_transit = LostTargetTransit(
+            max_speed=float(self._fsm.get_param(
+                "landing_lost_transit_max_speed", 0.15)),
+            tolerance=float(self._fsm.get_param(
+                "landing_lost_transit_tolerance", 0.15)),
+        )
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -64,6 +72,7 @@ class SimplePrecisionLandState:
         self._servo_converged = 0
         self._visual_alignment_latched = False
         self._servo_pid.reset()
+        self._lost_transit.reset()
         self._vertical_only_latched = False
         self._handoff_stable_frames = 0
         self._last_target_center = None
@@ -204,11 +213,16 @@ class SimplePrecisionLandState:
             return None
 
         if target is None:
-            # 目标丢失 → 悬停等待恢复; 通知 PID 冻结积分/清微分历史,
-            # 否则恢复时会把丢失前的误差斜率接上
+            # 目标丢失: 通知 PID 冻结积分/清微分历史 (否则恢复时会把丢失前的
+            # 误差斜率接上), 并**继续飞向最后已知位置**而非原地悬停 ——
+            # PX4 precland 水平接近段的语义是"途中丢失不悬停、不判失败,
+            # 到达最后目击点仍看不到才评估丢失" (precland.cpp:584-597).
+            # 原来的"拒绝一帧 → 悬停 → 超时 → 接管/异地降落"正是 8/12-14 的
+            # 失败链条. 纵轴保持不下降 (与权威的水平接近段一致).
             self._servo_pid.update(
                 0.0, 0.0, self._now(), measurement_valid=False)
-            self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+            self._fsm.fc.set_velocity_body(
+                *self._lost_transit_command(altitude), 0.0)
             self._servo_converged = 0
             self._handoff_stable_frames = 0
         else:
@@ -257,6 +271,8 @@ class SimplePrecisionLandState:
             forward, right = self._servo_pid.update(
                 float(dv), float(du),
                 self._fsm.vision_measurement_stamp("landing"))
+            # 每帧有效测量都刷新"最后已知位置" (丢失后继续接近的落点)
+            self._latch_lost_transit_target(altitude)
 
             # 未通过视觉锁存时，不得穿过盲降交接高度。
             blind_alt = float(self._fsm.get_param("landing_blind_altitude", 0.5))
@@ -300,6 +316,49 @@ class SimplePrecisionLandState:
         if altitude > 1.5:
             return float(self._fsm.get_param("landing_descent_medium", 0.25))
         return float(self._fsm.get_param("landing_descent_slow", 0.12))
+
+    def _latch_lost_transit_target(self, altitude: float) -> None:
+        """用本帧的带符号误差锁存目标的世界位置 (供丢失后继续接近).
+
+        符号取自 ServoPid 已算好的 error_forward/error_right —— 那是"从载机
+        指向目标"的机体系偏差, 已经过符号标定, 与伺服同向.
+
+        ⚠️ 单位: ServoPidStatus 里是**像素**, 本状态用的是像素域增益
+        (servo_px_*), 所以必须先按高度与焦距折成米 —— 直接把像素当米会得到
+        一个量级完全错误的锁存点 (低空 1px≈cm, 高空 1px≈数十 cm). 折算方式与
+        precision_align_controller._ground_error_m / state_cylinder_search 一致:
+        前向轴用 fy, 右向轴用 fx.
+        """
+        status = self._servo_pid.last_status
+        fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
+        fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
+        error_forward_m = float(status.error_forward) * altitude / fy
+        error_right_m = float(status.error_right) * altitude / fx
+
+        pos = self._fsm.bridge.get_current_position()
+        # nan 默认值: 拿不到航向时 latch/command 都拒绝动作, 而不是把 yaw=0
+        # 当成"机头朝北"去算出一个方向错误的指令 (与 state_drop 的读法一致).
+        yaw = float(getattr(self._fsm.bridge, "_current_yaw", math.nan))
+        self._lost_transit.latch(
+            float(pos.north), float(pos.east), yaw,
+            error_forward_m, error_right_m,
+        )
+
+    def _lost_transit_command(self, altitude: float) -> tuple:
+        """丢失目标时的机体系横向指令 (forward, right).
+
+        未锁存过目标、或已低于近地阈值时返回 (0, 0) —— 失败方向是不动作,
+        与原来的悬停行为一致, 不会凭空产生指令. 近地不做横向机动是对齐
+        ArduPilot PLND_ALT_MIN 的取舍: 离地很近时未知的横向移动风险更大.
+        """
+        min_altitude = float(self._fsm.get_param(
+            "landing_lost_transit_min_altitude", 0.75))
+        if altitude < min_altitude:
+            return (0.0, 0.0)
+        pos = self._fsm.bridge.get_current_position()
+        yaw = float(getattr(self._fsm.bridge, "_current_yaw", math.nan))
+        return self._lost_transit.command(
+            float(pos.north), float(pos.east), yaw)
 
     def _update_vertical_only_latch(
         self,
