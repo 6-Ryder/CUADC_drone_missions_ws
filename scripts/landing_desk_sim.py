@@ -3,7 +3,20 @@
 降落伺服台面仿真 —— 量出"低空误检"造成的实际横向漂移, 以及卡方门能挡掉多少.
 
 **这不是 SITL**: 载机用一阶速度环 + 位置积分近似 (含频率滞后), 检测流是脚本生成的.
-它验证的是**控制律**(伺服 + 门 + 估计器), 不是 PX4 的动力学. 结论必须按此口径引用.
+它验证的是**控制律**(伺服 + 门 + 估计器), 不是 PX4 的动力学.
+
+⚠️⚠️ **不要把本工具的数字当决策依据** —— 一次独立对抗审计核实了三处失真, 详见
+`docs/PRECISION_LANDING_PLAN.md` §4:
+  1. **时钟**: 状态内部用 `time.monotonic()`, 而本仿真比实时快约 1760 倍 → 滤波器的
+     dt 极小、过程噪声不增长、门不随仿真时间演化. 曾因此报出"门降低 70-90%"的
+     假象; 接上 SimClock 后该收益降为 0 甚至变差. **任何依赖时间的结论, 先确认时钟接对.**
+  2. **不走 FSM 分发层**: 只调 `_execute_servo()`, 从不调 `execute()` → 真机对检测
+     间隙的处置 (quick 档丢失 1.0s 即放弃精准降落) 被静默移除.
+  3. **失效模型不同**: 真机 miss 帧仍到达 (confidence=0.0) 并被置信度门在下一帧判为
+     None, 不是"旧目标一直有效".
+
+本工具的正当用途因此收缩为: **发现自相矛盾** (它已经抓出"同一份测量被重复融合"
+这个真实缺陷) 与**定性探针**; 数字不进决策.
 
 为什么值得有: 单测能证明"误检帧会让指令跳到 0.284 m/s"(刻画), 但回答不了
 "那到底把飞机带偏多少米". 这个脚本把闭环跑起来, 给出可比较的数字。
@@ -22,6 +35,7 @@ import json
 import math
 import pathlib
 import sys
+import time as _time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 for pkg in ("drone_mission", "drone_utils", "drone_vision", "px4_control"):
@@ -51,6 +65,26 @@ DROP_DURATION_S = 45.0
 AGE_GATE_S = 2.0           # 与 landing_target 龄期门同值
 FX = FY = 400.0
 CX, CY = 320.0, 240.0
+
+
+class SimClock:
+    """把 `time.monotonic` 接到**仿真时间**上的替身时钟.
+
+    为什么必须: 降落状态里的估计器 predict 与丢线复位都用 `time.monotonic()`, 而台面
+    仿真比实时快约 1760 倍 (实测: 12s 仿真时间只花 0.0068s 墙钟). 用挂钟的话滤波器
+    的 dt≈2e-5s、过程噪声不增长、协方差与门都不随仿真时间演化 —— 一切"随时间演化"
+    的结论都会变成时钟假象.
+
+    这不是理论担忧, 是实测: 同一个 16 帧误检场景, 用挂钟时门把偏移降低 50%,
+    改成仿真时钟后降为 **0%** (门根本没起作用, 因为协方差从未增长到能容纳偏差).
+    因此任何依赖时间的台面结论, 都必须先确认时钟已接对.
+    """
+
+    def __init__(self, t0: float = 1.0):
+        self.t = float(t0)
+
+    def monotonic(self) -> float:
+        return self.t
 
 
 class DeskVehicle:
@@ -110,6 +144,9 @@ def run(gate_enabled: bool, inject_fault: bool = True, latency_s=DETECT_LATENCY_
     steps = int(DURATION_S * TICK_HZ)
     vision_every = max(int(round(TICK_HZ / VISION_HZ)), 1)
 
+    clock = SimClock()
+    real_monotonic = _time.monotonic
+    _time.monotonic = clock.monotonic          # 状态内部的时钟改走仿真时间
     trace = []
     excursion = 0.0          # 误检**造成的额外偏移**, 而不是含初始条件的绝对漂移
     baseline = 0.707        # 故障开始时的漂移 (起点到目标距离)
@@ -127,6 +164,7 @@ def run(gate_enabled: bool, inject_fault: bool = True, latency_s=DETECT_LATENCY_
     fault_to = fault_from + fault_frames / VISION_HZ
     for k in range(steps):
         t = k * dt
+        clock.t = 1.0 + t
         fsm.bridge._pos = type("P", (), {
             "north": vehicle.north, "east": vehicle.east, "down": vehicle.down})()
         history.append((1.0 + t, vehicle.north, vehicle.east, vehicle.down,
@@ -165,6 +203,7 @@ def run(gate_enabled: bool, inject_fault: bool = True, latency_s=DETECT_LATENCY_
         if fault_from <= t < fault_to + 0.5:
             excursion = max(excursion, drift - baseline)
 
+    _time.monotonic = real_monotonic
     return {
         "excursion_m": max(excursion, 0.0),
         "gate_enabled": gate_enabled,
