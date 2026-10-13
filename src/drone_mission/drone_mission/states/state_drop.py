@@ -25,6 +25,7 @@ from drone_mission.precision_align_controller import (
     PrecisionAlignResult,
 )
 from drone_utils.progress_monitor import ProgressMonitor
+from drone_utils.servo_pid import ServoPid
 
 
 BUCKET_FINAL_HEIGHT_M = 1.1
@@ -69,6 +70,8 @@ class DropState:
         # 对心满足后的投放许可宽限截止时刻: 短暂丢帧不撤销已满足的对心许可
         self._centered_latch_until: float = 0.0
         self._bucket_last_seen_at: Optional[float] = None
+        # 边伺服边下降: 像素域 PID, 跨帧持久; enter() 时 reset 清积分/微分历史
+        self._servo_descend_pid = self._new_servo_descend_pid()
 
     # ---- 子状态切换 ----
 
@@ -104,6 +107,8 @@ class DropState:
         self._bucket_last_seen_at = None
         self._visual_aligner.reset()
         self._precision_aligner.reset()
+        # 每次进入状态从纯 P 起步, 不把上一个投放目标的积分偏置带进来
+        self._servo_descend_pid.reset()
         # 停滞检测: pixel_error 在低值附近振荡但无法收敛 → 提前触发最终下降
         self._stall_start_time: float = 0.0
         self._stall_ref_error: float = float("inf")
@@ -666,11 +671,37 @@ class DropState:
             return None
         return selected_positions[-1]
 
+    def _new_servo_descend_pid(self) -> ServoPid:
+        """构造像素域伺服 PID (增益契约见 config/pid_tuning.yaml).
+
+        死区来自 profile (各 profile 值不同), 符号沿用投放标定:
+        forward=机头方向, right=机体右侧.
+        """
+        return ServoPid(
+            kp=float(self._fsm.get_param("servo_px_kp", 0.0025)),
+            ki=float(self._fsm.get_param("servo_px_ki", 0.0005)),
+            kd=float(self._fsm.get_param("servo_px_kd", 0.0003)),
+            max_speed=float(self._fsm.get_param("servo_px_max_speed", 0.35)),
+            deadzone=float(self._fsm.get_param("landing_servo_deadzone_px", 12.0)),
+            sign_forward=float(
+                self._fsm.get_param("landing_servo_y_to_forward_sign", -1.0)),
+            sign_right=float(
+                self._fsm.get_param("landing_servo_x_to_right_sign", 1.0)),
+            integral_limit=float(self._fsm.get_param("servo_integral_limit", 0.10)),
+            derivative_alpha=float(
+                self._fsm.get_param("servo_derivative_alpha", 0.30)),
+            integral_band=float(self._fsm.get_param("servo_integral_band", 0.0)),
+        )
+
+    def _now(self) -> float:
+        """FSM 时钟秒 — PID 用它判定新测量与真实积分/微分步长."""
+        return self._fsm.get_clock().now().nanoseconds / 1e9
+
     def _servo_descend_tick(self, down: float) -> None:
-        """快速模式边伺服边下降单 tick: 像素 P 控制水平对心 + 分层垂直速度.
+        """快速模式边伺服边下降单 tick: 像素 PID 水平对心 + 分层垂直速度.
 
         目标选择: quick 只追蓝底标识, 取置信度达标且像素误差最小者
-        (与降落区伺服同方法: 连续像素 P 控制, 非步进脉冲).
+        (与降落区伺服同方法: 连续像素控制, 非步进脉冲).
         """
         altitude = float(self._fsm.fc.ned_to_altitude(down))
 
@@ -709,7 +740,10 @@ class DropState:
                 target = (u, v)
 
         if target is None:
-            # 目标丢失: 悬停等待恢复 (与降落区伺服一致)
+            # 目标丢失: 悬停等待恢复 (与降落区伺服一致);
+            # 必须通知 PID, 否则恢复时会把丢失前的误差斜率接上
+            self._servo_descend_pid.update(
+                0.0, 0.0, self._now(), measurement_valid=False)
             self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
             return
 
@@ -717,18 +751,8 @@ class DropState:
         du = u - cx
         dv = v - cy
 
-        # 像素 P 控制 (复用降落区伺服参数, quick 文件已配置同值)
-        kp = float(self._fsm.get_param("landing_servo_kp_pixel", 0.004))
-        max_vel = float(self._fsm.get_param("landing_servo_max_horizontal_vel", 0.6))
-        deadzone = float(self._fsm.get_param("landing_servo_deadzone_px", 12.0))
-        x_sign = float(self._fsm.get_param("landing_servo_x_to_right_sign", 1.0))
-        y_sign = float(self._fsm.get_param("landing_servo_y_to_forward_sign", -1.0))
-
-        if best_err < deadzone:
-            forward, right = 0.0, 0.0
-        else:
-            forward = max(-max_vel, min(max_vel, y_sign * kp * dv))
-            right = max(-max_vel, min(max_vel, x_sign * kp * du))
+        # 像素域 PID: 死区内输出零并冻结积分, 符号标定与合速度限幅均由 PID 承担
+        forward, right = self._servo_descend_pid.update(dv, du, self._now())
 
         # 分层垂直速度: 高空快降, 近投放高度减速保对心稳定
         if altitude > 3.0:

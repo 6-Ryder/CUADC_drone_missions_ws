@@ -16,6 +16,7 @@ import time
 from typing import Optional, List
 
 from drone_utils.progress_monitor import ProgressMonitor
+from drone_utils.servo_pid import ServoPid
 from drone_mission.quick_bucket_gate import is_bucket_search_candidate
 
 class CylinderSearchState:
@@ -40,6 +41,8 @@ class CylinderSearchState:
         self._blue_last_seen = 0.0
         self._blue_descent_started_at = 0.0
         self._search_altitude = None
+        # 蓝盘预降高: 米制域 PID, 跨帧持久; enter() 时 reset 清积分/微分历史
+        self._blue_servo_pid = self._new_blue_servo_pid()
 
     def enter(self):
         self._fsm.logger.log_state("TRANSIT_TO_DROP_ZONE", "CYL_SEARCH", "开始搜索圆筒")
@@ -57,6 +60,8 @@ class CylinderSearchState:
         self._blue_last_seen = 0.0
         self._blue_descent_started_at = 0.0
         self._search_altitude = None
+        # 每次进入搜索从纯 P 起步, 不把上一次蓝盘逼近的积分偏置带进来
+        self._blue_servo_pid.reset()
         if hasattr(self._fsm, "clear_known_cylinders"):
             self._fsm.clear_known_cylinders()
         self._min_cylinders_required = int(
@@ -213,6 +218,32 @@ class CylinderSearchState:
 
         return None
 
+    def _new_blue_servo_pid(self) -> ServoPid:
+        """构造蓝盘预降高的米制域伺服 PID (增益契约见 config/pid_tuning.yaml).
+
+        与 PrecisionAlignController 连续模式同域: 误差单位 m, 由平面距离把
+        像素偏差换算成地面偏差. 符号沿用图像→机体标定.
+        """
+        return ServoPid(
+            kp=float(self._fsm.get_param("servo_kp", 0.40)),
+            ki=float(self._fsm.get_param("servo_ki", 0.08)),
+            kd=float(self._fsm.get_param("servo_kd", 0.05)),
+            max_speed=float(self._fsm.get_param("servo_max_speed", 0.25)),
+            min_speed=float(self._fsm.get_param("servo_min_speed", 0.012)),
+            sign_forward=float(self._fsm.get_param(
+                "precision_align_image_y_to_forward_sign", -1.0)),
+            sign_right=float(self._fsm.get_param(
+                "precision_align_image_x_to_right_sign", 1.0)),
+            integral_limit=float(self._fsm.get_param("servo_integral_limit", 0.10)),
+            derivative_alpha=float(
+                self._fsm.get_param("servo_derivative_alpha", 0.30)),
+            integral_band=float(self._fsm.get_param("servo_integral_band", 0.0)),
+        )
+
+    def _now(self) -> float:
+        """FSM 时钟秒 — PID 用它判定新测量与真实积分/微分步长."""
+        return self._fsm.get_clock().now().nanoseconds / 1e9
+
     def _blue_predescent_tick(self, markers: list) -> bool:
         """Use fresh blue pixels to approach a better rim viewing height."""
         if self._blue_descent_done:
@@ -260,6 +291,9 @@ class CylinderSearchState:
             return False
 
         if target is None:
+            # 目标丢失: 通知 PID 冻结积分/清微分历史, 悬停等待恢复
+            self._blue_servo_pid.update(
+                0.0, 0.0, self._now(), measurement_valid=False)
             self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
             if now - self._blue_last_seen > 2.0:
                 self._finish_blue_predescent(now, altitude)
@@ -286,20 +320,14 @@ class CylinderSearchState:
         plane_distance = max(
             altitude + float(self._fsm.get_param("bucket_home_body_height", 0.0))
             - float(self._fsm.get_param("bucket_camera_down", 0.0)), 0.3)
-        gain = float(self._fsm.get_param("precision_align_ground_kp", 0.40))
         fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
         fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
-        forward = (gain * float(self._fsm.get_param(
-            "precision_align_image_y_to_forward_sign", -1.0))
-            * (target[1] - cy) * plane_distance / fy)
-        right = (gain * float(self._fsm.get_param(
-            "precision_align_image_x_to_right_sign", 1.0))
-            * (target[0] - cx) * plane_distance / fx)
-        max_speed = float(self._fsm.get_param("precision_align_max_speed", 0.25))
-        speed = math.hypot(forward, right)
-        if speed > max_speed > 0.0:
-            forward *= max_speed / speed
-            right *= max_speed / speed
+        # 米制域误差 (m): 蓝盘在地面, 用平面距离把像素偏差换算成地面偏差
+        error_forward_m = (target[1] - cy) * plane_distance / fy
+        error_right_m = (target[0] - cx) * plane_distance / fx
+        # 米制域 PID: 符号标定与合速度(向量模长)限幅均由 PID 承担
+        forward, right = self._blue_servo_pid.update(
+            error_forward_m, error_right_m, self._now())
         in_view = (abs(target[0] - cx) <= 0.35 * width
                    and abs(target[1] - cy) <= 0.35 * height)
         descent = (float(self._fsm.get_param("drop_servo_descend_slow", 0.28))

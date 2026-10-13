@@ -2,14 +2,17 @@
 CUADC-style low-altitude precision alignment.
 
 This controller aligns the selected target from the current camera image.
-It uses normalized pixel error, EMA smoothing, P-only body velocity,
-continuous or short step/stop commands, and stable-frame confirmation.
+It uses normalized pixel error, EMA smoothing, shared ServoPid body-velocity
+control (gain contract in config/pid_tuning.yaml), continuous or short
+step/stop commands, and stable-frame confirmation.
 """
 
 import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional, Tuple
+
+from drone_utils.servo_pid import ServoPid
 
 
 class PrecisionAlignResult(Enum):
@@ -67,6 +70,37 @@ class PrecisionAlignController:
         self._last_right = 0.0
         self._last_log_time = 0.0
         self._last_status = PrecisionAlignStatus()
+        self._active_pid: Optional[ServoPid] = None  # 最近一次出速度指令的 PID, 供日志诊断
+
+        # ── 共享伺服 PID (参数契约: config/pid_tuning.yaml) ──
+        # 两条输出分支的误差域不同, 各用一套增益, 不再有独立的纯 P 增益:
+        #   连续模式 (_pid_continuous): 误差 = _ground_error_m 输出的地面误差
+        #                               (m, 已带符号), 米制域增益 servo_kp/ki/kd
+        #   步进模式 (_pid_norm):       误差 = _smooth_dx/_smooth_dy
+        #                               (归一化图像比例), 归一化域增益 servo_norm_*
+        # 两域共用抗饱和与微分滤波参数. deadzone 保持 0: 对心判决由 _is_precise
+        # 的多重门槛负责, 死区停发指令会与 stable_frames 计数语义打架.
+        pid_common = {
+            "min_speed": float(self._init_param("servo_min_speed", 0.012)),
+            "integral_limit": float(self._init_param("servo_integral_limit", 0.10)),
+            "derivative_alpha": float(self._init_param("servo_derivative_alpha", 0.30)),
+            "integral_band": float(self._init_param("servo_integral_band", 0.0)),
+        }
+        servo_max_speed = float(self._init_param("servo_max_speed", 0.25))
+        self._pid_continuous = ServoPid(
+            kp=float(self._init_param("servo_kp", 0.40)),
+            ki=float(self._init_param("servo_ki", 0.08)),
+            kd=float(self._init_param("servo_kd", 0.05)),
+            max_speed=servo_max_speed,
+            **pid_common,
+        )
+        self._pid_norm = ServoPid(
+            kp=float(self._init_param("servo_norm_kp", 1.25)),
+            ki=float(self._init_param("servo_norm_ki", 0.25)),
+            kd=float(self._init_param("servo_norm_kd", 0.15)),
+            max_speed=servo_max_speed,
+            **pid_common,
+        )
 
     @property
     def last_status(self) -> PrecisionAlignStatus:
@@ -90,6 +124,10 @@ class PrecisionAlignController:
         self._last_right = 0.0
         self._last_log_time = 0.0
         self._last_status = PrecisionAlignStatus(reason="reset")
+        # 重新捕获 = 目标身份可能改变, 积分/微分历史必须清空 (见 ServoPid.reset)
+        self._pid_continuous.reset()
+        self._pid_norm.reset()
+        self._active_pid = None
 
     def reset_confirmation(self) -> None:
         """
@@ -97,6 +135,11 @@ class PrecisionAlignController:
 
         保留目标像素锁定和 EMA 平滑值, 使高度变化后无需冷启动
         重新收敛, 仅需在新高度重新确认像素居中。
+
+        PID 状态同样刻意保留: 积分偏置是机体系速度偏置, 对抗的是风/重心/
+        相机安装倾角这类与高度无关的常值扰动 (高度对 P 增益的影响已由
+        _ground_error_m 按当前高度换算误差抵消), 清掉反而要在新高度重新
+        收敛一遍.
         """
         self._stable_count = 0
         self._release_ready = False
@@ -123,6 +166,18 @@ class PrecisionAlignController:
 
     def _param(self, key: str, default):
         return self._fsm.get_param(key, default)
+
+    def _init_param(self, key: str, default):
+        """构造期读参: fsm 是缺少 get_param 的桩对象时退回默认值.
+
+        构造函数原本完全不碰 fsm, 有些调用方 (如 CylinderApproachState(object()))
+        只传空桩; 只有 step() 才真正依赖 fsm 接口. 这里保持同样的宽容度:
+        拿不到参数源就用默认值, 真实 fsm 行为不变.
+        """
+        getter = getattr(self._fsm, "get_param", None)
+        if not callable(getter):
+            return default
+        return getter(key, default)
 
     def _selected_memory_xy(self) -> Optional[Tuple[float, float]]:
         selected_positions = getattr(self._fsm.cylinder_selector, "_selected_positions", [])
@@ -221,6 +276,12 @@ class PrecisionAlignController:
                 reason=reason,
             )
             self._fsm.fc.stop_velocity()
+            # 丢帧期间不喂新误差. 本分支已经 stop_velocity 并 return, 天然不经过
+            # PID; 这里仍显式传 measurement_valid=False, 作用是 (1) 清空微分历史,
+            # 恢复时不会把丢失前的斜率接上 (2) 把"本帧无有效测量"的语义落到 PID
+            # 内部. 积分按设计冻结不清零, 保留对抗常值扰动的偏置.
+            self._pid_continuous.update(0.0, 0.0, now, measurement_valid=False)
+            self._pid_norm.update(0.0, 0.0, now, measurement_valid=False)
             self._maybe_log_missing()
 
             reacquire_after = int(self._param("precision_align_reacquire_after_lost", 6))
@@ -228,6 +289,10 @@ class PrecisionAlignController:
                 self._locked_pixel_uv = None
                 self._smooth_dx = None
                 self._smooth_dy = None
+                # 像素锁定已清除 = 下一帧按画面中心重新选目标 (目标身份切换),
+                # 积分/微分从头起步, 不把旧目标的偏置带到新目标上.
+                self._pid_continuous.reset()
+                self._pid_norm.reset()
                 self._fsm.get_logger().warn(
                     "PREC_ALIGN: 目标短暂丢失, 清除像素锁定并按画面中心重捕获"
                 )
@@ -342,12 +407,8 @@ class PrecisionAlignController:
         # much larger ground offset higher up, so keep horizontal correction
         # active until the height handoff.
         if continuous and not allow_release:
-            ground_kp = float(self._param("precision_align_ground_kp", 0.40))
-            forward = ground_kp * ground_forward_error_m
-            right = ground_kp * ground_right_error_m
-            forward, right = self._limit_vector(
-                forward, right, pixel_error, raw_tol, continuous=True,
-                altitude_m=altitude,
+            forward, right = self._continuous_command(
+                ground_forward_error_m, ground_right_error_m, now, altitude,
             )
             self._last_forward = forward
             self._last_right = right
@@ -364,20 +425,31 @@ class PrecisionAlignController:
             return PrecisionAlignResult.CONTINUE
 
         if continuous:
-            ground_kp = float(self._param("precision_align_ground_kp", 0.40))
-            forward = ground_kp * ground_forward_error_m
-            right = ground_kp * ground_right_error_m
-            forward, right = self._limit_vector(
-                forward, right, pixel_error, raw_tol, continuous=True,
-                altitude_m=altitude,
+            forward, right = self._continuous_command(
+                ground_forward_error_m, ground_right_error_m, now, altitude,
             )
         else:
-            gain = float(self._param("precision_align_gain", 1.25))
+            # 步进模式: 归一化域 PID. 图像方向→机体方向的标定符号在这里预先
+            # 作用到误差上 (与米制域一致: PID 收到的误差已带符号, sign_* 保持
+            # +1), 不交给 ServoPid 的 sign_forward/sign_right —— 那两个只乘在
+            # P/I 上, 微分项不乘, 符号为 -1 时会把 D 项反号.
             x_to_right_sign = float(self._param("precision_align_image_x_to_right_sign", 1.0))
             y_to_forward_sign = float(self._param("precision_align_image_y_to_forward_sign", -1.0))
-            forward = y_to_forward_sign * gain * float(self._smooth_dy)
-            right = x_to_right_sign * gain * float(self._smooth_dx)
-            forward, right = self._limit_vector(forward, right, pixel_error, raw_tol)
+            pid = self._pid_norm
+            # 归一化域两级限速 (恢复原 _limit_vector 非连续分支的行为):
+            # 精调段 (px 误差 ≤ fine 阈值) 用 precision_align_fine_max_speed,
+            # 其余用 servo_max_speed (原 precision_align_max_speed). 精调限速是
+            # 近地精调的安全限速, 与 profile 无关, 不做 bucket 分层.
+            if pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
+                pid.max_speed = float(self._param("precision_align_fine_max_speed", 0.065))
+            else:
+                pid.max_speed = float(self._param("servo_max_speed", 0.25))
+            forward, right = pid.update(
+                y_to_forward_sign * float(self._smooth_dy),
+                x_to_right_sign * float(self._smooth_dx),
+                now,
+            )
+            self._active_pid = pid
 
         self._last_forward = forward
         self._last_right = right
@@ -415,38 +487,42 @@ class PrecisionAlignController:
             and abs(raw_dy) <= threshold_y
         )
 
-    def _limit_vector(
+    def _continuous_max_speed(self, altitude_m: float) -> float:
+        """连续模式水平合速度上限 (m/s), 含 bucket 低空分层限速.
+
+        原 _limit_vector 的固定上限 precision_align_max_speed 已由
+        servo_max_speed 取代; bucket 分层 (低空降速) 原样保留:
+        1.9m 及以下取 precision_align_fine_max_speed,
+        3.0m 及以下取 bucket_servo_mid_max_speed, 取两者与 servo_max_speed
+        的较小值.
+        """
+        max_speed = float(self._param("servo_max_speed", 0.25))
+        if self._param("quick_drop_profile", "blue") == "bucket":
+            if altitude_m <= 1.9:
+                max_speed = min(max_speed, float(self._param(
+                    "precision_align_fine_max_speed", 0.065)))
+            elif altitude_m <= 3.0:
+                max_speed = min(max_speed, float(self._param(
+                    "bucket_servo_mid_max_speed", 0.14)))
+        return max_speed
+
+    def _continuous_command(
         self,
-        forward: float,
-        right: float,
-        pixel_error: float,
-        raw_tol: float,
-        continuous: bool = False,
-        altitude_m: Optional[float] = None,
+        error_forward_m: float,
+        error_right_m: float,
+        stamp: float,
+        altitude_m: float,
     ) -> Tuple[float, float]:
-        if continuous:
-            max_speed = float(self._param("precision_align_max_speed", 0.25))
-            if (self._param("quick_drop_profile", "blue") == "bucket"
-                    and altitude_m is not None):
-                if altitude_m <= 1.9:
-                    max_speed = min(max_speed, float(self._param(
-                        "precision_align_fine_max_speed", 0.065)))
-                elif altitude_m <= 3.0:
-                    max_speed = min(max_speed, float(self._param(
-                        "bucket_servo_mid_max_speed", 0.14)))
-        elif pixel_error <= float(self._param("precision_align_fine_pixel_error", 90.0)):
-            max_speed = float(self._param("precision_align_fine_max_speed", 0.065))
-        else:
-            max_speed = float(self._param("precision_align_max_speed", 0.25))
-        norm = math.hypot(forward, right)
-        if norm > max_speed > 0.0:
-            scale = max_speed / norm
-            return forward * scale, right * scale
-        min_speed = float(self._param("precision_align_min_correction_speed", 0.012))
-        if 0.0 < norm < min_speed and pixel_error > raw_tol:
-            scale = min_speed / norm
-            return forward * scale, right * scale
-        return forward, right
+        """连续模式: 米制域 PID, 每 tick 刷新一次限速上限.
+
+        限幅 (向量模长) 与最小修正速度抬升都在 ServoPid 内部完成, 这里只负责
+        把按高度算出的 max_speed 交给它 —— bucket 分层限速因此得以保留.
+        """
+        pid = self._pid_continuous
+        pid.max_speed = self._continuous_max_speed(altitude_m)
+        command = pid.update(error_forward_m, error_right_m, stamp)
+        self._active_pid = pid
+        return command
 
     def _horizontal_speed_ok(self) -> bool:
         max_speed = float(self._param("precision_align_release_max_horizontal_speed", 0.04))
@@ -600,6 +676,15 @@ class PrecisionAlignController:
             f"({s.target_world_xy[0]:.2f},{s.target_world_xy[1]:.2f})"
             if s.target_world_xy is not None else "invalid"
         )
+        # PID 分项 (P/I/D 各为双轴合矢量模长, 单位 m/s) + 是否饱和:
+        # 真机调参时据此判断是比例、积分还是微分在主导当前指令.
+        pid_label = ""
+        if self._active_pid is not None:
+            p = self._active_pid.last_status
+            pid_label = (
+                f" pid=(p{p.p_term:.3f},i{p.i_term:.3f},d{p.d_term:.3f})"
+                f" sat={int(p.saturated)}"
+            )
         self._fsm.get_logger().info(
             "PREC_ALIGN: "
             f"source={s.source} pixel_error={s.pixel_error:.1f}px "
@@ -609,6 +694,7 @@ class PrecisionAlignController:
             f"ground=({s.ground_forward_error_m:+.3f},{s.ground_right_error_m:+.3f})m "
             f"alt={s.altitude_m:.2f}m continuous={s.continuous} "
             f"stable={s.stable_count} cmd=({s.command_forward:+.3f},{s.command_right:+.3f})"
+            f"{pid_label}"
         )
 
     def _maybe_log_missing(self) -> None:

@@ -25,6 +25,8 @@ import math
 import time
 from typing import Optional
 
+from drone_utils.servo_pid import ServoPid
+
 
 class SimplePrecisionLandState:
     """test_mission 方法的三阶段精准降落 (landing_simple_mode=True 时启用)."""
@@ -49,6 +51,8 @@ class SimplePrecisionLandState:
         self._disarm_requested: bool = False
         self._servo_last_log_time: float = 0.0
         self._px4_land_requested: bool = False
+        # 像素域伺服 PID, 跨帧持久; enter() 时 reset 清积分/微分历史
+        self._servo_pid = self._new_servo_pid()
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -59,6 +63,7 @@ class SimplePrecisionLandState:
         self._has_target = False
         self._servo_converged = 0
         self._visual_alignment_latched = False
+        self._servo_pid.reset()
         self._vertical_only_latched = False
         self._handoff_stable_frames = 0
         self._last_target_center = None
@@ -153,13 +158,38 @@ class SimplePrecisionLandState:
 
     # ---- Phase 2: 像素空间 P 控制伺服下降 ----
 
+    def _new_servo_pid(self) -> ServoPid:
+        """构造像素域伺服 PID (增益契约见 config/pid_tuning.yaml).
+
+        死区来自 profile (各 profile 值不同), 符号沿用图像→机体标定.
+        """
+        return ServoPid(
+            kp=float(self._fsm.get_param("servo_px_kp", 0.0025)),
+            ki=float(self._fsm.get_param("servo_px_ki", 0.0005)),
+            kd=float(self._fsm.get_param("servo_px_kd", 0.0003)),
+            max_speed=float(self._fsm.get_param("servo_px_max_speed", 0.35)),
+            deadzone=float(self._fsm.get_param("landing_servo_deadzone_px", 12.0)),
+            sign_forward=float(
+                self._fsm.get_param("landing_servo_y_to_forward_sign", -1.0)),
+            sign_right=float(
+                self._fsm.get_param("landing_servo_x_to_right_sign", 1.0)),
+            integral_limit=float(self._fsm.get_param("servo_integral_limit", 0.10)),
+            derivative_alpha=float(
+                self._fsm.get_param("servo_derivative_alpha", 0.30)),
+            integral_band=float(self._fsm.get_param("servo_integral_band", 0.0)),
+        )
+
+    def _now(self) -> float:
+        """FSM 时钟秒 — PID 用它判定新测量与真实积分/微分步长."""
+        return self._fsm.get_clock().now().nanoseconds / 1e9
+
     def _execute_servo(
         self,
         target: Optional[dict] = None,
         *,
         has_target: Optional[bool] = None,
     ) -> Optional[str]:
-        """图像空间 P 控制器: 像素误差 → 机体速度, 对心下降."""
+        """图像空间 PID 控制器: 像素误差 → 机体速度, 对心下降."""
         pos = self._fsm.bridge.get_current_position()
         altitude = abs(self._fsm.fc.ned_to_altitude(pos.down))
 
@@ -174,7 +204,10 @@ class SimplePrecisionLandState:
             return None
 
         if target is None:
-            # 目标丢失 → 悬停等待恢复
+            # 目标丢失 → 悬停等待恢复; 通知 PID 冻结积分/清微分历史,
+            # 否则恢复时会把丢失前的误差斜率接上
+            self._servo_pid.update(
+                0.0, 0.0, self._now(), measurement_valid=False)
             self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
             self._servo_converged = 0
             self._handoff_stable_frames = 0
@@ -195,14 +228,9 @@ class SimplePrecisionLandState:
                 self._fsm.fc.set_velocity_body(0.0, 0.0, descent)
                 return None
 
-            # P 控制
-            kp = float(self._fsm.get_param("landing_servo_kp_pixel", 0.004))
-            max_vel = float(self._fsm.get_param("landing_servo_max_horizontal_vel", 0.6))
-            deadzone = float(self._fsm.get_param("landing_servo_deadzone_px", 12.0))
-
-            if pixel_error < deadzone:
-                forward = 0.0
-                right = 0.0
+            # 死区内计数与近地对心锁存
+            # (死区判定与 PID 内部一致; 输出一律由 PID 给出, 死区内恒为零速度)
+            if pixel_error < self._servo_pid.deadzone:
                 self._servo_converged += 1
                 stable_frames = int(self._fsm.get_param(
                     "landing_blind_stable_frames", 10,
@@ -221,11 +249,11 @@ class SimplePrecisionLandState:
                         f"({self._servo_converged}/{stable_frames})"
                     )
             else:
-                x_sign = float(self._fsm.get_param("landing_servo_x_to_right_sign", 1.0))
-                y_sign = float(self._fsm.get_param("landing_servo_y_to_forward_sign", -1.0))
-                forward = max(-max_vel, min(max_vel, y_sign * kp * dv))
-                right = max(-max_vel, min(max_vel, x_sign * kp * du))
                 self._servo_converged = 0
+
+            # PID 输出: 符号标定与合速度(向量模长)限幅均由 PID 承担
+            forward, right = self._servo_pid.update(
+                float(dv), float(du), self._now())
 
             # 未通过视觉锁存时，不得穿过盲降交接高度。
             blind_alt = float(self._fsm.get_param("landing_blind_altitude", 0.5))
