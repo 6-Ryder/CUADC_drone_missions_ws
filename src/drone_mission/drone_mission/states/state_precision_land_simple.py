@@ -75,6 +75,7 @@ class SimplePrecisionLandState:
         self._target_estimator = LandingTargetEstimator.from_params(self._fsm)
         self._estimator_last_predict = 0.0
         self._estimator_last_accept = 0.0
+        self._observed_measurement_stamp = -1.0
         self._estimator_reject_log_time = 0.0
 
     def enter(self):
@@ -91,6 +92,7 @@ class SimplePrecisionLandState:
         self._target_estimator.reset()
         self._estimator_last_predict = 0.0
         self._estimator_last_accept = 0.0
+        self._observed_measurement_stamp = -1.0
         self._vertical_only_latched = False
         self._handoff_stable_frames = 0
         self._last_target_center = None
@@ -487,6 +489,15 @@ class SimplePrecisionLandState:
 
         ⚠️ 单位: 传入的 du/dv 是**像素**; 先按"镜头到平面"的距离与焦距折成米.
         """
+        # ⚠️ 只在**新测量**上融合: 伺服 tick 20Hz 而视觉 3-5Hz, 同一份测量会被
+        # 复用 4-7 个 tick. 每个 tick 都喂一次等于把同一份测量重复计入 ——
+        # 协方差被虚假地收缩、门随之过紧 (表现为"看得见却越来越不接受").
+        # 权威同此: PX4 估计器在没有新 irlock_report 时 update() 直接返回.
+        stamp = self._fsm.vision_measurement_stamp("landing")
+        if stamp <= self._observed_measurement_stamp:
+            return False
+        self._observed_measurement_stamp = stamp
+
         sign_forward = float(self._fsm.get_param(
             "landing_servo_y_to_forward_sign", -1.0))
         sign_right = float(self._fsm.get_param(
@@ -499,7 +510,7 @@ class SimplePrecisionLandState:
         # 3-5Hz 下两者相差 0.2-0.33s, 平移误差 ≈ v·tau (0.25m/s 时约 7.5cm),
         # 旋转误差 ≈ |偏移|·Δψ 且方向随航向变化 (系统偏差, 卡方门抓不到).
         # 取不到时**退回处理时刻** —— 时间对齐是精度改进, 不是可用性前提.
-        pose = self._fsm.pose_at(self._fsm.vision_measurement_stamp("landing"))
+        pose = self._fsm.pose_at(stamp)
         if pose is not None:
             north, east, down, yaw = pose
             plane_m = camera_plane_distance(

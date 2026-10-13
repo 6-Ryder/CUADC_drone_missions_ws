@@ -413,8 +413,10 @@ def test_lost_target_transits_to_last_known_position_in_metres():
     state = SimplePrecisionLandState(fsm)
     state._phase = state.PHASE_SERVO
 
-    # 估计成熟后才锁存 (默认 5 帧), 见 test_immature_estimate_does_not_latch
-    for _ in range(6):
+    # 估计成熟后才锁存 (默认 5 帧), 见 test_immature_estimate_does_not_latch.
+    # 每次推进测量时刻 —— 伺服 20Hz 而视觉 3-5Hz, 同一份测量不该被重复融合.
+    for i in range(6):
+        fsm.set_measurement_stamp(100.0 + i * 0.25)
         state._execute_servo(has_target=True)
     latched = state._lost_transit.target
     assert latched is not None
@@ -478,7 +480,8 @@ def test_full_precision_land_transits_to_last_known_position():
         "camera_cy": 240.0,
     })
     state = PrecisionLandState(fsm)
-    for _ in range(6):      # 估计成熟后才锁存 (默认 5 帧)
+    for i in range(6):      # 估计成熟后才锁存 (默认 5 帧); 每次推进测量时刻
+        fsm.set_measurement_stamp(100.0 + i * 0.25)
         state._execute_servo(
             {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9})
 
@@ -637,14 +640,17 @@ def test_immature_estimate_does_not_latch_the_transit_target(state_cls):
         state._phase = state.PHASE_SERVO
     target = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
 
+    fsm.set_measurement_stamp(100.00)
     state._execute_servo(target)                 # 第 1 帧
     assert state._lost_transit.target is None, "未成熟就锁存了"
 
-    for _ in range(3):                           # 累计 4 帧, 仍不成熟
+    for i in range(1, 4):                        # 累计 4 帧, 仍不成熟
+        fsm.set_measurement_stamp(100.0 + i * 0.25)
         state._execute_servo(target)
     assert state._lost_transit.target is None
 
-    state._execute_servo(target)                 # 第 5 帧 → 成熟
+    fsm.set_measurement_stamp(101.00)            # 第 5 帧 → 成熟
+    state._execute_servo(target)
     assert state._lost_transit.target is not None
 
 
@@ -677,7 +683,8 @@ def test_observation_uses_capture_time_pose_not_processing_time(state_cls):
         state._phase = state.PHASE_SERVO
     centered = {"center_u": 320.0, "center_v": 240.0, "confidence": 0.9}
 
-    for _ in range(6):                          # 让估计成熟
+    for i in range(6):                          # 让估计成熟 (每帧推进测量时刻)
+        fsm.set_measurement_stamp(100.0 + i * 0.25)
         state._execute_servo(centered)
 
     assert state._lost_transit.target == pytest.approx((3.0, 1.5), abs=1e-6)
@@ -701,7 +708,8 @@ def test_observation_falls_back_to_processing_time_pose():
     state._phase = state.PHASE_SERVO
     centered = {"center_u": 320.0, "center_v": 240.0, "confidence": 0.9}
 
-    for _ in range(6):
+    for i in range(6):
+        fsm.set_measurement_stamp(100.0 + i * 0.25)
         state._execute_servo(centered)
 
     assert state._lost_transit.target == pytest.approx((7.0, 8.0), abs=1e-6)
@@ -941,11 +949,13 @@ def test_outlier_frame_does_not_move_the_lost_target_lock(state_cls):
         state._phase = state.PHASE_SERVO
     good = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
 
-    for _ in range(20):
+    for i in range(20):
+        fsm.set_measurement_stamp(100.0 + i * 0.25)   # 每帧推进 (4Hz 视觉)
         state._execute_servo(good)
     settled = state._lost_transit.target
     assert settled is not None
 
+    fsm.set_measurement_stamp(200.0)
     state._execute_servo({"center_u": 600.0, "center_v": 240.0,
                           "confidence": 0.9})
 
@@ -973,13 +983,15 @@ def test_sustained_jump_is_eventually_accepted(state_cls):
     state = state_cls(fsm)
     if hasattr(state, "_phase"):
         state._phase = state.PHASE_SERVO
-    for _ in range(20):
+    for i in range(20):
+        fsm.set_measurement_stamp(100.0 + i * 0.25)
         state._execute_servo({"center_u": 370.0, "center_v": 240.0,
                               "confidence": 0.9})
     settled = state._lost_transit.target
 
     moved = {"center_u": 600.0, "center_v": 240.0, "confidence": 0.9}
-    for _ in range(6):
+    for i in range(6):
+        fsm.set_measurement_stamp(200.0 + i * 0.25)
         state._execute_servo(moved)
 
     assert state._lost_transit.target != pytest.approx(settled)
@@ -1019,15 +1031,18 @@ class _LowAltitudeFalseDetectionScenario:
         self.centered = {"center_u": 321.0, "center_v": 240.0, "confidence": 0.9}
 
     def run(self):
-        for _ in range(6):                     # 先稳定对心 (估计成熟)
+        for i in range(6):                     # 先稳定对心 (估计成熟)
+            self.fsm.set_measurement_stamp(100.0 + i * 0.25)
             self.state._execute_servo(self.centered)
         settled = self.fsm.fc.calls[-1]
 
         # 一帧误检: u 偏 70px (< 80px 跳变门, 所以能过现有两道门)
         false_frame = {"center_u": 391.0, "center_v": 240.0, "confidence": 0.9}
+        self.fsm.set_measurement_stamp(101.5)
         self.state._execute_servo(false_frame)
         chased = self.fsm.fc.calls[-1]
 
+        self.fsm.set_measurement_stamp(101.75)   # 新一帧, 恢复正常
         self.state._execute_servo(self.centered)
         recovered = self.fsm.fc.calls[-1]
         return settled, chased, recovered
