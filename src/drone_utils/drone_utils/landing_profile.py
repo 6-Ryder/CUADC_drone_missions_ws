@@ -83,6 +83,41 @@ def nominal_descent_speed(
     return float(slow)
 
 
+def camera_plane_distance(
+    altitude_m: float,
+    camera_offset_down_m: float = 0.0,
+    min_distance_m: float = 0.05,
+) -> float:
+    """
+    镜头光学中心到目标平面的距离 (m) —— 像素→米换算的**正确**高度基准.
+
+    为什么不是直接用 altitude: `altitude` 是**机体原点**离地高度, 而像素是按
+    **镜头**看到的东西成像的. 本项目真机相机装在原点下方 36.5cm
+    (airframe_params_real.yaml 的 bucket_camera_down), 于是直接用 altitude 会把
+    地面误差系统性放大: 2.5m 处放大约 17%, 1.0m 处约 57%.
+
+    换算公式与投放路径保持一致 (state_drop.py:347 / state_cylinder_search.py:322
+    的 plane_distance 同样减掉了相机下偏移), 避免同一物理量在两条路径上用两个
+    公式.
+
+    ⚠️ 下界取 0.05 而不是投放路径那个 0.3: 投放路径是**除以**这个距离
+    (把机体偏移换算成像素), 小分母会发散, 所以需要一个大一点的保护值; 本函数
+    的结果是用来**乘**像素误差的, 小距离只会得到小误差, 不存在发散问题. 若照抄
+    0.3, 在 0.2m 高度会把误差凭空放大 50% —— 近地恰恰是最不该放大误差的地方.
+    下界只为挡住"高度低于相机安装偏移"导致的零/负值.
+
+    退化方向: 参数非法或算出的距离非正时返回下界, 而不是返回错误值或抛异常 ——
+    调用方永远拿到一个可用的正距离.
+    """
+    if not all(math.isfinite(v) for v in
+               (altitude_m, camera_offset_down_m, min_distance_m)):
+        return max(min_distance_m, 0.0)
+    distance = altitude_m - camera_offset_down_m
+    if distance <= min_distance_m:
+        return min_distance_m
+    return distance
+
+
 def ground_error_m(
     du: float,
     dv: float,

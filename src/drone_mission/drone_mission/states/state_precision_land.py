@@ -21,6 +21,7 @@ from typing import Optional
 
 from drone_utils.landing_profile import (
     NEAR_GROUND_SLOWDOWN_MAX_ALT_M,
+    camera_plane_distance,
     ground_error_m,
     hold_at_search_altitude,
     near_ground_descent_speed,
@@ -278,8 +279,10 @@ class PrecisionLandState:
         status = self._servo_pid.last_status
         fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
         fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
-        error_forward_m = float(status.error_forward) * altitude / fy
-        error_right_m = float(status.error_right) * altitude / fx
+        plane_m = camera_plane_distance(
+            altitude, float(self._fsm.get_param("bucket_camera_down", 0.0)))
+        error_forward_m = float(status.error_forward) * plane_m / fy
+        error_right_m = float(status.error_right) * plane_m / fx
 
         pos = self._fsm.bridge.get_current_position()
         # nan 默认值: 拿不到航向时 latch/command 都拒绝动作, 而不是把 yaw=0
@@ -405,8 +408,13 @@ class PrecisionLandState:
             # ── 4. 高度分层下降速度 + 近地按水平误差调度 ──
             fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
             fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
+            # 像素→米用**镜头到平面**的距离, 不是机体原点高度: 相机装在原点
+            # 下方 (真机 36.5cm), 直接用 altitude 会把地面误差放大 ~17%(2.5m)
+            # 到 ~57%(1.0m). 与投放路径同一公式.
+            plane_m = camera_plane_distance(
+                altitude, float(self._fsm.get_param("bucket_camera_down", 0.0)))
             descent = self._scheduled_descent(
-                altitude, ground_error_m(du, dv, altitude, fx, fy),
+                altitude, ground_error_m(du, dv, plane_m, fx, fy),
             )
 
             self._fsm.fc.set_velocity_body(forward, right, descent)

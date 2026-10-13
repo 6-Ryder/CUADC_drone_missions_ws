@@ -11,6 +11,7 @@ import pytest
 
 from drone_utils.landing_profile import (
     LAND_DESCENT_FLOOR_MS,
+    camera_plane_distance,
     ground_error_m,
     hold_at_search_altitude,
     near_ground_descent_speed,
@@ -204,3 +205,37 @@ def test_search_hold_falls_back_to_default_speed(speed):
 
     assert fsm.fc.waypoints == [(1.0, 2.0, -5.0, 0.5)]
     assert fsm.fc.loiter_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# camera_plane_distance
+# ---------------------------------------------------------------------------
+
+def test_camera_plane_distance_subtracts_camera_offset():
+    """像素→米的高度基准是**镜头**到平面的距离, 不是机体原点高度.
+
+    真机相机装在原点下方 36.5cm: 直接用 altitude 会把地面误差系统性放大
+    (2.5m 处 ~17%, 1.0m 处 ~57%).
+    """
+    assert camera_plane_distance(2.5, 0.365) == pytest.approx(2.135)
+    assert camera_plane_distance(1.0, 0.365) == pytest.approx(0.635)
+    # 未配置偏移时退化为原高度 (与整理前的行为一致)
+    assert camera_plane_distance(2.5, 0.0) == pytest.approx(2.5)
+
+
+def test_camera_plane_distance_floor_is_small_not_the_drop_path_03():
+    """下界是 0.05 而非投放路径的 0.3 —— 本函数的结果是乘数不是除数.
+
+    若照抄 0.3, 在 0.2m 高度会把误差凭空放大 50%; 而本函数不存在小分母发散
+    问题 (投放路径是除以该距离, 才有必要抬高下界).
+    """
+    assert camera_plane_distance(0.2, 0.0) == pytest.approx(0.2)
+    assert camera_plane_distance(0.4, 0.365) == pytest.approx(0.05)  # 0.035 → 下界
+    assert camera_plane_distance(-0.5, 0.0) == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize("alt,offset", [
+    (math.nan, 0.0), (1.0, math.nan), (math.inf, 0.0),
+])
+def test_camera_plane_distance_handles_invalid_input(alt, offset):
+    assert camera_plane_distance(alt, offset) > 0.0
