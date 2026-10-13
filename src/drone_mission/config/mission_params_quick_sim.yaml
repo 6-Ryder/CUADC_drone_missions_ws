@@ -23,9 +23,7 @@
     waypoint_tolerance: 0.5       # 航点到达容差 (m)
     takeoff_tolerance: 0.3        # 起飞到达容差 (m)
     control_frequency: 20.0       # 控制循环频率 (Hz)
-    max_error_count: 5            # 最大错误次数, 超过则中止任务
     waypoint_timeout: 120.0       # 单航点超时 (s)
-    land_altitude: 0.15           # 着陆确认高度 (m)
 
     # --- 速度参数 (quick: 中转/扫描提速) ---
     sweep_speed: 1.2              # 区域内部遍历速度 (原 0.8)
@@ -41,7 +39,6 @@
     area1_forward_max: 35.0
     area1_right_min: -4.0
     area1_right_max: 4.0
-    area1_altitude: 2.0           # 投放区飞行高度 (m, NED z 负值)
     area1_search_altitude: 4.5    # 相对起飞点；与真机同步，扫描补足降低高度后的视场
 
     # --- Area 2: 侦察区 ---
@@ -124,7 +121,6 @@
     precision_align_final_descent_speed: 0.25   # 未使用 (final_descent 关闭)
     precision_align_fallback_max_pixel_error: 120.0 # quick 兜底: 超时重试耗尽后像素 ≤120px (等比 60px) 才直接投
     precision_align_log_interval: 0.75
-    cylinder_approach_fast_speed: 0.30   # 投放区视觉逼近速度, 降低以保持检测连续
     cylinder_approach_slow_speed: 0.20   # 接近对心后慢速微调 (quick 提速至 0.20)
     cylinder_approach_memory_speed: 0.25 # 丢帧时向记忆圆心粗靠近速度
     camera_fx: 539.9
@@ -152,7 +148,6 @@
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
     landing_blind_altitude: 1.0   # SITL: H 标识近地实测 ~0.9m 失效, 1.0m 切入盲降 (真机 0.5m)
-    landing_blind_align_tolerance_px: 30.0  # 切入盲降前最大像素误差
     landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
     landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
     landing_visual_handoff_altitude: 1.6  # 圆形几何对心后，开始纯垂直下降高度 (m)

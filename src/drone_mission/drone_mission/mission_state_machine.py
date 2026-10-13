@@ -178,7 +178,10 @@ class MissionFSM(Node):
         self._state_enter_time: float = 0.0
 
         # ---- 策略 ----
-        self._cylinder_selector = CylinderSelector(min_radius_first=True)
+        # 判据本身早已存在于 CylinderSelector, 只是构造时写死了 True,
+        # 于是 min_radius_first 这个参数改了不生效. 接上后与写死值等价.
+        self._cylinder_selector = CylinderSelector(
+            min_radius_first=bool(self.get_param("min_radius_first", True)))
         self._path_planner: Optional[PathPlanner] = None
 
         # ---- 工具 ----
@@ -299,9 +302,7 @@ class MissionFSM(Node):
         # 遥控器安全 — True=等待人用遥控器解锁, False=代码 arm 跳过
         self.declare_parameter("rc_require_arm_signal", True)
         self.declare_parameter("control_frequency", 20.0)
-        self.declare_parameter("max_error_count", 5)
         self.declare_parameter("waypoint_timeout", 120.0)
-        self.declare_parameter("land_altitude", 0.15)
         self.declare_parameter("max_drops", 2)
         # 速度
         self.declare_parameter("sweep_speed", 0.8)
@@ -317,7 +318,6 @@ class MissionFSM(Node):
         self.declare_parameter("area1_forward_max", 35.0)
         self.declare_parameter("area1_right_min", -4.0)
         self.declare_parameter("area1_right_max", 4.0)
-        self.declare_parameter("area1_altitude", 2.0)
         self.declare_parameter("area1_search_altitude", 5.0)
         # Area 2
         self.declare_parameter("area2_forward_min", 55.0)
@@ -426,7 +426,6 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_final_drop_height", 1.25)
         self.declare_parameter("precision_align_final_descent_speed", 0.25)
         self.declare_parameter("precision_align_log_interval", 0.75)
-        self.declare_parameter("cylinder_approach_fast_speed", 0.30)
         self.declare_parameter("cylinder_approach_slow_speed", 0.15)
         self.declare_parameter("cylinder_approach_memory_speed", 0.25)
         self.declare_parameter("camera_fx", 539.9)
@@ -439,7 +438,6 @@ class MissionFSM(Node):
         self.declare_parameter("landing_search_altitude", 5.0)
         self.declare_parameter("landing_approach_speed", 0.5)
         self.declare_parameter("landing_blind_altitude", 1.5)
-        self.declare_parameter("landing_blind_align_tolerance_px", 30.0)
         self.declare_parameter("landing_blind_stable_frames", 10)
         self.declare_parameter("landing_alignment_latch_max_altitude", 2.5)
         self.declare_parameter("landing_precision_target", 0.1)

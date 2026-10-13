@@ -12,9 +12,7 @@
     waypoint_tolerance: 0.5       # 航点到达容差 (m)
     takeoff_tolerance: 0.3        # 起飞到达容差 (m)
     control_frequency: 20.0       # 控制循环频率 (Hz), 必须 >2Hz
-    max_error_count: 5            # 最大错误次数, 超过则中止任务
     waypoint_timeout: 120.0       # 单航点超时 (s)
-    land_altitude: 0.15           # 着陆确认高度 (m, NED z > -0.15 认为已着陆)
 
     # --- Bridge 位置设定点安全上限 ---
     # 任务阶段速度由 mission_params.yaml 统一配置；此值只限制其最大值。
