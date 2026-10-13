@@ -454,6 +454,14 @@ class MissionFSM(Node):
         self.declare_parameter("landing_blind_descent_speed", 0.30)
         # 丢失目标后继续飞向"最后已知位置" (PX4 precland 水平接近段语义).
         # 速度取保守值: 这段是在没有测量的情况下飞行.
+        # 降落目标状态估计器 (drone_utils.landing_estimator). 权威的"微分项"
+        # 来源是滤波器状态而非对测量求差; 参数含义见该模块 docstring.
+        self.declare_parameter("landing_estimator_acc_unc", 0.5)
+        self.declare_parameter("landing_estimator_pos_unc_init", 0.25)
+        self.declare_parameter("landing_estimator_vel_unc_init", 0.25)
+        # 角噪声方差 (tan²). σ_tan≈0.022 ≈ f=400 时 9px 抖动; 位置方差 = 该值×高度².
+        # ⚠️ 必须按真机探测器抖动实测标定, 默认值只是保守起点.
+        self.declare_parameter("landing_estimator_meas_unc_tan2", 5e-4)
         self.declare_parameter("landing_lost_transit_max_speed", 0.15)
         self.declare_parameter("landing_lost_transit_tolerance", 0.15)
         # 低于此高度不再横向接近, 只保持垂直 (对齐 ArduPilot PLND_ALT_MIN=0.75:

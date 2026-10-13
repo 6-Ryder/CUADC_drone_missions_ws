@@ -32,6 +32,7 @@ from drone_utils.landing_profile import (
     near_ground_descent_speed,
     nominal_descent_speed,
 )
+from drone_utils.landing_estimator import LandingTargetEstimator
 from drone_utils.lost_target_transit import LostTargetTransit
 from drone_utils.servo_pid import ServoPid
 
@@ -68,6 +69,9 @@ class SimplePrecisionLandState:
             tolerance=float(self._fsm.get_param(
                 "landing_lost_transit_tolerance", 0.15)),
         )
+        # 目标世界位置的 2 状态卡尔曼 (权威的"微分项"来源 + 卡方误检门).
+        # 接在丢失后继续接近的路径上: 单帧误检不再直接决定继续接近的落点.
+        self._target_estimator = LandingTargetEstimator.from_params(self._fsm)
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -80,6 +84,7 @@ class SimplePrecisionLandState:
         self._visual_alignment_latched = False
         self._servo_pid.reset()
         self._lost_transit.reset()
+        self._target_estimator.reset()
         self._vertical_only_latched = False
         self._handoff_stable_frames = 0
         self._last_target_center = None
@@ -372,10 +377,24 @@ class SimplePrecisionLandState:
         # nan 默认值: 拿不到航向时 latch/command 都拒绝动作, 而不是把 yaw=0
         # 当成"机头朝北"去算出一个方向错误的指令 (与 state_drop 的读法一致).
         yaw = float(getattr(self._fsm.bridge, "_current_yaw", math.nan))
-        self._lost_transit.latch(
+
+        # 先经估计器融合 (卡方门拒绝单帧误检), 再把**融合后**的位置作为锁存点.
+        # 观测 = 载机位置 + 机体系偏移 → 目标世界位置; 测量方差随高度平方增长
+        # (R ∝ range², PX4 LandingTargetEstimator.cpp:125).
+        self._target_estimator.observe(
             float(pos.north), float(pos.east), yaw,
             error_forward_m, error_right_m,
+            self._target_estimator.measurement_uncertainty(altitude),
         )
+        filtered = self._target_estimator.position
+        if filtered is not None:
+            self._lost_transit.latch_world(filtered[0], filtered[1])
+        else:
+            # 估计器尚不可用 (观测非法) → 退回单帧观测, 不因新机制而失去锁存
+            self._lost_transit.latch(
+                float(pos.north), float(pos.east), yaw,
+                error_forward_m, error_right_m,
+            )
 
     def _lost_transit_command(self, altitude: float) -> tuple:
         """丢失目标时的机体系横向指令 (forward, right).

@@ -74,6 +74,19 @@ class LostTargetTransit:
         self._north = None
         self._east = None
 
+    def latch_world(self, north: float, east: float) -> None:
+        """
+        直接锁存一个**世界坐标**点 (用于把估计器的输出作为锁存点).
+
+        与 `latch()` 的区别: `latch()` 从"载机位置 + 机体系偏移"现算一个点,
+        适合单帧观测; 本方法接收已经融合过的位置 —— 调用方接上
+        `LandingTargetEstimator` 后, 单帧误检不会再直接决定锁存点.
+        """
+        if not all(math.isfinite(v) for v in (north, east)):
+            return
+        self._north = float(north)
+        self._east = float(east)
+
     def latch(
         self,
         north: float,

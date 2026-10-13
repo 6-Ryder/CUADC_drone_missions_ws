@@ -804,3 +804,71 @@ def test_base_params_untouched_by_simple_landing():
         assert "landing_simple_mode" not in node
         assert "landing_search_timeout" not in node
         assert "landing_simple_blind_timeout" not in node
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_outlier_frame_does_not_move_the_lost_target_lock(state_cls):
+    """单帧误检不得改变"丢失后继续接近"的落点 (卡方门在状态层的效果).
+
+    没有估计器时, 锁存点直接取最后一帧观测 —— 一帧把目标"看"到几米外, 就会把
+    整段丢失接近引向错误方向. 这里先喂若干正常帧让滤波器收敛, 再喂一帧远跳:
+    门必须拒掉它, 锁存点保持不动.
+    """
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+    }
+    fsm = _SimpleFSM(params)
+    state = state_cls(fsm)
+    if hasattr(state, "_phase"):
+        state._phase = state.PHASE_SERVO
+    good = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
+
+    for _ in range(20):
+        state._execute_servo(good)
+    settled = state._lost_transit.target
+    assert settled is not None
+
+    state._execute_servo({"center_u": 600.0, "center_v": 240.0,
+                          "confidence": 0.9})
+
+    assert state._lost_transit.target == pytest.approx(settled)
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_sustained_jump_is_eventually_accepted(state_cls):
+    """持续远跳最终必须被接受 —— 门不能把真移动(或标定突变)永久锁死.
+
+    ArduPilot 的"连续 3 次拒绝后强制融合"就是为这条; 没有它, 滤波器会被自己的
+    门饿死, 表现为"目标明明看得见却永远不接受".
+    """
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+    }
+    fsm = _SimpleFSM(params)
+    state = state_cls(fsm)
+    if hasattr(state, "_phase"):
+        state._phase = state.PHASE_SERVO
+    for _ in range(20):
+        state._execute_servo({"center_u": 370.0, "center_v": 240.0,
+                              "confidence": 0.9})
+    settled = state._lost_transit.target
+
+    moved = {"center_u": 600.0, "center_v": 240.0, "confidence": 0.9}
+    for _ in range(6):
+        state._execute_servo(moved)
+
+    assert state._lost_transit.target != pytest.approx(settled)
