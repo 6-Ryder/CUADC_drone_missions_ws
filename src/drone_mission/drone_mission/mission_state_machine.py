@@ -222,6 +222,11 @@ class MissionFSM(Node):
         self._next_known_marker_id: int = 1001
         self._hazards: List[Any] = []
         self._landing_target: Optional[Dict] = None
+        # 各视觉源的测量时刻 (秒, 单调时钟). 消费方用它判断测量新鲜度
+        # 并按真实测量间隔推进积分/微分, 而非按 FSM tick.
+        # 注意: 圆柱与标识另有 *_capture_stamp (消息 header 的采集时刻);
+        # LandingTarget.msg 无 header 字段, 故降落目标目前只有到达时刻.
+        self._landing_target_stamp: float = 0.0
         self._coverage_status: Optional[Dict] = None
         self._cylinders_timestamp: float = 0.0
         self._markers_timestamp: float = 0.0
@@ -758,6 +763,24 @@ class MissionFSM(Node):
         if self.get_param("drop_target_source", "cylinder") == "marker":
             self._emergency.update_vision(len(self._markers) > 0)
 
+    def vision_measurement_stamp(self, source: str) -> float:
+        """
+        返回指定视觉源最近一次测量的时刻 (秒), 无测量时返回 0.0.
+
+        消费方用它做两件事:
+          - 新鲜度门控: 过期测量不得继续驱动控制 (stale -> 视为无目标).
+          - 真实步长: 积分/微分按相邻两次测量的时间差推进, 而不是按 FSM
+            tick 周期. 真机视觉 3-5Hz 而 tick 20Hz, 按 tick 推进会把同一份
+            误差重复累加数倍, 微分也会被放大.
+
+        source 取 "cylinder" | "marker" | "landing".
+        """
+        return {
+            "cylinder": self._cylinders_timestamp,
+            "marker": self._markers_timestamp,
+            "landing": self._landing_target_stamp,
+        }.get(source, 0.0)
+
     @staticmethod
     def _capture_seconds(msg) -> float:
         try:
@@ -975,6 +998,7 @@ class MissionFSM(Node):
         self._watchdog.feed("vision")
 
     def _landing_target_cb(self, msg):
+        self._landing_target_stamp = time.time()
         self._landing_target = {
             "center_u": msg.center_u,
             "center_v": msg.center_v,
