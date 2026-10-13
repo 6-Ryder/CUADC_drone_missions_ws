@@ -75,6 +75,7 @@ class _FC:
     def __init__(self):
         self.calls = []
         self.waypoints = []
+        self.stop_calls = 0
 
     def ned_to_altitude(self, down):
         return -float(down)
@@ -84,6 +85,9 @@ class _FC:
 
     def set_velocity_body(self, f, r, d):
         self.calls.append((f, r, d))
+
+    def stop_velocity(self):
+        self.stop_calls += 1
 
     def goto_ned(self, north, east, down, yaw=None, speed=1.0):
         # 搜索段用 goto_ned 命令 landing_search_altitude (纯垂直移动),
@@ -117,6 +121,7 @@ class _SimpleFSM:
         self.fc = _FC()
         self.logger = _LogState()
         self.vision_modes = []
+        self.takeovers = []
         self._measurement_stamp = None
 
     def get_param(self, name, default=None):
@@ -144,6 +149,9 @@ class _SimpleFSM:
 
     def set_vision_mode(self, mode):
         self.vision_modes.append(mode)
+
+    def request_takeover(self, reason):
+        self.takeovers.append(reason)
 
     def loiter(self, *_a):
         pass
@@ -557,6 +565,35 @@ def test_near_ground_descent_keeps_nominal_speed_when_aligned(state_cls):
     # 调度只允许减速.
     nominal = params["landing_descent_slow"]
     assert nominal * 0.95 < descent <= nominal
+
+
+def test_full_blind_descent_times_out_and_hands_over():
+    """full 盲降必须受 landing_blind_timeout 限制 (此前该参数零消费者).
+
+    配置注释写的是"从进入盲降开始计时, 超时则停止下降并报错", 但 _blind_start_time
+    被赋值后从未被读过 —— 维护者会误以为盲降受 45s 保护. 到期动作是停止下降并
+    交飞手, 与 full 变体的既有政策一致 (绝不自主 RTL/降落).
+    """
+    fsm = _SimpleFSM({"landing_blind_timeout": 45.0})
+    state = PrecisionLandState(fsm)
+    state._blind_start_time = time.time() - 100.0
+
+    state._execute_blind()
+
+    assert fsm.takeovers, "盲降超时应交飞手"
+    assert fsm.fc.stop_calls >= 1, "超时后必须停止下降"
+
+
+def test_full_blind_descent_ran_within_timeout_is_not_interrupted():
+    """未超时的盲降不得被打断 —— 时间界不能误伤正常着陆."""
+    fsm = _SimpleFSM({"landing_blind_timeout": 45.0})
+    state = PrecisionLandState(fsm)
+    state._blind_start_time = time.time()
+
+    state._execute_blind()
+
+    assert fsm.takeovers == []
+    assert fsm.fc.calls[-1][2] > 0.0, "应在下降"
 
 
 def test_lost_target_transit_reset_on_enter():

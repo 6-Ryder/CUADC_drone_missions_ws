@@ -429,6 +429,22 @@ class PrecisionLandState:
             )
             return self._finish_touchdown()
 
+        # 盲降时间界: landing_blind_timeout 此前零消费者, 使"从进入盲降开始计时,
+        # 超时则停止下降并报错"这条写在配置里的承诺没有实现 —— 维护者会以为盲降
+        # 受 45s 保护. 现在接上: 到期后停止下降并交飞手 (与 full 变体的既有政策
+        # 一致 —— request_takeover 只做零速度悬停, 绝不自主 RTL/降落).
+        timeout = float(self._fsm.get_param("landing_blind_timeout", 45.0))
+        if timeout > 0.0 and self._blind_start_time > 0.0:
+            if time.time() - self._blind_start_time > timeout:
+                self._fsm.get_logger().error(
+                    f"PRECISION_LAND: 盲降超时 ({timeout:.0f}s), 停止下降并交飞手"
+                )
+                self._fsm.fc.stop_velocity()
+                self._fsm.request_takeover(
+                    "PRECISION_LAND: blind descent timed out"
+                )
+                return None
+
         if self._blind_progress is not None:
             pos = self._fsm.bridge.get_current_position()
             altitude = abs(self._fsm.fc.ned_to_altitude(pos.down))
