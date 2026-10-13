@@ -12,7 +12,9 @@ import pytest
 from drone_utils.landing_profile import (
     LAND_DESCENT_FLOOR_MS,
     ground_error_m,
+    hold_at_search_altitude,
     near_ground_descent_speed,
+    nominal_descent_speed,
 )
 
 
@@ -106,3 +108,99 @@ def test_unusable_nominal_speed_is_returned_unchanged(nominal):
         assert math.isnan(result)
     else:
         assert result == nominal
+
+
+# ---------------------------------------------------------------------------
+# nominal_descent_speed / hold_at_search_altitude
+# ---------------------------------------------------------------------------
+
+def test_nominal_descent_speed_uses_three_altitude_bands():
+    """三档分界 3.0 / 1.5 m, 与两条降落分支合并前的行为逐值一致."""
+    assert nominal_descent_speed(5.0, 0.4, 0.25, 0.12) == 0.4
+    assert nominal_descent_speed(3.01, 0.4, 0.25, 0.12) == 0.4
+    assert nominal_descent_speed(3.0, 0.4, 0.25, 0.12) == 0.25
+    assert nominal_descent_speed(1.6, 0.4, 0.25, 0.12) == 0.25
+    assert nominal_descent_speed(1.5, 0.4, 0.25, 0.12) == 0.12
+    assert nominal_descent_speed(0.2, 0.4, 0.25, 0.12) == 0.12
+
+
+class _SearchFC:
+    def __init__(self):
+        self.waypoints = []
+        self.loiter_calls = 0
+
+    def altitude_to_ned(self, altitude):
+        return -float(altitude)
+
+    def goto_ned(self, north, east, down, yaw=None, speed=1.0):
+        self.waypoints.append((north, east, down, speed))
+
+    def loiter(self, *_a):
+        self.loiter_calls += 1
+
+
+class _SearchFSM:
+    def __init__(self, altitude=5.0, speed=0.5, position=(1.0, 2.0)):
+        self.fc = _SearchFC()
+        self._params = {"landing_search_altitude": altitude,
+                        "landing_approach_speed": speed}
+        self._position = type("P", (), {"north": position[0],
+                                        "east": position[1], "down": -4.0})()
+
+    class _Bridge:
+        def __init__(self, position):
+            self._position = position
+
+        def get_current_position(self):
+            return self._position
+
+    def get_param(self, key, default=None):
+        return self._params.get(key, default)
+
+    def loiter(self, *_a):
+        self.fc.loiter()
+
+
+def _search_fsm(**kwargs):
+    fsm = _SearchFSM(**kwargs)
+    fsm.bridge = _SearchFSM._Bridge(fsm._position)
+    return fsm
+
+
+def test_search_hold_commands_configured_altitude_at_approach_speed():
+    """搜索高度必须是被**命令**的, 而不是"停在上一段碰巧留下的高度".
+
+    landing_search_altitude / landing_approach_speed 此前零消费者, 注释里写的
+    "保持在 5m" 只是对返航高度的假设.
+    """
+    fsm = _search_fsm(altitude=4.2, speed=0.3, position=(7.0, 8.0))
+
+    hold_at_search_altitude(fsm)
+
+    assert fsm.fc.waypoints == [(7.0, 8.0, -4.2, 0.3)]
+    assert fsm.fc.loiter_calls == 0
+
+
+@pytest.mark.parametrize("altitude", [0.0, -1.0, math.nan])
+def test_search_hold_degrades_to_loiter_on_unusable_altitude(altitude):
+    """高度参数不可用时退回"原地悬停" —— 与改动前行为一致, 不产生未知几何.
+
+    (速度不可用是另一条退化路径: 仍飞向该高度, 但用默认接近速度, 见下条测试.)
+    """
+    fsm = _search_fsm(altitude=altitude, speed=0.5)
+
+    hold_at_search_altitude(fsm)
+
+    assert fsm.fc.waypoints == []
+    assert fsm.fc.loiter_calls == 1
+
+
+@pytest.mark.parametrize("speed", [0.0, -1.0, math.nan])
+def test_search_hold_falls_back_to_default_speed(speed):
+    """速度为 0/非法时用默认接近速度, 而不是发一个 0 速度的航点(等于悬停)."""
+    fsm = _search_fsm(altitude=5.0, speed=speed)
+
+    hold_at_search_altitude(fsm)
+
+    assert fsm.fc.waypoints == [(1.0, 2.0, -5.0, 0.5)]
+    assert fsm.fc.loiter_calls == 0

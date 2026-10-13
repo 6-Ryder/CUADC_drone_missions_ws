@@ -28,6 +28,7 @@ from typing import Optional
 from drone_utils.landing_profile import (
     NEAR_GROUND_SLOWDOWN_MAX_ALT_M,
     ground_error_m,
+    hold_at_search_altitude,
     near_ground_descent_speed,
     nominal_descent_speed,
 )
@@ -90,8 +91,9 @@ class SimplePrecisionLandState:
 
         self._fsm.set_vision_mode("landing")
         self._fsm.get_logger().info("PRECISION_LAND: Phase 1 - 搜索 H 标识 (simple)")
-        # 保持在 5m 悬停等待视觉检测
-        self._fsm.loiter()
+        # 在 landing_search_altitude 悬停等待视觉检测 (此前是裸 loiter(),
+        # 即"停在上一段留下的高度", 与参数无关)
+        hold_at_search_altitude(self._fsm)
 
     def execute(self) -> Optional[str]:
         # PX4 已检测到着陆 → 完成

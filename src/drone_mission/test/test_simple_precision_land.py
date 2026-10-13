@@ -74,12 +74,21 @@ class _Bridge:
 class _FC:
     def __init__(self):
         self.calls = []
+        self.waypoints = []
 
     def ned_to_altitude(self, down):
         return -float(down)
 
+    def altitude_to_ned(self, altitude):
+        return -float(altitude)
+
     def set_velocity_body(self, f, r, d):
         self.calls.append((f, r, d))
+
+    def goto_ned(self, north, east, down, yaw=None, speed=1.0):
+        # 搜索段用 goto_ned 命令 landing_search_altitude (纯垂直移动),
+        # 与实机 flight_controller.goto_ned 同签名
+        self.waypoints.append((north, east, down, speed))
 
     def loiter(self, *_a):
         pass
@@ -458,6 +467,26 @@ def test_full_precision_land_transits_to_last_known_position():
     assert right > 0.0
     assert forward == pytest.approx(0.0, abs=1e-9)
     assert descent == 0.0
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_search_phase_commands_configured_search_altitude(state_cls):
+    """两条分支进入降落时都要**命令** landing_search_altitude, 而不是裸 loiter().
+
+    裸 loiter() 是"停在上一段留下的高度", 参数 landing_search_altitude /
+    landing_approach_speed 因此长期零消费者. 检测质量与高度强相关 (本项目已记录
+    近地 ~0.9m 与 3.15-3.75m 两个失效带), 搜索高度必须可控.
+    """
+    fsm = _SimpleFSM({
+        "landing_search_altitude": 4.2,
+        "landing_approach_speed": 0.3,
+    })
+    state = state_cls(fsm)
+
+    state.enter()
+
+    assert fsm.fc.waypoints == [(0.0, 0.0, -4.2, 0.3)]
+    assert "landing" in fsm.vision_modes
 
 
 @pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])

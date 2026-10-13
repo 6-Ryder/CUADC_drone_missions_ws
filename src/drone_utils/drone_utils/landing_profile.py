@@ -34,6 +34,36 @@ LAND_DESCENT_FLOOR_MS = 0.1
 NEAR_GROUND_SLOWDOWN_MAX_ALT_M = 1.5
 
 
+def hold_at_search_altitude(fsm) -> None:
+    """
+    把载机保持在 (当前位置, `landing_search_altitude`) 悬停, 等待视觉检测.
+
+    两条降落分支此前都是裸调 `fsm.loiter()`, 即"在进入降落那一刻的高度悬停",
+    代码注释写着"保持在 5m" —— 那是**假设**上一段(返航)留下 5m, 而不是命令.
+    `landing_search_altitude` / `landing_approach_speed` 两个参数因此一直零消费者.
+
+    为什么值得命令而不是假设: 检测质量与高度强相关, 本项目已记录多个失效高度带
+    (近地 ~0.9m, 以及 3.15-3.75m 的断裂带). 让搜索高度由参数决定, 才有可能把
+    搜索段稳定放在这些带之外; 靠"上一段碰巧停在哪"则不可控.
+
+    速度用 `landing_approach_speed` —— 这是一次纯垂直的、无测量的移动,
+    必须慢.
+    """
+    fc = fsm.fc
+    position = fsm.bridge.get_current_position()
+    altitude = float(fsm.get_param("landing_search_altitude", 5.0))
+    speed = float(fsm.get_param("landing_approach_speed", 0.5))
+    if not math.isfinite(altitude) or altitude <= 0.0:
+        # 参数不可用时退回"原地悬停" —— 与改动前的行为一致.
+        fsm.loiter()
+        return
+    fc.goto_ned(
+        float(position.north), float(position.east),
+        fc.altitude_to_ned(altitude),
+        speed=speed if math.isfinite(speed) and speed > 0.0 else 0.5,
+    )
+
+
 def nominal_descent_speed(
     altitude_m: float,
     fast: float,
