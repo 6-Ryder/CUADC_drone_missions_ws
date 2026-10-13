@@ -16,7 +16,7 @@
 | 测试命令 | 见 §6（**四套分开跑**，合跑会因同名 `test_copyright.py` 收集冲突） |
 | 基线 | mission **279 通过 / 2 失败**，utils **114 / 2**，bringup **86 / 2**，vision **87 / 2** |
 | 失败说明 | 四套的 2 条失败**全是既有 lint**（`install/`、`build/` 下 rosidl 生成代码），不是回归 |
-| 本次会话产出 | 23 个提交（全部已推送，见 §1） |
+| 本次会话产出 | 25 个提交（全部已推送，见 §1） |
 
 **开工前必读的三条项目约定**（都已写进各提交信息，此处是索引）：
 1. **不改 `build/`、`install/`**；`src/drone_mission/{build,install}` 是幽灵树。
@@ -49,6 +49,7 @@
 | B1 | **full 任务接入** airframe 几何 | `1b4fe6c` | L1 |
 | **P0** | **时间对齐**：观测改用**采集时刻**的载机位姿（新增 `pose_history`，FSM 每 tick 采样 + `pose_at`） | `bc15985` | L1 |
 | 清理 | 清掉最后 6 个死参数（1 个接线 + 5 个删除）+ **双向参数契约测试**（经变异验证） | `f27ffa2` | L1 |
+| 证据 | **台面闭环仿真** `scripts/landing_desk_sim.py`（量误检漂移）+ 修**同一份测量被重复融合**的真实缺陷 | `3bb7ad3` | L1 |
 
 **量化收益（仿真，非真机）**：目标位置估计误差在 8px 抖动 / 2.5m / 12 帧下
 **单帧锁存 6.38cm（σ3.15）→ 滤波后 2.09cm（σ1.11）**。⚠️ 这是**锁存点**误差，不是落点精度。
@@ -72,7 +73,7 @@
 
 | # | 事项 | 需要你做什么 | 不做会怎样 |
 |---|---|---|---|
-| **U1** | **B2 默认开关** | 决定是否在标定前就打开 `landing_servo_estimator_gate_enable`。我默认设为 **False**（门限未标定，"门太紧"会让真测量被拒→悬停兜底） | 保持现状：低空误检仍会全权驱动伺服（8/8 形态） |
+| **U1** | **B2 默认开关** | 决定是否在标定前就打开 `landing_servo_estimator_gate_enable`。我默认设为 **False**（门限未标定，"门太紧"会让真测量被拒→悬停兜底）。**现有证据**（台面仿真，`scripts/landing_desk_sim.py`）：单帧误检无害（1.2cm，回路自吸收）；持续误检的额外偏移有界（≤0.18m）；门把它降低 70–90%。但该模型**复现不出 8/8 的戏剧性振荡** → 证据支持"门有用且无害"，不够支持"开门即堵住 8/8" | 保持现状：低空误检仍会全权驱动伺服（8/8 形态） |
 | **U2** | **门限标定数据** | 提供/安排一次实测：相机探测器在静止悬停时的**像素抖动分布**（用于 `meas_unc_tan2`）、以及典型**丢帧分布**（用于 `acc_psd`） | B2 无法打开；估计器的门宽度只能靠猜 |
 | **U3** | **飞控固件** | 决定是否接受"改 `dds_topics.yaml` + 重刷"以解锁：① A2 角速率项（`/fmu/out/vehicle_angular_velocity` 目前是**注释掉的**）；② 路径 B。飞控是**冻结基线** `params_v4`，重刷意味着整套基线要复验 | A2 与路径 B 永久搁置；**其余所有已交付改动都不需要动固件** |
 | **U4** | **SITL 是否复现真机降落路径** | 目前 SITL 与真机 quick 档**刻意不同**（`landing_blind_stable_frames` 真机=1 / SITL=10，且 SITL 保留了真机已关闭的圆形几何交接，有测试注明"SITL 档独立"）。代价是**仿真看不见真机那条路径的回归** | 真机降落路径的改动只能靠真机发现，而历史失败正集中在这一带 |
@@ -122,6 +123,13 @@ src/drone_bringup/config/
   airframe_params_real.yaml / airframe_params_sitl.yaml   # 机体几何 (只放几何)
 src/drone_bringup/launch/
   sitl / real_flight / quick_sitl / quick_flight  # 四个 launch 都需同步
+```
+
+**工具**
+```bash
+# 台面闭环仿真: 量出"低空误检把飞机带偏多少"(不是 SITL, 验证控制律)
+python3 scripts/landing_desk_sim.py            # 单场景对比 (门关 vs 门开)
+python3 scripts/landing_desk_sim.py --sweep [--alternate]   # 扫误检持续帧数
 ```
 
 **测试**
