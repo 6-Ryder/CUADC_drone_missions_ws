@@ -232,6 +232,10 @@ class MissionFSM(Node):
         # 这是已记录的缺口 (见 docs/PRECISION_LANDING_AUTHORITY.md §5.1),
         # 不是与另两源等价的机制.
         self._landing_target_stamp: float = 0.0
+        # 最后一次"含真实检测"的降落目标消息时刻 (confidence > 0). 与
+        # _landing_target_stamp (每条消息都刷新, 含 miss 帧) 分开, 因为二者
+        # 回答不同问题: "这个源还在发消息吗" vs "还有可用的测量吗".
+        self._landing_target_detection_stamp: float = 0.0
         self._coverage_status: Optional[Dict] = None
         self._cylinders_timestamp: float = 0.0
         self._markers_timestamp: float = 0.0
@@ -1018,7 +1022,14 @@ class MissionFSM(Node):
         self._watchdog.feed("vision")
 
     def _landing_target_cb(self, msg):
-        self._landing_target_stamp = time.time()
+        now = time.time()
+        self._landing_target_stamp = now
+        # "有测量"的判据: 视觉节点对"本帧没看到 H 标识"发布的是 confidence
+        # 恰为 0.0 的合成样本 (vision_pipeline._process_landing_v2 三个发布
+        # 分支), 所以 >0 就是"这一帧真的检测到了", 与置信度门槛 (消费侧的
+        # 0.60) 是两件事, 不能互相替代.
+        if float(getattr(msg, "confidence", 0.0)) > 0.0:
+            self._landing_target_detection_stamp = now
         self._landing_target = {
             "center_u": msg.center_u,
             "center_v": msg.center_v,
@@ -1631,6 +1642,20 @@ class MissionFSM(Node):
         return self._hazards
 
     def get_landing_target(self) -> Optional[Dict]:
+        """获取最新的 H 降落目标 (过去 2s 内有过一次真实检测).
+
+        与 get_cylinders/get_markers/get_hazards 同形的龄期门. 判据取"距最后
+        一次**含检测**的消息", 而不是"距最后一条消息" —— 后者会让相机/推理
+        链路死亡时旧目标永不失效 (视觉节点对 miss 帧也发消息), 这正是记录在
+        案的失效路径: 目标永久冻结, 而 watchdog 因帧流仍在而被喂活.
+
+        权威口径同此: PX4 precland 以 landing_target_pose 的时间戳判龄
+        (PLD_BTOUT), 且其估计器的 _last_update 只在成功融合/发布时刷新 ——
+        "一串持续被门拒绝的测量"同样会走到复位 (LandingTargetEstimator.cpp
+        :76-80,120,180).
+        """
+        if time.time() - self._landing_target_detection_stamp > 2.0:
+            return None
         return self._landing_target
 
     def get_coverage(self) -> Optional[Dict]:
