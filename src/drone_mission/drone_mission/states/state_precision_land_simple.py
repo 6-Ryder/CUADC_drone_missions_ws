@@ -25,6 +25,12 @@ import math
 import time
 from typing import Optional
 
+from drone_utils.landing_profile import (
+    NEAR_GROUND_SLOWDOWN_MAX_ALT_M,
+    ground_error_m,
+    near_ground_descent_speed,
+    nominal_descent_speed,
+)
 from drone_utils.lost_target_transit import LostTargetTransit
 from drone_utils.servo_pid import ServoPid
 
@@ -276,7 +282,11 @@ class SimplePrecisionLandState:
 
             # 未通过视觉锁存时，不得穿过盲降交接高度。
             blind_alt = float(self._fsm.get_param("landing_blind_altitude", 0.5))
-            descent = self._descent_speed(altitude)
+            fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
+            fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
+            descent = self._scheduled_descent(
+                altitude, ground_error_m(du, dv, altitude, fx, fy),
+            )
             if altitude <= blind_alt and not self._visual_alignment_latched:
                 descent = 0.0
 
@@ -307,15 +317,36 @@ class SimplePrecisionLandState:
             self._switch_to_blind()
         return None
 
+    def _scheduled_descent(self, altitude: float, ground_error: float) -> float:
+        """近地段按水平误差调度下降速度 (ArduPilot mode.cpp:747-756).
+
+        越对准降得越快、越偏降得越慢, 但有下限, 所以**永远不会因为偏心停在
+        半空**. 只在使用慢速档的高度内生效 —— 高空横向误差本就由伺服持续
+        修正, 再叠加降速只会拖长低空停留.
+
+        调度参数用 landing_precision_target (目标水平精度, m): 它是"认为已经
+        对准"的误差量级, 正好是这条律的参考误差. 它此前一直没有消费者.
+        """
+        nominal = self._descent_speed(altitude)
+        if altitude > NEAR_GROUND_SLOWDOWN_MAX_ALT_M:
+            return nominal
+        return near_ground_descent_speed(
+            nominal,
+            ground_error,
+            float(self._fsm.get_param("landing_precision_target", 0.1)),
+        )
+
     def _vertical_handoff_enabled(self) -> bool:
         return float(self._fsm.get_param("landing_visual_handoff_altitude", 0.0)) > 0.0
 
     def _descent_speed(self, altitude: float) -> float:
-        if altitude > 3.0:
-            return float(self._fsm.get_param("landing_descent_fast", 0.4))
-        if altitude > 1.5:
-            return float(self._fsm.get_param("landing_descent_medium", 0.25))
-        return float(self._fsm.get_param("landing_descent_slow", 0.12))
+        """离地高度三档下降速度 (共享实现见 drone_utils.landing_profile)."""
+        return nominal_descent_speed(
+            altitude,
+            float(self._fsm.get_param("landing_descent_fast", 0.4)),
+            float(self._fsm.get_param("landing_descent_medium", 0.25)),
+            float(self._fsm.get_param("landing_descent_slow", 0.12)),
+        )
 
     def _latch_lost_transit_target(self, altitude: float) -> None:
         """用本帧的带符号误差锁存目标的世界位置 (供丢失后继续接近).

@@ -479,6 +479,27 @@ Handbook of Robotics ch. 24；ViSP（Inria 参考实现）；Bourquardez et al.,
 >   避免的错误偏移。正确做法是保留现有锁存，**另设一个更低的强制阈值**。
 > - **S5 需与重试阶梯同时上**：单独实现"未对准保持高度"会让持续偏心的目标永不
 >   下降 → 悬停 → 超时接管，把 8/14 的"卡住"放大。
+>
+> **S8 经复核后判定"不实施"，因为它是控制逻辑冲突而非改进**：
+> ArduPilot 的兜底是"悬停 7 s 给飞手，然后无论如何垂直降落"（`AC_PrecLand_StateMachine
+> .cpp:240-275`），PX4 的 Fallback 也是"原地落"。但本项目有一条**显式且被测试钉住**
+> 的策略：`request_takeover` 之后只做零速度悬停交给飞手，**永不自主动 RTL 或降落**
+> （`test_operator_takeover_contract.py::test_request_takeover_latches_the_first_reason_and_never_commands_rtl_or_land`）。
+> 把权威的兜底搬进来等于推翻这条契约。**注意区分**：simple 变体直接调用
+> `bridge.land_at_current()` 是自己的降落兜底，不经过 `request_takeover`，两者不冲突
+> —— 但 full 变体选择的是"交人"，这属于政策而非缺陷，不由本次改造推翻。
+>
+> **S5 的已实施形态与诚实评估**：只实施"近地按水平误差调度下降速度"这一半
+> （ArduPilot `mode.cpp:747-756` 的结构，含 0.1 m/s 下限，保证偏心也不会停在半空），
+> **不实施**"未对准保持高度"那一半（理由同上条）。实现放在
+> `drone_utils/landing_profile.py`，**两条分支共用同一份**，并把此前各写一份的
+> 高度分层梯子也合并进去 —— 避免继续出现"只改一侧"。同时给 `landing_precision_target`
+> 这个此前零消费者的参数接上了用途（作为可接受误差）。
+> ⚠️ **但必须说清楚：这条律在当前的整定下作用很小** —— 慢速档名义速度
+> `landing_descent_slow = 0.12 m/s` 与下限 0.1 m/s 只差 0.02，所以 1.5 m 以下的
+> 调度幅度仅 0.12→0.10。它的价值是**结构就位 + 参数复活 + 消除重复实现**；要让这条律
+> 真正有牙齿，需要同时提高 `landing_descent_slow`（例如 0.25–0.30），那是一次真机整定
+> 决定，不在地面可验证范围内。
 
 ### 阶段 5（可选，另立项）：路径 B 评估
 

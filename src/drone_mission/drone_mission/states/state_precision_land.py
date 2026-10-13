@@ -19,6 +19,12 @@ import math
 import time
 from typing import Optional
 
+from drone_utils.landing_profile import (
+    NEAR_GROUND_SLOWDOWN_MAX_ALT_M,
+    ground_error_m,
+    near_ground_descent_speed,
+    nominal_descent_speed,
+)
 from drone_utils.lost_target_transit import LostTargetTransit
 from drone_utils.progress_monitor import ProgressMonitor
 from drone_utils.servo_pid import ServoPid
@@ -197,6 +203,34 @@ class PrecisionLandState:
         """FSM 时钟秒 — PID 用它判定新测量与真实积分/微分步长."""
         return self._fsm.get_clock().now().nanoseconds / 1e9
 
+    def _descent_speed(self, altitude: float) -> float:
+        """离地高度三档下降速度 (共享实现见 drone_utils.landing_profile)."""
+        return nominal_descent_speed(
+            altitude,
+            float(self._fsm.get_param("landing_descent_fast", 0.4)),
+            float(self._fsm.get_param("landing_descent_medium", 0.25)),
+            float(self._fsm.get_param("landing_descent_slow", 0.12)),
+        )
+
+    def _scheduled_descent(self, altitude: float, ground_error: float) -> float:
+        """近地段按水平误差调度下降速度 (ArduPilot mode.cpp:747-756).
+
+        越对准降得越快、越偏降得越慢, 但有下限, 所以**永远不会因为偏心停在
+        半空**. 只在使用慢速档的高度内生效 —— 高空横向误差本就由伺服持续
+        修正, 再叠加降速只会拖长低空停留.
+
+        调度参数用 landing_precision_target (目标水平精度, m): 它是"认为已经
+        对准"的误差量级, 正好是这条律的参考误差. 它此前一直没有消费者.
+        """
+        nominal = self._descent_speed(altitude)
+        if altitude > NEAR_GROUND_SLOWDOWN_MAX_ALT_M:
+            return nominal
+        return near_ground_descent_speed(
+            nominal,
+            ground_error,
+            float(self._fsm.get_param("landing_precision_target", 0.1)),
+        )
+
     def _latch_lost_transit_target(self, altitude: float) -> None:
         """用本帧的带符号误差锁存目标的世界位置 (供丢失后继续接近).
 
@@ -320,13 +354,12 @@ class PrecisionLandState:
             # 每帧有效测量都刷新"最后已知位置" (丢失后继续接近的落点)
             self._latch_lost_transit_target(altitude)
 
-            # ── 4. 高度分层下降速度 ──
-            if altitude > 3.0:
-                descent = float(self._fsm.get_param("landing_descent_fast", 0.4))
-            elif altitude > 1.5:
-                descent = float(self._fsm.get_param("landing_descent_medium", 0.25))
-            else:
-                descent = float(self._fsm.get_param("landing_descent_slow", 0.12))
+            # ── 4. 高度分层下降速度 + 近地按水平误差调度 ──
+            fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
+            fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
+            descent = self._scheduled_descent(
+                altitude, ground_error_m(du, dv, altitude, fx, fy),
+            )
 
             self._fsm.fc.set_velocity_body(forward, right, descent)
 

@@ -460,6 +460,76 @@ def test_full_precision_land_transits_to_last_known_position():
     assert descent == 0.0
 
 
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_near_ground_descent_slows_down_when_laterally_off(state_cls):
+    """两条分支都要按水平误差调度近地下降速度 (不能只改一侧).
+
+    近地(<=1.5m)且横向偏差大时, 下降速度必须低于名义值且不低于下限 ——
+    下限保证"偏心也不会停在半空", 这正是低空振荡/悬停等待的结构性防线.
+    """
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "landing_descent_slow": 0.30,
+        "landing_precision_target": 0.10,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+    }
+    # 1.0m 高度, 200px 偏差 → 地面误差 0.5m >> 0.10m 的可接受误差
+    fsm = _SimpleFSM(params)
+    fsm.bridge._pos = type("P", (), {"north": 0.0, "east": 0.0, "down": -1.0})()
+    target = {"center_u": 520.0, "center_v": 240.0, "confidence": 0.9}
+    state = state_cls(fsm)
+    if hasattr(state, "_phase"):
+        state._phase = state.PHASE_SERVO
+
+    state._execute_servo(target)
+    _, _, descent = fsm.fc.calls[-1]
+
+    assert descent == pytest.approx(0.1)      # 下限, 但仍在下降
+    assert descent < params["landing_descent_slow"]
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_near_ground_descent_keeps_nominal_speed_when_aligned(state_cls):
+    """已对准时不得减速 —— 调度只能因为偏心而降速, 不是无差别放慢.
+
+    注意两条分支的图像中心默认值不同 (simple 320x240 / full 640x480),
+    这里显式统一, 否则"对准"的判据在两侧不是同一个点.
+    """
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "landing_descent_slow": 0.30,
+        "landing_precision_target": 0.10,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+    }
+    fsm = _SimpleFSM(params)
+    fsm.bridge._pos = type("P", (), {"north": 0.0, "east": 0.0, "down": -1.0})()
+    target = {"center_u": 321.0, "center_v": 240.0, "confidence": 0.9}
+    state = state_cls(fsm)
+    if hasattr(state, "_phase"):
+        state._phase = state.PHASE_SERVO
+
+    state._execute_servo(target)
+    _, _, descent = fsm.fc.calls[-1]
+
+    # 1px @1.0m/400 ≈ 0.0025m, 相对 0.10m 的可接受误差只占 2.5%, 故几乎不减速
+    # (该律是线性的, 不会在误差非零时突然跳到名义速度). 上界仍是名义速度 ——
+    # 调度只允许减速.
+    nominal = params["landing_descent_slow"]
+    assert nominal * 0.95 < descent <= nominal
+
+
 def test_lost_target_transit_reset_on_enter():
     """换相进入降落时必须清锁存, 否则上一段的点会继续驱动."""
     fsm = _SimpleFSM({})
