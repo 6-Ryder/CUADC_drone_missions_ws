@@ -1,6 +1,6 @@
 # 构建与部署
 
-本文档只记录当前可执行的启动方式。真机飞行前必须由现场操作者完成遥控器、PX4 参数和硬件急停检查。
+本文档只记录当前可执行的启动方式。2026-10-13 的精准降落改动仅有单元/契约验证，尚无本分支完整 SITL 或真机复飞。真机飞行前必须由现场操作者完成遥控器、PX4 参数和硬件急停检查。
 
 ## 1. 构建
 
@@ -14,7 +14,9 @@ source install/setup.bash
 验证：
 
 ```bash
-pytest -q src/drone_mission/test src/drone_vision/test src/px4_control/test
+python3 -m pytest -q src/drone_mission/test
+python3 -m pytest -q src/drone_vision/test
+python3 -m pytest -q src/px4_control/test
 ```
 
 视觉配置引用的模型位于 `src/drone_vision/drone_vision/models/`，当前运行模型为 ONNX。模型、ROS 2 Humble、PX4 消息和 Python 依赖缺失时不要开始飞行。
@@ -56,7 +58,7 @@ colcon build --packages-up-to drone_vision test_mission px4_control
 # --packages-up-to = 该包 + 它依赖的所有包
 ```
 
-实飞事故实例（版本回退后两次任务启动即崩溃）见 [WORKLOG.md](WORKLOG.md) 2026-08-02 复盘。
+实飞事故实例（版本回退后两次任务启动即崩溃）见 [WORKLOG.md](../Debug/WORKLOG.md) 2026-08-02 复盘。
 
 ## 3. 完整 SITL
 
@@ -137,7 +139,7 @@ DDS_PORT=8888 ./scripts/start_full_real_mission.sh camera_device:=/dev/video0
 SITL v4 overlay 剥离，因此自启环境下也能可靠拉起 Agent。
 
 同一 UDP 端口只能运行一个 Agent；脚本 Step 0 会清理旧 Agent 保证端口唯一。
-Agent 意外退出时脚本检测并停止任务节点（等价旧的 launch exit guard），不能忽略该报错继续飞行。启动后先观察 `/fmu/out/vehicle_status_v1`、`/drone/pose`、`/drone/vision/status` 和 `/drone/servo/status`，确认就绪再允许任务进入 ARM。现场检查顺序见 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)。
+Agent 意外退出时脚本检测并停止任务节点（等价旧的 launch exit guard），不能忽略该报错继续飞行。启动后先观察 `/fmu/out/vehicle_status_v1`、`/drone/pose`、`/drone/vision/status` 和 `/drone/servo/status`，确认就绪再允许任务进入 ARM。现场检查顺序见 [REAL_HARDWARE_DEBUG_GUIDE.md](../Debug/REAL_HARDWARE_DEBUG_GUIDE.md)。
 
 ## 6. 分阶段 smoke test
 
@@ -150,5 +152,6 @@ Agent 意外退出时脚本检测并停止任务节点（等价旧的 launch exi
 - 视觉未就绪：检查模型路径、ONNX Runtime provider、相机话题和 `/drone/vision/status`。
 - 启动即崩溃 `undefined symbol` / `UnsupportedTypeSupport`：版本切换或接口变更后增量构建产物残留，执行全量清理重建（见 [§2 构建产物清理](#2-构建产物清理)）。
 - PX4 无状态：检查网线、Jetson IP、UDP `8888` 监听、PX4 Ethernet uXRCE 参数和 v1 消息环境。
-- 舵机无动作：检查 `/drone/servo/trigger_drop`、MAIN5 配置和 [飞控参数修改记录](../real_flight_logs/飞控参数修改记录.md)。
-- 降落失败：检查 H 检测置信度、视觉对心日志、盲降计时和 `vehicle_land_detected`；不得把问题掩盖为 PX4 LAND。
+- 舵机无动作：检查 `/drone/servo/trigger_drop`、MAIN5 配置和 [飞控参数修改记录](../../real_flight_logs/飞控参数修改记录.md)。
+- 降落失败：先确认运行的是 full 还是 quick/simple；检查 H 的采集时刻与 2 s 龄期、估计器拒帧日志、对心锁存、盲降计时和 `vehicle_land_detected`。full 超时后请求人工接管；quick/simple 可请求 PX4 LAND。两条路径的严格近地静止备用接地判据在真机仍待验证。
+- 启动即报 `InvalidParameterTypeException`：检查 YAML double 值是否写成整数，及浮点 launch 覆盖值是否用 `ParameterValue(..., value_type=float)` 下发；运行 `python3 -m pytest -q src/drone_mission/test/test_mission_params_contract.py`。两类问题都曾让真机节点 exit code 1。

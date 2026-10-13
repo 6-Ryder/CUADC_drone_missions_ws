@@ -12,18 +12,20 @@
 - SITL 接地判定、停速和强制解锁完成；
 - `mission_end.success=True`，总时长约 200 s。
 
-日志目录：[log/simulation_20260730_192807](/home/nvidia/CUADC_drone_missions_ws/log/simulation_20260730_192807)
+该次验证早于 2026-10-13 的降落改动；新链路已有单元测试和台面仿真检查，尚无完整 SITL 或真机复飞证据。历史日志目录：`log/simulation_20260730_192807/`。
 
 ## 先读什么
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)：当前代码结构、数据流、FSM 和控制算法。
 - [CODE_READING_GUIDE.md](CODE_READING_GUIDE.md)：逐文件导读、运行时调用链和代码学习路径。
-- [DEPLOYMENT.md](DEPLOYMENT.md)：构建、仿真、真机启动和日志操作。
-- [PARAMETER_USAGE_GUIDE.md](PARAMETER_USAGE_GUIDE.md)：任务速度、航向和常用参数修改指南。
-- [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)：真机现场检查清单。
-- [RTK_DEPLOYMENT_GUIDE.md](RTK_DEPLOYMENT_GUIDE.md)：C-RTK 基站/Rover 部署、PX4 参数、QGC 验证、日志与可选 RTK 质量门设计。
-- [RISKS_AND_TODOS.md](RISKS_AND_TODOS.md)：风险清单和待办事项，真机飞行前的 blocking items。
-- [WORKLOG.md](WORKLOG.md)：问题、修改、验证和遗留风险的工作记录。
+- [DEPLOYMENT.md](Deployment/DEPLOYMENT.md)：构建、仿真、真机启动和日志操作。
+- [PARAMETER_USAGE_GUIDE.md](Debug/PARAMETER_USAGE_GUIDE.md)：任务速度、航向和常用参数修改指南。
+- [REAL_HARDWARE_DEBUG_GUIDE.md](Debug/REAL_HARDWARE_DEBUG_GUIDE.md)：真机现场检查清单。
+- [RTK_DEPLOYMENT_GUIDE.md](Deployment/RTK_DEPLOYMENT_GUIDE.md)：C-RTK 基站/Rover 部署、PX4 参数、QGC 验证、日志与可选 RTK 质量门设计。
+- [RISKS_AND_TODOS.md](Debug/RISKS_AND_TODOS.md)：风险清单和待办事项。
+- [WORKLOG.md](Debug/WORKLOG.md)：问题、修改、验证和遗留风险的工作记录。
+- [PRECISION_LANDING_PLAN.md](PRECISION_LANDING_PLAN.md)：2026-10-13 降落改造状态与待决策项。
+- [PRECISION_LANDING_AUTHORITY.md](PRECISION_LANDING_AUTHORITY.md)：降落算法依据与一手证据。
 - [field/README.md](../field/README.md)：Gazebo 场景和随机场地说明。
 - [飞控参数修改记录](../real_flight_logs/飞控参数修改记录.md)：实际飞行后的 PX4 参数记录。
 
@@ -38,7 +40,7 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
  → RETURN_TO_HOME → PRECISION_LAND → COMPLETE
 ```
 
-投放区按圆筒记忆库和半径策略选目标，低空使用图像闭环精校后调用舵机服务。侦察区执行弓字形全路径扫描，覆盖监控只统计相机视场是否覆盖网格。降落阶段必须先识别 H、视觉对心并连续稳定，再进入纯垂直盲降；不调用 PX4 LAND 作为精准降落路径。
+投放区按圆筒记忆库和半径策略选目标，低空使用图像闭环精校后调用舵机服务。侦察区执行弓字形全路径扫描，覆盖监控只统计相机视场是否覆盖网格。降落阶段先识别 H、视觉对心并锁存，再进入纯垂直盲降。主任务 full 在失效后停止并请求人工接管；快速任务 quick 的 simple 降落在搜索、丢失或盲降超时时可请求 PX4 LAND。两者的参数与兜底策略不能混用。
 
 ## SITL 与真机
 
@@ -51,18 +53,20 @@ INIT → ARM → TAKEOFF → TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
 | 消息环境 | `scripts/sitl_env.sh` 提升隔离 v4 `px4_msgs` | 工作区默认 v1 `px4_msgs` |
 | 相机 | Gazebo 图像桥 | V4L2 相机节点 |
 | 舵机 | `drone_servo2` SITL Mock | PX4 `DO_SET_ACTUATOR` → MAIN5 |
-| 接地确认 | 严格的高度/速度保持条件备用判定 | PX4 `vehicle_land_detected` |
+| 接地确认 | PX4 接地信号及严格近地静止备用判定 | PX4 接地信号及严格近地静止备用判定；备用判定可靠性待实测 |
 
-因此，“真机发布 v1、仿真使用 v4”是部署适配，不是任务逻辑分叉。详细边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+消息版本是部署适配。full 与 quick 则有独立的投放和降落策略，详见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 构建与测试
 
 ```bash
-cd /home/nvidia/CUADC_drone_missions_ws
+cd /home/ryder/drone_tasks_ws  # 开发机；Jetson 使用实际部署路径
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
-pytest -q src/drone_mission/test src/drone_vision/test src/px4_control/test
+python3 -m pytest -q src/drone_mission/test
+python3 -m pytest -q src/drone_vision/test
+python3 -m pytest -q src/px4_control/test
 ```
 
 完整仿真前需准备 PX4 SITL、Gazebo Harmonic、MicroXRCEAgent，以及 `src/drone_vision/drone_vision/models/` 中配置引用的 ONNX 模型。运行：

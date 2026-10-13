@@ -28,12 +28,12 @@ PX4 飞控                    drone_servo2 舵机投放
 
 1. `scripts/start_quick_simulation.sh` / `scripts/start_full_simulation.sh`：分别启动快速权威策略和主任务策略；两者都从 `layout_heading_deg` 生成运行时场地、PX4 初始 Gazebo yaw 和 ROS launch，并建立日志目录。
 2. `scripts/sitl_env.sh`：加载 ROS 2 和工作区，再把隔离构建的 v4 `px4_msgs` overlay 放到环境前端。
-3. `src/drone_bringup/launch/quick_sitl.launch.py` / `sitl.launch.py`：组合相同节点，但分别加载快速与主任务参数；两者都覆盖 SITL 的 Home、`layout_heading_deg` 和 v4 状态话题。
+3. `src/drone_bringup/launch/quick_sitl.launch.py` / `sitl.launch.py`：组合相同节点，但分别加载快速与主任务参数；两者都覆盖 SITL 的 Home、`layout_heading_deg`、v4 状态话题，并加载 `airframe_params_sitl.yaml`。浮点 launch 参数用 `ParameterValue(..., value_type=float)` 下发。
 4. `src/drone_bringup/scripts/gz_camera_bridge.py`：把 Gazebo 图像转换成 `/drone/camera/image_raw` 和相机信息。
 
 ### 2.2 真机启动链
 
-1. `scripts/start_quick_mission_real.sh` / `scripts/start_full_real_mission.sh`：分别启动快速和主任务真机流程；它们启动唯一 MicroXRCEAgent（UDP `8888`）并等待 DDS 就绪，再调用 `quick_flight.launch.py` / `real_flight.launch.py`。两者接受同一个 `layout_heading_deg`，但真机场地方位必须由操作者实地确认。
+1. `scripts/start_quick_mission_real.sh` / `scripts/start_full_real_mission.sh`：分别启动快速和主任务真机流程；它们启动唯一 MicroXRCEAgent（UDP `8888`）并等待 DDS 就绪，再调用 `quick_flight.launch.py` / `real_flight.launch.py`。两者接受同一个 `layout_heading_deg` 并加载 `airframe_params_real.yaml`；真机场地方位与机体几何须由操作者实地确认。
 2. `src/drone_vision/drone_vision/camera.py`：读取 V4L2 设备并发布标准 ROS 图像话题。
 3. PX4 通过以太网 UDP 向 Jetson 的 `MicroXRCEAgent udp4 -p 8888` 建立 DDS；相机则独立通过 USB 接入 Jetson。
 4. 真机使用工作区默认 v1 `px4_msgs` 和 `/fmu/out/vehicle_status_v1`；任务逻辑仍与 SITL 共用。
@@ -46,7 +46,7 @@ PX4 飞控                    drone_servo2 舵机投放
 
 1. `msg/NedPositionSetpoint.msg`：任务位置航段如何原子传递 NED 目标、yaw 和可选速度给 `px4_bridge`。
 2. `msg/CylinderDetection.msg`、`CylinderArray.msg`：投放目标怎样表达。
-3. `msg/LandingTarget.msg`：H 目标中心、世界坐标和置信度怎样表达。
+3. `msg/LandingTarget.msg`：H 目标中心、世界坐标、置信度和 `header.stamp` 采集时刻怎样表达。
 4. `msg/CoverageStatus.msg`：覆盖率怎样从视觉传给任务。
 5. `srv/SetVisionMode.srv`：FSM 如何切换视觉模式。
 6. `srv/TriggerDrop.srv`：FSM 如何请求一次投放。
@@ -149,7 +149,7 @@ yaw。起飞、位置航点、视觉速度和接管悬停都保持该 yaw；起�
 
 ### 4.4 视觉降落
 
-返航到 Home → FSM 切换 landing 模式 → `vision_pipeline.py` 加载 `landing_h_yolo.onnx` 并发布 `LandingTarget` → `state_precision_land.py` 检查置信度、跳变、像素误差和稳定帧 → 对心锁存后下降到 1.5 m → 只发布垂直 Offboard 速度 → 真机等待 `vehicle_land_detected`，SITL 评估严格近地备用条件 → 零速度、force disarm、写入 `mission_end`。
+返航到 Home → FSM 切换 landing 模式 → `vision_pipeline.py` 发布带采集时刻的 `LandingTarget` → `mission_state_machine.py` 检查真实检测的 2 秒龄期并保存载机位姿历史 → full 的 `state_precision_land.py` 或 quick 的 `state_precision_land_simple.py` 做像素伺服和目标位置估计 → 对心锁存后切纯垂直盲降 → PX4 接地信号或严格近地静止判据确认后收尾。full 丢失重捕获失败或盲降超时会请求人工接管；quick/simple 可请求 PX4 LAND。两条路径都从 `pid_tuning.yaml` 取伺服增益，伺服卡方门默认关闭。
 
 ## 5. 遇到问题时的定位顺序
 
@@ -179,7 +179,7 @@ yaw。起飞、位置航点、视觉速度和接管悬停都保持该 yaw；起�
 
 ### 第四阶段：读视觉闭环
 
-按 `vision_pipeline.py → yolo_engine.py → detector/refiner → coordinate_transforms.py → visual_servoing.py` 阅读。重点跟踪一帧图像如何变成目标坐标和速度，而不是先调阈值。
+按 `vision_pipeline.py → yolo_engine.py → detector/refiner → coordinate_transforms.py → mission_state_machine.py → pose_history.py → landing_estimator.py → state_precision_land*.py → servo_pid.py` 阅读降落链。重点跟踪一帧图像的采集时刻、位姿、目标估计和速度指令。
 
 ### 第五阶段：用日志反向验证
 
@@ -187,7 +187,7 @@ yaw。起飞、位置航点、视觉速度和接管悬停都保持该 yaw；起�
 
 ### 第六阶段：再看真机差异
 
-最后阅读 `real_flight.launch.py`、`scripts/sitl_env.sh`、`standalone_bridge.py` 和 [REAL_HARDWARE_DEBUG_GUIDE.md](REAL_HARDWARE_DEBUG_GUIDE.md)，专门比较 USB 相机、PX4 Ethernet/UDP DDS、v1/v4 消息、MAIN5 和接地确认，不要把 SITL Adapter 的行为误认为真机实现。
+最后阅读 `real_flight.launch.py`、`scripts/sitl_env.sh`、`standalone_bridge.py` 和 [Debug/REAL_HARDWARE_DEBUG_GUIDE.md](Debug/REAL_HARDWARE_DEBUG_GUIDE.md)，专门比较 USB 相机、PX4 Ethernet/UDP DDS、v1/v4 消息、MAIN5 和接地确认，不要把 SITL Adapter 的行为误认为真机实现。
 
 同时比较四个完整入口：`quick_sitl` / `quick_flight` 加载 quick 参数（标识物目标、
 连续投放、简化降落和其独立速度）；`sitl` / `real_flight` 加载主任务参数（完整

@@ -1,6 +1,6 @@
 # Quick bucket 高度几何同步说明
 
-> 本文记录 2026-09-27 至 2026-10-05 的几何配置过程。旧蓝盘兜底门禁与 `bucket_sim_calibration_valid` 启动参数已停用；当前 bucket 依据圆筒视觉对心或 16 秒超时投放。运行逻辑见 [Quick bucket 当前流程](../Tactics/QUICK_BUCKET_CURRENT_FLOW.md)。下文量测数据仍保留供试投核对。
+> 本文记录 2026-09-27 至 2026-10-05 的几何配置过程。2026-10-13 起机体几何的当前配置位置为 `src/drone_bringup/config/airframe_params_{real,sitl}.yaml`，四个完整任务 launch 均加载对应文件。旧蓝盘兜底门禁与 `bucket_sim_calibration_valid` 启动参数已停用；当前 bucket 依据圆筒视觉对心或 16 秒超时投放。运行逻辑见 [Quick bucket 当前流程](../Tactics/QUICK_BUCKET_CURRENT_FLOW.md)。下文量测数据仍保留供试投核对。
 
 2026-09-27：将 Jetson 分支 `9f8d05e` 的 bucket 高度修正同步到 Optimization。此次仅修改 bucket 投影、视觉伺服距离和投放落点计算；起飞状态、PX4 通信、真机相机设备及话题未改。`quick_drop_profile` 仍默认 `blue`，`bucket_calibration_valid` 仍默认 `false`。
 
@@ -14,6 +14,6 @@ O 点是现场选定的机体中心，仍须与 PX4 位姿使用的机体参考�
 
 ## 仿真隔离
 
-SITL launch 改为加载 `vision_params_quick_sim.yaml`，沿用此前仿真验证过的零机体离地基准、零相机安装偏移和 0.30 m 桶口。真机 launch 继续加载 `vision_params_quick.yaml`，使用现场量测值。仿真任务配置也保持原值。因此真机几何不会覆盖已跑通的 SITL 条件。
+SITL quick launch 加载 `vision_params_quick_sim.yaml` 和 `airframe_params_sitl.yaml`，后者保持零机体离地基准、零相机安装偏移；真机 quick launch 加载 `vision_params_quick.yaml` 和 `airframe_params_real.yaml`，后者保存现场量测值。full 的 SITL/真机 launch 也分别加载这两个机体文件。桶口高度仍由任务 profile/launch 单独配置，不能把机体几何文件当作全部投放参数。
 
 真机部署时以 Jetson 分支为准；Optimization 的实飞配置用于开发与对比。更新机载电脑后，先确认参数加载、模型、图像与静态投影，再做受控试投。单元测试与 SITL 通过不能保证真机起飞或命中，起飞前仍须完成机载构建和常规地面检查。

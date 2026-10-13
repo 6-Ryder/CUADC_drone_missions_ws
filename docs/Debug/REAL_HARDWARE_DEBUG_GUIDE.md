@@ -9,7 +9,7 @@
 - QGroundControl 能连接 CUAV 7-Nano，电池和传感器状态正常。
 - 确认 PX4 v1.17 参数记录与当前飞控一致，尤其是 RC、接地检测和速度限制。
 
-参数参考：[飞控参数修改记录](../real_flight_logs/飞控参数修改记录.md)。
+参数参考：[飞控参数修改记录](../../real_flight_logs/飞控参数修改记录.md)。
 
 ## 2. PX4 DDS 与桥接
 
@@ -39,7 +39,7 @@ ros2 topic list | rg 'image|vision/status'
 ros2 topic echo /drone/vision/status --once
 ```
 
-必须看到视觉 `ready=1`，并使用真机标定的 `fx/fy/cx/cy`。若模型加载失败、provider 不可用、相机无帧或 ready 未置位，不得解锁。
+必须看到视觉 `ready=1`，并核对实际 `fx/fy/cx/cy` 与相机标定；当前真机配置中的 400/400/320/240 仍是待标定值。`ready=1` 不能代替帧龄检查。若模型加载失败、provider 不可用、相机无帧或 ready 未置位，不得解锁。
 
 ## 4. 舵机与 MAIN5
 
@@ -78,11 +78,13 @@ ros2 topic echo /fmu/out/vehicle_command_ack --once               # PX4 ACK (res
 - `vehicle_status_v1`、`/drone/pose`、视觉和舵机均 ready；
 - 遥控器允许解锁但仍保留手动接管；
 - 任务区域坐标、相机朝向和目标载荷与配置一致；
+- 核对 `airframe_params_real.yaml` 中相机下偏移、机体原点及投放点，与实体一致；
+- 运行 `python3 -m pytest -q src/drone_mission/test/test_mission_params_contract.py`，确认 YAML double 参数和 launch 浮点覆盖类型正确；
 - 操作者知道如何切换手动/安全模式；
 - 记录本次日志目录和飞控参数版本。
 
 ## 6. 降落与异常
 
-精准降落必须先由 H 视觉完成对心锁存，再进入 1.5 m 盲降。视觉丢失、盲降超时或水平误差未稳定时，系统应停止运动并进入错误处理；不要以 PX4 LAND 代替视觉流程。
+主任务 full 必须先由 H 视觉完成对心锁存，再于约 1.5 m 切入盲降。查看 H 目标采集时刻、2 s 龄期、估计器拒帧和对心锁存日志；盲降默认 45 s 超时后停止并请求人工接管。短时丢失时若有成熟目标且高于近地横移下限，状态会有界地向最后已知位置靠近。quick/simple 的 1.6 m 交接与 PX4 LAND 兜底是另一条路径，不能套用 full 的故障预期。
 
-接地后确认 `/fmu/out/vehicle_land_detected`，再检查电机停转、舵机状态和任务摘要。任何异常先由遥控器接管，再停止 ROS 2 节点。
+接地后确认 `/fmu/out/vehicle_land_detected`，并检查是否使用了严格近地静止备用判据，再核对电机停转、舵机状态和任务摘要。备用判据在真机的可靠性仍待实测。任何异常先由遥控器接管，再停止 ROS 2 节点。

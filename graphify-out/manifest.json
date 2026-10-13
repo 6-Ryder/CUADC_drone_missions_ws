@@ -1,0 +1,1302 @@
+{
+  ".vscode/c_cpp_properties.json": {
+    "mtime": 1784792207.2880664,
+    "ast_hash": "90af0bd7832507397ca5ce6859ad386d",
+    "semantic_hash": "90af0bd7832507397ca5ce6859ad386d"
+  },
+  ".vscode/settings.json": {
+    "mtime": 1790302665.702659,
+    "ast_hash": "75829e1a993e064c1e4cdebf86f28556",
+    "semantic_hash": "75829e1a993e064c1e4cdebf86f28556"
+  },
+  "compile_commands.json": {
+    "mtime": 1791872516.4899733,
+    "ast_hash": "0c1d7f47ef4143992bd07421e38b0bd1",
+    "semantic_hash": "0c1d7f47ef4143992bd07421e38b0bd1"
+  },
+  "field/generate_random_field.py": {
+    "mtime": 1786527533.1710188,
+    "ast_hash": "6503ef437e35dbd938840b77ba0de495",
+    "semantic_hash": "6503ef437e35dbd938840b77ba0de495"
+  },
+  "scripts/build_sitl_px4_msgs.sh": {
+    "mtime": 1790302665.702659,
+    "ast_hash": "24e272f9e3edae397acd9876bc706cb7",
+    "semantic_hash": "24e272f9e3edae397acd9876bc706cb7"
+  },
+  "scripts/debug_vision.sh": {
+    "mtime": 1790302640.576047,
+    "ast_hash": "5905679c47bfbc014a23ba4d19f24f90",
+    "semantic_hash": "5905679c47bfbc014a23ba4d19f24f90"
+  },
+  "scripts/simple_mission.sh": {
+    "mtime": 1790395453.510427,
+    "ast_hash": "8bd1cf98cbce04ea60f64d4f0b11dcbd",
+    "semantic_hash": "8bd1cf98cbce04ea60f64d4f0b11dcbd"
+  },
+  "scripts/simple_mission_real.sh": {
+    "mtime": 1785628276.762191,
+    "ast_hash": "92c52505772ce4dad3947aa0574098fb",
+    "semantic_hash": "92c52505772ce4dad3947aa0574098fb"
+  },
+  "scripts/sitl_env.sh": {
+    "mtime": 1785408729.8749907,
+    "ast_hash": "312b8ac4237763f497feccfdf8c2343a",
+    "semantic_hash": "312b8ac4237763f497feccfdf8c2343a"
+  },
+  "scripts/start_full_real_mission.sh": {
+    "mtime": 1785915188.1858087,
+    "ast_hash": "02058919127d58ea0a7c3a35e159dfe9",
+    "semantic_hash": "02058919127d58ea0a7c3a35e159dfe9"
+  },
+  "scripts/start_full_simulation.sh": {
+    "mtime": 1790395453.3924267,
+    "ast_hash": "7469635848d75bee86ae6d4d6780d16e",
+    "semantic_hash": "7469635848d75bee86ae6d4d6780d16e"
+  },
+  "scripts/start_quick_mission_real.sh": {
+    "mtime": 1791336305.3632812,
+    "ast_hash": "4dfd2dba5e84f45c6070f60fd6373b7d",
+    "semantic_hash": "4dfd2dba5e84f45c6070f60fd6373b7d"
+  },
+  "scripts/start_quick_simulation.sh": {
+    "mtime": 1791278414.7793462,
+    "ast_hash": "9d00822c91c7d42fa55db3329588756b",
+    "semantic_hash": "9d00822c91c7d42fa55db3329588756b"
+  },
+  "scripts/test_forward_recon.sh": {
+    "mtime": 1786527533.1710188,
+    "ast_hash": "e00128800ea43d7d4e5a11225dc199e8",
+    "semantic_hash": "e00128800ea43d7d4e5a11225dc199e8"
+  },
+  "scripts/verify_real_flight_ready.sh": {
+    "mtime": 1785915188.9519079,
+    "ast_hash": "6c9b8577a981108de7417162d7fff0e0",
+    "semantic_hash": "6c9b8577a981108de7417162d7fff0e0"
+  },
+  "src/drone_bringup/drone_bringup/__init__.py": {
+    "mtime": 1783323704.232062,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "src/drone_bringup/launch/quick_flight.launch.py": {
+    "mtime": 1791891968.5874734,
+    "ast_hash": "4898de4f2967a795e9dcece72f64fe83",
+    "semantic_hash": "4898de4f2967a795e9dcece72f64fe83"
+  },
+  "src/drone_bringup/launch/quick_sitl.launch.py": {
+    "mtime": 1791891968.5874734,
+    "ast_hash": "3401c38b6d32c2cce76fabd55fc5ea95",
+    "semantic_hash": "3401c38b6d32c2cce76fabd55fc5ea95"
+  },
+  "src/drone_bringup/launch/real_flight.launch.py": {
+    "mtime": 1791891968.5884733,
+    "ast_hash": "af47ebc12e044031e2c986a1284b2c52",
+    "semantic_hash": "af47ebc12e044031e2c986a1284b2c52"
+  },
+  "src/drone_bringup/launch/simple_mission.launch.py": {
+    "mtime": 1791892053.8648171,
+    "ast_hash": "ef60fb07d12da366431dc2e67321d48e",
+    "semantic_hash": "ef60fb07d12da366431dc2e67321d48e"
+  },
+  "src/drone_bringup/launch/sitl.launch.py": {
+    "mtime": 1791892066.3572662,
+    "ast_hash": "6f8733b95ffc66a4569aa64193463d67",
+    "semantic_hash": "6f8733b95ffc66a4569aa64193463d67"
+  },
+  "src/drone_bringup/launch/vision_only.launch.py": {
+    "mtime": 1784792197.218055,
+    "ast_hash": "5ab323fd5cbb20a7adddab43bc6d92d7",
+    "semantic_hash": "5ab323fd5cbb20a7adddab43bc6d92d7"
+  },
+  "src/drone_bringup/scripts/gz_camera_bridge.py": {
+    "mtime": 1790395780.9854038,
+    "ast_hash": "11a8ac982413a69045a8413c160a4499",
+    "semantic_hash": "11a8ac982413a69045a8413c160a4499"
+  },
+  "src/drone_bringup/setup.py": {
+    "mtime": 1790302665.7066576,
+    "ast_hash": "f8ffd2464cd3a2270b133d019484854d",
+    "semantic_hash": "f8ffd2464cd3a2270b133d019484854d"
+  },
+  "src/drone_bringup/test/test_copyright.py": {
+    "mtime": 1783323704.2330623,
+    "ast_hash": "4996344e5b6b7ac0c99a267f121398f4",
+    "semantic_hash": "4996344e5b6b7ac0c99a267f121398f4"
+  },
+  "src/drone_bringup/test/test_flake8.py": {
+    "mtime": 1783323704.2330623,
+    "ast_hash": "aa129cddddd383a922ed54000fb385e5",
+    "semantic_hash": "aa129cddddd383a922ed54000fb385e5"
+  },
+  "src/drone_bringup/test/test_pep257.py": {
+    "mtime": 1783323704.2330623,
+    "ast_hash": "1a5086842153d5f68611ba9f8cb7e443",
+    "semantic_hash": "1a5086842153d5f68611ba9f8cb7e443"
+  },
+  "src/drone_bringup/test/test_px4_interface_deployment_contract.py": {
+    "mtime": 1785892945.107689,
+    "ast_hash": "97417a8101a160bf9819dda74c7a6983",
+    "semantic_hash": "97417a8101a160bf9819dda74c7a6983"
+  },
+  "src/drone_bringup/test/test_quick_launch_configuration.py": {
+    "mtime": 1791875929.068276,
+    "ast_hash": "8fa19672317d1d923a3d0ee8e58644db",
+    "semantic_hash": "8fa19672317d1d923a3d0ee8e58644db"
+  },
+  "src/drone_bringup/test/test_real_full_mission_profile.py": {
+    "mtime": 1791876598.753343,
+    "ast_hash": "ffdbdb63bbaa3e8eac0ff59d055c6b59",
+    "semantic_hash": "ffdbdb63bbaa3e8eac0ff59d055c6b59"
+  },
+  "src/drone_bringup/test/test_real_mission_scripts.py": {
+    "mtime": 1790303320.5925145,
+    "ast_hash": "f3c5dd26e46efb3ebd291875590d965a",
+    "semantic_hash": "f3c5dd26e46efb3ebd291875590d965a"
+  },
+  "src/drone_bringup/test/test_servo_launch_configuration.py": {
+    "mtime": 1784792197.218055,
+    "ast_hash": "3019dd43e4bc0e6a7b0a6fb69a7a0d81",
+    "semantic_hash": "3019dd43e4bc0e6a7b0a6fb69a7a0d81"
+  },
+  "src/drone_bringup/test/test_simulation_script.py": {
+    "mtime": 1786527533.172019,
+    "ast_hash": "f80e2695823a2bdc54cacdc1c9e2b91b",
+    "semantic_hash": "f80e2695823a2bdc54cacdc1c9e2b91b"
+  },
+  "src/drone_bringup/test/test_vision_launch_configuration.py": {
+    "mtime": 1784792197.218055,
+    "ast_hash": "366e5b2b276f1ca2721ead8b82b0ace5",
+    "semantic_hash": "366e5b2b276f1ca2721ead8b82b0ace5"
+  },
+  "src/drone_mission/drone_mission/__init__.py": {
+    "mtime": 1783998417.9387465,
+    "ast_hash": "1f5551310160b8ef504fbe1b91d8d8d4",
+    "semantic_hash": "1f5551310160b8ef504fbe1b91d8d8d4"
+  },
+  "src/drone_mission/drone_mission/cylinder_selector.py": {
+    "mtime": 1791360907.3664472,
+    "ast_hash": "afb86973674e3672c2b5f93ed315bfcd",
+    "semantic_hash": "afb86973674e3672c2b5f93ed315bfcd"
+  },
+  "src/drone_mission/drone_mission/drop_visual_aligner.py": {
+    "mtime": 1786527533.173019,
+    "ast_hash": "c1c96b19a1a32cdb48f3271dbc791796",
+    "semantic_hash": "c1c96b19a1a32cdb48f3271dbc791796"
+  },
+  "src/drone_mission/drone_mission/mission_state_machine.py": {
+    "mtime": 1791891595.8039374,
+    "ast_hash": "ef994b25ee5647db29b181b5570cbde3",
+    "semantic_hash": "ef994b25ee5647db29b181b5570cbde3"
+  },
+  "src/drone_mission/drone_mission/path_planner.py": {
+    "mtime": 1786527533.173019,
+    "ast_hash": "8672c88a5db284ca11445135dbb0d506",
+    "semantic_hash": "8672c88a5db284ca11445135dbb0d506"
+  },
+  "src/drone_mission/drone_mission/precision_align_controller.py": {
+    "mtime": 1791891580.0385993,
+    "ast_hash": "a236f05a883e535d6c5a2c152cb1b997",
+    "semantic_hash": "a236f05a883e535d6c5a2c152cb1b997"
+  },
+  "src/drone_mission/drone_mission/simple_mission.py": {
+    "mtime": 1786458879.9414258,
+    "ast_hash": "b1526c1d5e4820f18f437b7d6e0a8e24",
+    "semantic_hash": "b1526c1d5e4820f18f437b7d6e0a8e24"
+  },
+  "src/drone_mission/drone_mission/states/__init__.py": {
+    "mtime": 1783424382.2391524,
+    "ast_hash": "6620b8611f130e8e4f3d1a86787563be",
+    "semantic_hash": "6620b8611f130e8e4f3d1a86787563be"
+  },
+  "src/drone_mission/drone_mission/states/state_cylinder_approach.py": {
+    "mtime": 1791360907.3664472,
+    "ast_hash": "a94aa6635e27ddd8645b667aae16d566",
+    "semantic_hash": "a94aa6635e27ddd8645b667aae16d566"
+  },
+  "src/drone_mission/drone_mission/states/state_cylinder_search.py": {
+    "mtime": 1791871685.7343287,
+    "ast_hash": "9a4087a7a9b56c5ffb4d92efb24cc33c",
+    "semantic_hash": "9a4087a7a9b56c5ffb4d92efb24cc33c"
+  },
+  "src/drone_mission/drone_mission/states/state_drop.py": {
+    "mtime": 1791871681.6975904,
+    "ast_hash": "2e2683c1c3e6c26ea5a9784643c885b0",
+    "semantic_hash": "2e2683c1c3e6c26ea5a9784643c885b0"
+  },
+  "src/drone_mission/drone_mission/states/state_hold_for_takeover.py": {
+    "mtime": 1785838710.306696,
+    "ast_hash": "bf90992aafb8c94e116d7314dbb08911",
+    "semantic_hash": "bf90992aafb8c94e116d7314dbb08911"
+  },
+  "src/drone_mission/drone_mission/states/state_init.py": {
+    "mtime": 1785838781.3752394,
+    "ast_hash": "ba377f402b3569cfd72c489e6d16fb59",
+    "semantic_hash": "ba377f402b3569cfd72c489e6d16fb59"
+  },
+  "src/drone_mission/drone_mission/states/state_precision_land.py": {
+    "mtime": 1791891580.037599,
+    "ast_hash": "34bf2bb0de9c008248c47cdfc15f3285",
+    "semantic_hash": "34bf2bb0de9c008248c47cdfc15f3285"
+  },
+  "src/drone_mission/drone_mission/states/state_precision_land_simple.py": {
+    "mtime": 1791891580.037599,
+    "ast_hash": "1222f87174b05f72e45c49a6cd09c2b7",
+    "semantic_hash": "1222f87174b05f72e45c49a6cd09c2b7"
+  },
+  "src/drone_mission/drone_mission/states/state_recon_inspect.py": {
+    "mtime": 1783408857.9152322,
+    "ast_hash": "61a7382086f19e1fce4314befe8b5d29",
+    "semantic_hash": "61a7382086f19e1fce4314befe8b5d29"
+  },
+  "src/drone_mission/drone_mission/states/state_recon_patrol.py": {
+    "mtime": 1786527533.174019,
+    "ast_hash": "c6af31aa44fd66a2049619b387fa4dfd",
+    "semantic_hash": "c6af31aa44fd66a2049619b387fa4dfd"
+  },
+  "src/drone_mission/drone_mission/states/state_return.py": {
+    "mtime": 1786527533.174019,
+    "ast_hash": "f8fe1f7b3d81e80a5ad37bcbb2e7e7f3",
+    "semantic_hash": "f8fe1f7b3d81e80a5ad37bcbb2e7e7f3"
+  },
+  "src/drone_mission/drone_mission/states/state_takeoff.py": {
+    "mtime": 1786527991.7214367,
+    "ast_hash": "0683cf13ddfd52a54c1f2b96d8cf94d3",
+    "semantic_hash": "0683cf13ddfd52a54c1f2b96d8cf94d3"
+  },
+  "src/drone_mission/drone_mission/states/state_transit.py": {
+    "mtime": 1786527533.174019,
+    "ast_hash": "f6b78311d74c9b113ad0d972180f30af",
+    "semantic_hash": "f6b78311d74c9b113ad0d972180f30af"
+  },
+  "src/drone_mission/setup.py": {
+    "mtime": 1790302665.7066576,
+    "ast_hash": "241b74d0405fe57ff77445eca089c202",
+    "semantic_hash": "241b74d0405fe57ff77445eca089c202"
+  },
+  "src/drone_mission/test/test_copyright.py": {
+    "mtime": 1783323372.2578049,
+    "ast_hash": "4996344e5b6b7ac0c99a267f121398f4",
+    "semantic_hash": "4996344e5b6b7ac0c99a267f121398f4"
+  },
+  "src/drone_mission/test/test_drop_service_failure.py": {
+    "mtime": 1786527533.174019,
+    "ast_hash": "4e349d61c0c4367cd632adab0813ddab",
+    "semantic_hash": "4e349d61c0c4367cd632adab0813ddab"
+  },
+  "src/drone_mission/test/test_drop_timing_contract.py": {
+    "mtime": 1791869582.0993414,
+    "ast_hash": "512609628ef5e998825af714a261a9cc",
+    "semantic_hash": "512609628ef5e998825af714a261a9cc"
+  },
+  "src/drone_mission/test/test_flake8.py": {
+    "mtime": 1783323372.2578049,
+    "ast_hash": "aa129cddddd383a922ed54000fb385e5",
+    "semantic_hash": "aa129cddddd383a922ed54000fb385e5"
+  },
+  "src/drone_mission/test/test_flight_safety_contract.py": {
+    "mtime": 1791882339.419268,
+    "ast_hash": "0999a11d098190836946c3e235370e08",
+    "semantic_hash": "0999a11d098190836946c3e235370e08"
+  },
+  "src/drone_mission/test/test_full_real_recovery_contract.py": {
+    "mtime": 1786527533.174019,
+    "ast_hash": "edd5d9b5259a0b38c6f06ee907ec9534",
+    "semantic_hash": "edd5d9b5259a0b38c6f06ee907ec9534"
+  },
+  "src/drone_mission/test/test_hold_for_takeover.py": {
+    "mtime": 1786527533.174019,
+    "ast_hash": "8eb1b3d0900d11df1746ca4cd6b22fbc",
+    "semantic_hash": "8eb1b3d0900d11df1746ca4cd6b22fbc"
+  },
+  "src/drone_mission/test/test_operator_takeover_contract.py": {
+    "mtime": 1785841528.8146238,
+    "ast_hash": "2afbe9c6c0b4f4b24028042512092d93",
+    "semantic_hash": "2afbe9c6c0b4f4b24028042512092d93"
+  },
+  "src/drone_mission/test/test_pep257.py": {
+    "mtime": 1783323372.2578049,
+    "ast_hash": "1a5086842153d5f68611ba9f8cb7e443",
+    "semantic_hash": "1a5086842153d5f68611ba9f8cb7e443"
+  },
+  "src/drone_mission/test/test_precision_align_controller.py": {
+    "mtime": 1791891595.8029373,
+    "ast_hash": "ca861f31255c26cf19b431e60e035325",
+    "semantic_hash": "ca861f31255c26cf19b431e60e035325"
+  },
+  "src/drone_mission/test/test_quick_drop_strategy.py": {
+    "mtime": 1791871979.6702,
+    "ast_hash": "205b1c9144aef48a4ff4ae045b93699a",
+    "semantic_hash": "205b1c9144aef48a4ff4ae045b93699a"
+  },
+  "src/drone_mission/test/test_recon_coverage_lifecycle.py": {
+    "mtime": 1786527533.175019,
+    "ast_hash": "ade6051c8431ce1632896b500390a084",
+    "semantic_hash": "ade6051c8431ce1632896b500390a084"
+  },
+  "src/drone_mission/test/test_simple_precision_land.py": {
+    "mtime": 1791891595.8029373,
+    "ast_hash": "09c4f313604bae8d10f57af9c96e35f1",
+    "semantic_hash": "09c4f313604bae8d10f57af9c96e35f1"
+  },
+  "src/drone_servo2/include/drone_servo2/drop_manager.hpp": {
+    "mtime": 1784792207.2910664,
+    "ast_hash": "ba6eb303a87147246e5d924412fc5d42",
+    "semantic_hash": "ba6eb303a87147246e5d924412fc5d42"
+  },
+  "src/drone_servo2/include/drone_servo2/servo_interface.hpp": {
+    "mtime": 1784792207.2910664,
+    "ast_hash": "1b591c3ccbc372388d6218df0f0bd96a",
+    "semantic_hash": "1b591c3ccbc372388d6218df0f0bd96a"
+  },
+  "src/drone_servo2/scripts/check_servo.sh": {
+    "mtime": 1790302665.702659,
+    "ast_hash": "efbc3329914266dca38bf708d5eca13b",
+    "semantic_hash": "efbc3329914266dca38bf708d5eca13b"
+  },
+  "src/drone_servo2/scripts/debug_terminal.sh": {
+    "mtime": 1790302665.702659,
+    "ast_hash": "08ac90ab22c788cb67389e8dfe4db7b4",
+    "semantic_hash": "08ac90ab22c788cb67389e8dfe4db7b4"
+  },
+  "src/drone_servo2/scripts/demo.sh": {
+    "mtime": 1790302665.702659,
+    "ast_hash": "5367273666ae170081d75b7f5ea298c8",
+    "semantic_hash": "5367273666ae170081d75b7f5ea298c8"
+  },
+  "src/drone_servo2/scripts/mock_px4_ack.py": {
+    "mtime": 1785676106.3103335,
+    "ast_hash": "a99fbd64b55079f76bfc9ecb1fd54480",
+    "semantic_hash": "a99fbd64b55079f76bfc9ecb1fd54480"
+  },
+  "src/drone_servo2/scripts/test_servo_full.sh": {
+    "mtime": 1790302665.702659,
+    "ast_hash": "f8aa25581ef7cddde657c7d5f50220c2",
+    "semantic_hash": "f8aa25581ef7cddde657c7d5f50220c2"
+  },
+  "src/drone_servo2/scripts/test_servo_hardware.sh": {
+    "mtime": 1790302665.7036586,
+    "ast_hash": "7180dea9458d3eedc37396ac641bdb19",
+    "semantic_hash": "7180dea9458d3eedc37396ac641bdb19"
+  },
+  "src/drone_servo2/src/servo_controller.cpp": {
+    "mtime": 1785916415.3517394,
+    "ast_hash": "65a0d2dc3ae2aeb1a566e199c51bac8f",
+    "semantic_hash": "65a0d2dc3ae2aeb1a566e199c51bac8f"
+  },
+  "src/drone_servo2/test/test_servo_source_contract.py": {
+    "mtime": 1785840237.6479688,
+    "ast_hash": "4e7c91cd8de040b7a7e1d40dbbb137dc",
+    "semantic_hash": "4e7c91cd8de040b7a7e1d40dbbb137dc"
+  },
+  "src/drone_utils/drone_utils/__init__.py": {
+    "mtime": 1786527533.175019,
+    "ast_hash": "2746bcebed72cea3faf64e050a268347",
+    "semantic_hash": "2746bcebed72cea3faf64e050a268347"
+  },
+  "src/drone_utils/drone_utils/config_loader.py": {
+    "mtime": 1784792197.221055,
+    "ast_hash": "ec61e2b4cb0261890da2aa64f5a402f2",
+    "semantic_hash": "ec61e2b4cb0261890da2aa64f5a402f2"
+  },
+  "src/drone_utils/drone_utils/emergency.py": {
+    "mtime": 1785399750.3099828,
+    "ast_hash": "fbc5f851e7c977549b7d8ad6b36c626f",
+    "semantic_hash": "fbc5f851e7c977549b7d8ad6b36c626f"
+  },
+  "src/drone_utils/drone_utils/logger.py": {
+    "mtime": 1784792197.221055,
+    "ast_hash": "a886e4f3ead28bad8ade0eff53287adb",
+    "semantic_hash": "a886e4f3ead28bad8ade0eff53287adb"
+  },
+  "src/drone_utils/drone_utils/progress_monitor.py": {
+    "mtime": 1785836350.2672741,
+    "ast_hash": "5b1548e86d4d10097a2f55dae7c0d81e",
+    "semantic_hash": "5b1548e86d4d10097a2f55dae7c0d81e"
+  },
+  "src/drone_utils/drone_utils/watchdog.py": {
+    "mtime": 1784792197.221055,
+    "ast_hash": "bb2c5fd04aac7180be8b6fd59d7e8982",
+    "semantic_hash": "bb2c5fd04aac7180be8b6fd59d7e8982"
+  },
+  "src/drone_utils/setup.py": {
+    "mtime": 1790302665.7066576,
+    "ast_hash": "623a46208dd2879254837709a9d0d067",
+    "semantic_hash": "623a46208dd2879254837709a9d0d067"
+  },
+  "src/drone_utils/test/test_copyright.py": {
+    "mtime": 1783322461.1067426,
+    "ast_hash": "4996344e5b6b7ac0c99a267f121398f4",
+    "semantic_hash": "4996344e5b6b7ac0c99a267f121398f4"
+  },
+  "src/drone_utils/test/test_flake8.py": {
+    "mtime": 1783322461.1077425,
+    "ast_hash": "aa129cddddd383a922ed54000fb385e5",
+    "semantic_hash": "aa129cddddd383a922ed54000fb385e5"
+  },
+  "src/drone_utils/test/test_pep257.py": {
+    "mtime": 1783322461.1077425,
+    "ast_hash": "1a5086842153d5f68611ba9f8cb7e443",
+    "semantic_hash": "1a5086842153d5f68611ba9f8cb7e443"
+  },
+  "src/drone_utils/test/test_progress_monitor.py": {
+    "mtime": 1785836342.445483,
+    "ast_hash": "466f1891e8dab99ea224b9c9a170250c",
+    "semantic_hash": "466f1891e8dab99ea224b9c9a170250c"
+  },
+  "src/drone_vision/drone_vision/__init__.py": {
+    "mtime": 1784792197.222055,
+    "ast_hash": "c759e3656f65c2f6e74a9f57b2dc7905",
+    "semantic_hash": "c759e3656f65c2f6e74a9f57b2dc7905"
+  },
+  "src/drone_vision/drone_vision/camera.py": {
+    "mtime": 1785835026.9042907,
+    "ast_hash": "5279cbec3ce8f93cf5fd14af462ae05c",
+    "semantic_hash": "5279cbec3ce8f93cf5fd14af462ae05c"
+  },
+  "src/drone_vision/drone_vision/coordinate_transforms.py": {
+    "mtime": 1790390863.8132236,
+    "ast_hash": "74794e7cec0e7d9925b8efd259aaa2a0",
+    "semantic_hash": "74794e7cec0e7d9925b8efd259aaa2a0"
+  },
+  "src/drone_vision/drone_vision/core/__init__.py": {
+    "mtime": 1783407176.465482,
+    "ast_hash": "6c28a559f790e35780504b2c7e81ac5e",
+    "semantic_hash": "6c28a559f790e35780504b2c7e81ac5e"
+  },
+  "src/drone_vision/drone_vision/coverage_monitor.py": {
+    "mtime": 1786527533.176019,
+    "ast_hash": "94f1df3672c8f2721da2216d675b15d5",
+    "semantic_hash": "94f1df3672c8f2721da2216d675b15d5"
+  },
+  "src/drone_vision/drone_vision/cylinder_detector.py": {
+    "mtime": 1786527533.176019,
+    "ast_hash": "184762519161ee753c38bfe274760dc3",
+    "semantic_hash": "184762519161ee753c38bfe274760dc3"
+  },
+  "src/drone_vision/drone_vision/hazard_classifier.py": {
+    "mtime": 1784792197.222055,
+    "ast_hash": "c0b8bd097519d352c38eff232285e611",
+    "semantic_hash": "c0b8bd097519d352c38eff232285e611"
+  },
+  "src/drone_vision/drone_vision/landing_detector.py": {
+    "mtime": 1786527991.7224367,
+    "ast_hash": "4a965084bb237f32e5df424d2c7bb810",
+    "semantic_hash": "4a965084bb237f32e5df424d2c7bb810"
+  },
+  "src/drone_vision/drone_vision/marker_detector.py": {
+    "mtime": 1790304788.089356,
+    "ast_hash": "26f591502adb43ce8f4772810e6cb46b",
+    "semantic_hash": "26f591502adb43ce8f4772810e6cb46b"
+  },
+  "src/drone_vision/drone_vision/models/__init__.py": {
+    "mtime": 1783406289.37945,
+    "ast_hash": "3a5f349fe53b1d477aa25e6b2918935f",
+    "semantic_hash": "3a5f349fe53b1d477aa25e6b2918935f"
+  },
+  "src/drone_vision/drone_vision/models/yolo_engine.py": {
+    "mtime": 1790302640.7729867,
+    "ast_hash": "76441ca3918c78a55ffb9368ad6d40d3",
+    "semantic_hash": "76441ca3918c78a55ffb9368ad6d40d3"
+  },
+  "src/drone_vision/drone_vision/vision_pipeline.py": {
+    "mtime": 1791872473.1673322,
+    "ast_hash": "29c7d175976497973c036437f4027826",
+    "semantic_hash": "29c7d175976497973c036437f4027826"
+  },
+  "src/drone_vision/drone_vision/vision_viewer.py": {
+    "mtime": 1784792197.2230551,
+    "ast_hash": "d4c74e0761518001487313bcd53257c7",
+    "semantic_hash": "d4c74e0761518001487313bcd53257c7"
+  },
+  "src/drone_vision/drone_vision/visual_servoing.py": {
+    "mtime": 1785073303.5040448,
+    "ast_hash": "3e99683c814bc2f8fa383d70205020a6",
+    "semantic_hash": "3e99683c814bc2f8fa383d70205020a6"
+  },
+  "src/drone_vision/scripts/__init__.py": {
+    "mtime": 1783670457.6022112,
+    "ast_hash": "599efbcb2d79dd5220afa5a25f22b15e",
+    "semantic_hash": "599efbcb2d79dd5220afa5a25f22b15e"
+  },
+  "src/drone_vision/scripts/vision_viewer.py": {
+    "mtime": 1786527533.176019,
+    "ast_hash": "f5aa01fa0b58a023fd094d66a6448261",
+    "semantic_hash": "f5aa01fa0b58a023fd094d66a6448261"
+  },
+  "src/drone_vision/setup.py": {
+    "mtime": 1790302665.7066576,
+    "ast_hash": "96831c8bc7e187f45f202385f127ed61",
+    "semantic_hash": "96831c8bc7e187f45f202385f127ed61"
+  },
+  "src/drone_vision/test/test_camera_startup.py": {
+    "mtime": 1785835026.9042907,
+    "ast_hash": "18881b8108407688b5ea035faf5ce2c6",
+    "semantic_hash": "18881b8108407688b5ea035faf5ce2c6"
+  },
+  "src/drone_vision/test/test_coordinate_transforms.py": {
+    "mtime": 1790390863.8132236,
+    "ast_hash": "a182d021214ed1dab6f191a7013a157c",
+    "semantic_hash": "a182d021214ed1dab6f191a7013a157c"
+  },
+  "src/drone_vision/test/test_copyright.py": {
+    "mtime": 1783323068.1452222,
+    "ast_hash": "4996344e5b6b7ac0c99a267f121398f4",
+    "semantic_hash": "4996344e5b6b7ac0c99a267f121398f4"
+  },
+  "src/drone_vision/test/test_coverage_monitor_scan_lifecycle.py": {
+    "mtime": 1786527533.176019,
+    "ast_hash": "4b31b300403579d365fa16274d544031",
+    "semantic_hash": "4b31b300403579d365fa16274d544031"
+  },
+  "src/drone_vision/test/test_cylinder_refiner.py": {
+    "mtime": 1784792197.2230551,
+    "ast_hash": "6eaaa4621102867acdd2c86dc6a4d818",
+    "semantic_hash": "6eaaa4621102867acdd2c86dc6a4d818"
+  },
+  "src/drone_vision/test/test_flake8.py": {
+    "mtime": 1783323068.1452222,
+    "ast_hash": "aa129cddddd383a922ed54000fb385e5",
+    "semantic_hash": "aa129cddddd383a922ed54000fb385e5"
+  },
+  "src/drone_vision/test/test_landing_pad_detection.py": {
+    "mtime": 1786527991.7234368,
+    "ast_hash": "f77e172339e37838dad138b63249d9d3",
+    "semantic_hash": "f77e172339e37838dad138b63249d9d3"
+  },
+  "src/drone_vision/test/test_marker_refiner.py": {
+    "mtime": 1790304856.1521065,
+    "ast_hash": "8045721fd755bc02c78caaed9383483b",
+    "semantic_hash": "8045721fd755bc02c78caaed9383483b"
+  },
+  "src/drone_vision/test/test_pep257.py": {
+    "mtime": 1783323068.1452222,
+    "ast_hash": "1a5086842153d5f68611ba9f8cb7e443",
+    "semantic_hash": "1a5086842153d5f68611ba9f8cb7e443"
+  },
+  "src/drone_vision/test/test_runtime_entrypoints.py": {
+    "mtime": 1784792197.2230551,
+    "ast_hash": "e4263c95acf5cffd2cc211dddcacc193",
+    "semantic_hash": "e4263c95acf5cffd2cc211dddcacc193"
+  },
+  "src/drone_vision/test/test_vision_modes.py": {
+    "mtime": 1786089606.8309162,
+    "ast_hash": "82a3729ac95b3425efe84f6514c83277",
+    "semantic_hash": "82a3729ac95b3425efe84f6514c83277"
+  },
+  "src/drone_vision/test/test_vision_viewer.py": {
+    "mtime": 1784792197.2230551,
+    "ast_hash": "3f9fe93e0387a1866d50dda638163585",
+    "semantic_hash": "3f9fe93e0387a1866d50dda638163585"
+  },
+  "src/drone_vision/test/test_visual_servo_directions.py": {
+    "mtime": 1785073314.0075498,
+    "ast_hash": "2b90ed309d6ca7c65a151d814e96f5b2",
+    "semantic_hash": "2b90ed309d6ca7c65a151d814e96f5b2"
+  },
+  "src/drone_vision/test/test_yolo_providers.py": {
+    "mtime": 1786007031.3391302,
+    "ast_hash": "0a9e46d712caffa8f5cb6f182f4979d4",
+    "semantic_hash": "0a9e46d712caffa8f5cb6f182f4979d4"
+  },
+  "src/drone_vision/training/__init__.py": {
+    "mtime": 1783407298.6064012,
+    "ast_hash": "30bd581cf7c04b39c9ae0a18f0b62858",
+    "semantic_hash": "30bd581cf7c04b39c9ae0a18f0b62858"
+  },
+  "src/drone_vision/training/data_generation/__init__.py": {
+    "mtime": 1783407299.2544503,
+    "ast_hash": "8f2959be29d50641724f19444e5b3988",
+    "semantic_hash": "8f2959be29d50641724f19444e5b3988"
+  },
+  "src/drone_vision/training/data_generation/generate_labels.py": {
+    "mtime": 1784983108.5105717,
+    "ast_hash": "d687bb75f62338db8c267efc69fb35ab",
+    "semantic_hash": "d687bb75f62338db8c267efc69fb35ab"
+  },
+  "src/drone_vision/training/export.py": {
+    "mtime": 1784792197.224055,
+    "ast_hash": "c498c93de85ccef95759e0cb1594b488",
+    "semantic_hash": "c498c93de85ccef95759e0cb1594b488"
+  },
+  "src/drone_vision/training/train.py": {
+    "mtime": 1784792197.224055,
+    "ast_hash": "e5be1d35017f523c8944c3712bd67391",
+    "semantic_hash": "e5be1d35017f523c8944c3712bd67391"
+  },
+  "src/px4_control/px4_control/__init__.py": {
+    "mtime": 1784792207.2930665,
+    "ast_hash": "764f92adceb08e3a40e5667a36e734ff",
+    "semantic_hash": "764f92adceb08e3a40e5667a36e734ff"
+  },
+  "src/px4_control/px4_control/flight_controller.py": {
+    "mtime": 1786527533.176019,
+    "ast_hash": "294927ae8e5052223f3b14b1a10ac0bf",
+    "semantic_hash": "294927ae8e5052223f3b14b1a10ac0bf"
+  },
+  "src/px4_control/px4_control/px4_bridge.py": {
+    "mtime": 1791882669.83857,
+    "ast_hash": "28f0dcb8b99f8fb5b4db9096e91b4379",
+    "semantic_hash": "28f0dcb8b99f8fb5b4db9096e91b4379"
+  },
+  "src/px4_control/px4_control/standalone_bridge.py": {
+    "mtime": 1790390863.8132236,
+    "ast_hash": "c1719a1d98b4f754a33e17e194a941ba",
+    "semantic_hash": "c1719a1d98b4f754a33e17e194a941ba"
+  },
+  "src/px4_control/px4_control/telemetry.py": {
+    "mtime": 1784983108.5115721,
+    "ast_hash": "3665ffef61832a482d93a15e816ad331",
+    "semantic_hash": "3665ffef61832a482d93a15e816ad331"
+  },
+  "src/px4_control/setup.py": {
+    "mtime": 1790302665.7066576,
+    "ast_hash": "d9b33b82ff078ae8b4ce31d44a1294f5",
+    "semantic_hash": "d9b33b82ff078ae8b4ce31d44a1294f5"
+  },
+  "src/px4_control/test/test_copyright.py": {
+    "mtime": 1783322657.1883829,
+    "ast_hash": "4996344e5b6b7ac0c99a267f121398f4",
+    "semantic_hash": "4996344e5b6b7ac0c99a267f121398f4"
+  },
+  "src/px4_control/test/test_flake8.py": {
+    "mtime": 1783322657.1883829,
+    "ast_hash": "aa129cddddd383a922ed54000fb385e5",
+    "semantic_hash": "aa129cddddd383a922ed54000fb385e5"
+  },
+  "src/px4_control/test/test_mission_setpoint_contract.py": {
+    "mtime": 1786527533.1770191,
+    "ast_hash": "085f66a3856695e9ecad0b68453f59d4",
+    "semantic_hash": "085f66a3856695e9ecad0b68453f59d4"
+  },
+  "src/px4_control/test/test_pep257.py": {
+    "mtime": 1783322657.189383,
+    "ast_hash": "1a5086842153d5f68611ba9f8cb7e443",
+    "semantic_hash": "1a5086842153d5f68611ba9f8cb7e443"
+  },
+  "src/px4_control/test/test_px4_safety_contract.py": {
+    "mtime": 1786527533.1770191,
+    "ast_hash": "f0dc0e9151f8873389c1c719118c5057",
+    "semantic_hash": "f0dc0e9151f8873389c1c719118c5057"
+  },
+  "src/test_mission/launch/test_forward_recon.launch.py": {
+    "mtime": 1786527533.1770191,
+    "ast_hash": "333b9c8ebb68de28193aee1a5bcf0d1a",
+    "semantic_hash": "333b9c8ebb68de28193aee1a5bcf0d1a"
+  },
+  "src/test_mission/setup.py": {
+    "mtime": 1790302665.7076576,
+    "ast_hash": "b604dcd98020493f59d37e27e0e1ef63",
+    "semantic_hash": "b604dcd98020493f59d37e27e0e1ef63"
+  },
+  "src/test_mission/test/test_copyright.py": {
+    "mtime": 1784974719.318239,
+    "ast_hash": "4996344e5b6b7ac0c99a267f121398f4",
+    "semantic_hash": "4996344e5b6b7ac0c99a267f121398f4"
+  },
+  "src/test_mission/test/test_flake8.py": {
+    "mtime": 1784974719.318239,
+    "ast_hash": "aa129cddddd383a922ed54000fb385e5",
+    "semantic_hash": "aa129cddddd383a922ed54000fb385e5"
+  },
+  "src/test_mission/test/test_pep257.py": {
+    "mtime": 1784974719.318239,
+    "ast_hash": "1a5086842153d5f68611ba9f8cb7e443",
+    "semantic_hash": "1a5086842153d5f68611ba9f8cb7e443"
+  },
+  "src/test_mission/test_mission/__init__.py": {
+    "mtime": 1784974719.318239,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "src/test_mission/test_mission/test_forward_recon.py": {
+    "mtime": 1786527533.1770191,
+    "ast_hash": "8e1bcb2b0dda5c434fbed6b88503a75e",
+    "semantic_hash": "8e1bcb2b0dda5c434fbed6b88503a75e"
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1784983108.5105717,
+    "ast_hash": "1265e51e67afff6ed7dafaa0050026c9",
+    "semantic_hash": "1265e51e67afff6ed7dafaa0050026c9"
+  },
+  "docs/ARCHITECTURE.md": {
+    "mtime": 1791893131.114447,
+    "ast_hash": "470a77ea36b3b23736a387d43b843c24",
+    "semantic_hash": "470a77ea36b3b23736a387d43b843c24"
+  },
+  "docs/CODE_READING_GUIDE.md": {
+    "mtime": 1791893313.94773,
+    "ast_hash": "6462817e100cc62d0a5a60baf31f58c5",
+    "semantic_hash": "6462817e100cc62d0a5a60baf31f58c5"
+  },
+  "docs/Debug/PARAMETER_USAGE_GUIDE.md": {
+    "mtime": 1791893704.521789,
+    "ast_hash": "4dd8ac6f55e573bd52d58140222d31ed",
+    "semantic_hash": "4dd8ac6f55e573bd52d58140222d31ed"
+  },
+  "docs/Debug/REAL_HARDWARE_DEBUG_GUIDE.md": {
+    "mtime": 1791893664.7542148,
+    "ast_hash": "a40ba7132938de2ed59e4a268d1f58d4",
+    "semantic_hash": "a40ba7132938de2ed59e4a268d1f58d4"
+  },
+  "docs/Debug/RISKS_AND_TODOS.md": {
+    "mtime": 1791893430.4964483,
+    "ast_hash": "ab6c356d6d2e5f39d177d0a046351c42",
+    "semantic_hash": "ab6c356d6d2e5f39d177d0a046351c42"
+  },
+  "docs/Debug/WORKLOG.md": {
+    "mtime": 1791893313.94873,
+    "ast_hash": "e0403acc84e977d53418a8a0ba5bb879",
+    "semantic_hash": "e0403acc84e977d53418a8a0ba5bb879"
+  },
+  "docs/Deployment/DEPLOYMENT.md": {
+    "mtime": 1791893664.7542148,
+    "ast_hash": "4ac005eafa7066101967de9aff5aedeb",
+    "semantic_hash": "4ac005eafa7066101967de9aff5aedeb"
+  },
+  "docs/Deployment/FULL_REAL_MISSION_GUIDE.md": {
+    "mtime": 1791893259.6503713,
+    "ast_hash": "34297a20f8cae1726a8a132ae0060719",
+    "semantic_hash": "34297a20f8cae1726a8a132ae0060719"
+  },
+  "docs/Deployment/RTK_DEPLOYMENT_GUIDE.md": {
+    "mtime": 1790306158.1034338,
+    "ast_hash": "31fd17b0ba5a9e3d370728adf584242f",
+    "semantic_hash": "31fd17b0ba5a9e3d370728adf584242f"
+  },
+  "docs/Deployment/RTK_OFFICIAL_RESEARCH.md": {
+    "mtime": 1790305972.0474195,
+    "ast_hash": "94245a129c04a0a4658b669ae2a3ab28",
+    "semantic_hash": "94245a129c04a0a4658b669ae2a3ab28"
+  },
+  "docs/README.md": {
+    "mtime": 1791893664.7532148,
+    "ast_hash": "72ce2dfffa843323c51de76f2dbc7c63",
+    "semantic_hash": "72ce2dfffa843323c51de76f2dbc7c63"
+  },
+  "docs/Tactics/DROP_STALL_ANALYSIS.md": {
+    "mtime": 1785987590.830061,
+    "ast_hash": "7d7a1bfd00819066ac98794803d5e3a5",
+    "semantic_hash": "7d7a1bfd00819066ac98794803d5e3a5"
+  },
+  "docs/Tactics/PLAN_drop_landing_optimization.md": {
+    "mtime": 1786107016.4369256,
+    "ast_hash": "7bffa9322ef5cd3dcb18ee906c21cbde",
+    "semantic_hash": "7bffa9322ef5cd3dcb18ee906c21cbde"
+  },
+  "docs/Tactics/PLAN_drop_zone_align_gate.md": {
+    "mtime": 1786004740.4101653,
+    "ast_hash": "00f2f503bb981bdb51f7e67e1d9750f6",
+    "semantic_hash": "00f2f503bb981bdb51f7e67e1d9750f6"
+  },
+  "docs/Tactics/PLAN_recon_yaw_heading_param.md": {
+    "mtime": 1786677607.3548534,
+    "ast_hash": "fab3a681e21a5dfcb57dcafae7181b13",
+    "semantic_hash": "fab3a681e21a5dfcb57dcafae7181b13"
+  },
+  "docs/Tactics/PLAN_visual_servo_optimization.md": {
+    "mtime": 1786071341.7770252,
+    "ast_hash": "0fc22917af01cd5357e320ea1b3d3ce2",
+    "semantic_hash": "0fc22917af01cd5357e320ea1b3d3ce2"
+  },
+  "field/README.md": {
+    "mtime": 1786527533.1710188,
+    "ast_hash": "ca942d81c9d05fdc27d3ffd033674eb2",
+    "semantic_hash": "ca942d81c9d05fdc27d3ffd033674eb2"
+  },
+  "src/drone_interfaces/CMakeLists.txt": {
+    "mtime": 1785630609.555736,
+    "ast_hash": "7fe550aa058fd5a10a55166974f74ead",
+    "semantic_hash": "7fe550aa058fd5a10a55166974f74ead"
+  },
+  "src/drone_mission/config/mission_params.yaml": {
+    "mtime": 1791882837.5929282,
+    "ast_hash": "057cde011efd5cee2dc767b74307dcb5",
+    "semantic_hash": "057cde011efd5cee2dc767b74307dcb5"
+  },
+  "src/drone_mission/config/mission_params_quick.yaml": {
+    "mtime": 1791882669.8405697,
+    "ast_hash": "f7cc5be0cbebcf5296812293fc3ad521",
+    "semantic_hash": "f7cc5be0cbebcf5296812293fc3ad521"
+  },
+  "src/drone_mission/config/mission_params_quick_sim.yaml": {
+    "mtime": 1791893430.5304484,
+    "ast_hash": "ba89af155ecec6a77e90ffe815b9af79",
+    "semantic_hash": "ba89af155ecec6a77e90ffe815b9af79"
+  },
+  "src/drone_mission/config/mission_params_real.yaml": {
+    "mtime": 1791892066.355266,
+    "ast_hash": "841324b353b84440c5eb69072c2870c1",
+    "semantic_hash": "841324b353b84440c5eb69072c2870c1"
+  },
+  "src/drone_servo2/CMakeLists.txt": {
+    "mtime": 1784792207.2910664,
+    "ast_hash": "48746f69a3b0ade70c1534b89347e3ba",
+    "semantic_hash": "48746f69a3b0ade70c1534b89347e3ba"
+  },
+  "src/drone_servo2/config/servo_params.yaml": {
+    "mtime": 1785840273.9375021,
+    "ast_hash": "37a361b5616877a22c2aa50dd5431427",
+    "semantic_hash": "37a361b5616877a22c2aa50dd5431427"
+  },
+  "src/drone_servo2/config/servo_params_quick.yaml": {
+    "mtime": 1786089136.6155152,
+    "ast_hash": "12807a5510198c948aff1e7582a7f08e",
+    "semantic_hash": "12807a5510198c948aff1e7582a7f08e"
+  },
+  "src/drone_vision/config/vision_params.yaml": {
+    "mtime": 1790328133.608063,
+    "ast_hash": "770f370f342ddd2db5be7d0322ec8967",
+    "semantic_hash": "770f370f342ddd2db5be7d0322ec8967"
+  },
+  "src/drone_vision/training/dataset_config.yaml": {
+    "mtime": 1783407206.459184,
+    "ast_hash": "994d397ff9c106af1266288160f6f959",
+    "semantic_hash": "994d397ff9c106af1266288160f6f959"
+  },
+  "src/px4_control/config/px4_params.yaml": {
+    "mtime": 1791882669.8415697,
+    "ast_hash": "a07cb5bb35db809b3d10478180ab7a30",
+    "semantic_hash": "a07cb5bb35db809b3d10478180ab7a30"
+  },
+  "src/px4_msgs/.github/dependabot.yml": {
+    "mtime": 1781623913.0,
+    "ast_hash": "f89599a8bc1fbdaebf3358532e90baba",
+    "semantic_hash": "f89599a8bc1fbdaebf3358532e90baba"
+  },
+  "src/px4_msgs/.github/workflows/build.yml": {
+    "mtime": 1781623913.0,
+    "ast_hash": "6249838ef1c139a07b23c475cc2170d4",
+    "semantic_hash": "6249838ef1c139a07b23c475cc2170d4"
+  },
+  "src/px4_msgs/CMakeLists.txt": {
+    "mtime": 1781623913.0,
+    "ast_hash": "c9182dc2c1ddaf874e835c9ac2b64373",
+    "semantic_hash": "c9182dc2c1ddaf874e835c9ac2b64373"
+  },
+  "src/px4_msgs/CONTRIBUTING.md": {
+    "mtime": 1781623913.0,
+    "ast_hash": "ccef6d34da0e5b23a7be019b531b1737",
+    "semantic_hash": "ccef6d34da0e5b23a7be019b531b1737"
+  },
+  "src/px4_msgs/README.md": {
+    "mtime": 1781623913.0,
+    "ast_hash": "1dcd30d02f3c5fe6a368c54c0ca59304",
+    "semantic_hash": "1dcd30d02f3c5fe6a368c54c0ca59304"
+  },
+  "docs/Tactics/photos/5f8871ab9cb24257c589002ad424565c.png": {
+    "mtime": 1786003431.751332,
+    "ast_hash": "7267b3e3ab6846ff3f0824d081fa682f",
+    "semantic_hash": "7267b3e3ab6846ff3f0824d081fa682f"
+  },
+  "docs/Tactics/photos/97f8eac13f0960c2bd9f332c32b0cc44.png": {
+    "mtime": 1786003418.454864,
+    "ast_hash": "73c2b3858eb0d1c5a3d9b3cf4bccca48",
+    "semantic_hash": "73c2b3858eb0d1c5a3d9b3cf4bccca48"
+  },
+  "docs/Tactics/photos/a8f681aa85f7ca1c523ccc79820cd4d1.png": {
+    "mtime": 1786003426.662538,
+    "ast_hash": "6e36aaaeccf7229806fd56dbd680375a",
+    "semantic_hash": "6e36aaaeccf7229806fd56dbd680375a"
+  },
+  "field/drone_field_meshes/textures/hazard_danger.png": {
+    "mtime": 1784105302.3736424,
+    "ast_hash": "5e9932d79f526a318865938f13780f82",
+    "semantic_hash": "5e9932d79f526a318865938f13780f82"
+  },
+  "field/drone_field_meshes/textures/hazard_flammable.png": {
+    "mtime": 1784105302.3736424,
+    "ast_hash": "7cb68391e06016a9cbe7ad042e50be0e",
+    "semantic_hash": "7cb68391e06016a9cbe7ad042e50be0e"
+  },
+  "field/drone_field_meshes/textures/hazard_health.png": {
+    "mtime": 1784105302.3746426,
+    "ast_hash": "99bc591e5048da81820ddb53c2800c0f",
+    "semantic_hash": "99bc591e5048da81820ddb53c2800c0f"
+  },
+  "docs/Tactics/evidence/quick_bucket_sitl_release_20260927.json": {
+    "mtime": 1790440897.1663952,
+    "ast_hash": "298b50312d8cb851db4014a6987d450f",
+    "semantic_hash": "298b50312d8cb851db4014a6987d450f"
+  },
+  "field/layout_field.py": {
+    "mtime": 1786527533.1710188,
+    "ast_hash": "9a3b6ca2ead10e9bb60f0daea346e2bb",
+    "semantic_hash": "9a3b6ca2ead10e9bb60f0daea346e2bb"
+  },
+  "quick_llogs/forensic_20261007/px4_events.json": {
+    "mtime": 1791342386.1122289,
+    "ast_hash": "88011e4dec7f3dd2c6c80ed6eb1dd706",
+    "semantic_hash": "88011e4dec7f3dd2c6c80ed6eb1dd706"
+  },
+  "quick_llogs/forensic_257/dump_events.py": {
+    "mtime": 1791354571.185125,
+    "ast_hash": "5f79904dcdaa4965c663b0b3a6a32f43",
+    "semantic_hash": "5f79904dcdaa4965c663b0b3a6a32f43"
+  },
+  "quick_llogs/forensic_257/flight_timeline.py": {
+    "mtime": 1791355345.0648112,
+    "ast_hash": "054068a8d0dd0469c180b70f175ce67d",
+    "semantic_hash": "054068a8d0dd0469c180b70f175ce67d"
+  },
+  "scripts/check_jetson_sync.sh": {
+    "mtime": 1790305272.8238559,
+    "ast_hash": "2110ada0cd36cb8107d6550f62fcbdbd",
+    "semantic_hash": "2110ada0cd36cb8107d6550f62fcbdbd"
+  },
+  "scripts/summarize_layout_benchmark.py": {
+    "mtime": 1786527533.1710188,
+    "ast_hash": "ed935a484b3d72f9b561b899a4a9167f",
+    "semantic_hash": "ed935a484b3d72f9b561b899a4a9167f"
+  },
+  "src/drone_bringup/test/test_layout_field.py": {
+    "mtime": 1786527533.172019,
+    "ast_hash": "58bddfc2d861fd432ae762eb8b168458",
+    "semantic_hash": "58bddfc2d861fd432ae762eb8b168458"
+  },
+  "src/drone_bringup/test/test_layout_heading_launch_contract.py": {
+    "mtime": 1791892314.5344446,
+    "ast_hash": "8f77596f588e270d099e366ef0b15902",
+    "semantic_hash": "8f77596f588e270d099e366ef0b15902"
+  },
+  "src/drone_bringup/test/test_quick_real_single_instance.py": {
+    "mtime": 1791278577.3871145,
+    "ast_hash": "2df7829a4373f8b1663cd322167242c2",
+    "semantic_hash": "2df7829a4373f8b1663cd322167242c2"
+  },
+  "src/drone_bringup/test/test_quick_simulation_script.py": {
+    "mtime": 1790302640.5770466,
+    "ast_hash": "23d8561db27006f7113dacf68d47530b",
+    "semantic_hash": "23d8561db27006f7113dacf68d47530b"
+  },
+  "src/drone_mission/drone_mission/quick_bucket_gate.py": {
+    "mtime": 1791360907.3664472,
+    "ast_hash": "1164273ccb7e1a6f860fc4b787b882bf",
+    "semantic_hash": "1164273ccb7e1a6f860fc4b787b882bf"
+  },
+  "src/drone_mission/drone_mission/quick_release_geometry.py": {
+    "mtime": 1790390863.8132236,
+    "ast_hash": "06cfa80b749e87a1d62452076da62a44",
+    "semantic_hash": "06cfa80b749e87a1d62452076da62a44"
+  },
+  "src/drone_mission/test/test_bucket_drop_state.py": {
+    "mtime": 1791361096.027128,
+    "ast_hash": "aa3ecff08a9565cc858a1251d486a38a",
+    "semantic_hash": "aa3ecff08a9565cc858a1251d486a38a"
+  },
+  "src/drone_mission/test/test_bucket_relaxed_acquisition.py": {
+    "mtime": 1791360907.3674474,
+    "ast_hash": "666c1d05e0bd3f04458c29361d9ed257",
+    "semantic_hash": "666c1d05e0bd3f04458c29361d9ed257"
+  },
+  "src/drone_mission/test/test_cylinder_world_consumers.py": {
+    "mtime": 1786527533.174019,
+    "ast_hash": "8c34e5846a541a9b693a2affd21d63e7",
+    "semantic_hash": "8c34e5846a541a9b693a2affd21d63e7"
+  },
+  "src/drone_mission/test/test_layout_benchmark_summary.py": {
+    "mtime": 1786527533.175019,
+    "ast_hash": "ba12ca18ff20d5299ee7c70c0d929555",
+    "semantic_hash": "ba12ca18ff20d5299ee7c70c0d929555"
+  },
+  "src/drone_mission/test/test_layout_mission_config.py": {
+    "mtime": 1790328133.607063,
+    "ast_hash": "06f9876d1ea3ec515e8615445dd14267",
+    "semantic_hash": "06f9876d1ea3ec515e8615445dd14267"
+  },
+  "src/drone_mission/test/test_layout_paths.py": {
+    "mtime": 1786527533.175019,
+    "ast_hash": "355f4f524bf3d04d29b7e64f8c521acd",
+    "semantic_hash": "355f4f524bf3d04d29b7e64f8c521acd"
+  },
+  "src/drone_mission/test/test_quick_release_geometry.py": {
+    "mtime": 1790390863.8132236,
+    "ast_hash": "c1d66b00a072e68b725510833f13abc8",
+    "semantic_hash": "c1d66b00a072e68b725510833f13abc8"
+  },
+  "src/drone_utils/drone_utils/layout_frame.py": {
+    "mtime": 1786527533.175019,
+    "ast_hash": "f16ce54cdc0bf8a9b58996d1da615ebe",
+    "semantic_hash": "f16ce54cdc0bf8a9b58996d1da615ebe"
+  },
+  "src/drone_utils/test/test_layout_frame.py": {
+    "mtime": 1786527533.175019,
+    "ast_hash": "43453cc21af11f534f758f298bd7f007",
+    "semantic_hash": "43453cc21af11f534f758f298bd7f007"
+  },
+  "src/drone_vision/drone_vision/capture_pose.py": {
+    "mtime": 1790390863.8132236,
+    "ast_hash": "a282e0c2c7cc749b6916823a0b93a093",
+    "semantic_hash": "a282e0c2c7cc749b6916823a0b93a093"
+  },
+  "src/drone_vision/test/test_capture_pose.py": {
+    "mtime": 1790390863.8132236,
+    "ast_hash": "09209e3d734ddcdab548c9d0917e6b67",
+    "semantic_hash": "09209e3d734ddcdab548c9d0917e6b67"
+  },
+  "src/drone_vision/test/test_coverage_monitor_layout.py": {
+    "mtime": 1786527533.176019,
+    "ast_hash": "1fff514670969c57f8d57babf18cf5b6",
+    "semantic_hash": "1fff514670969c57f8d57babf18cf5b6"
+  },
+  "src/drone_vision/test/test_cylinder_world_contract.py": {
+    "mtime": 1790493237.921015,
+    "ast_hash": "9c9bbf000022abed3d0d8f6630e28a67",
+    "semantic_hash": "9c9bbf000022abed3d0d8f6630e28a67"
+  },
+  "src/drone_vision/test/test_vision_pose_validity.py": {
+    "mtime": 1791278132.6875753,
+    "ast_hash": "b1d5ecb2951fa1a7e090d2f33e865ae9",
+    "semantic_hash": "b1d5ecb2951fa1a7e090d2f33e865ae9"
+  },
+  "src/test_mission/test/test_layout_parameter_contract.py": {
+    "mtime": 1786527533.1770191,
+    "ast_hash": "f518b7c45607507e2eb63f499a3e503d",
+    "semantic_hash": "f518b7c45607507e2eb63f499a3e503d"
+  },
+  "docs/2026-07-17-real-hardware-workspace-plan.md": {
+    "mtime": 1790302640.5740476,
+    "ast_hash": "d954e09c1793d6697e953449ea145300",
+    "semantic_hash": "d954e09c1793d6697e953449ea145300"
+  },
+  "docs/Debug/QUICK_BUCKET_REAL_20261006.md": {
+    "mtime": 1791301878.6239853,
+    "ast_hash": "e5663c4f9b9219e90e0f70af5a520057",
+    "semantic_hash": "e5663c4f9b9219e90e0f70af5a520057"
+  },
+  "docs/Debug/REAL_FLIGHT_20260808_SERVO_ANALYSIS.md": {
+    "mtime": 1786527991.7204368,
+    "ast_hash": "fd05c0fd85f24f344d8fff1eba0bf181",
+    "semantic_hash": "fd05c0fd85f24f344d8fff1eba0bf181"
+  },
+  "docs/Deployment/QUICK_BUCKET_GEOMETRY_SYNC.md": {
+    "mtime": 1791893296.1726146,
+    "ast_hash": "dafbca111f4e4f64309041f03a5075f0",
+    "semantic_hash": "dafbca111f4e4f64309041f03a5075f0"
+  },
+  "docs/Tactics/PLAN_quick_blue_guided_predescent_20261007.md": {
+    "mtime": 1791360907.3654473,
+    "ast_hash": "9fdd6342ddba8184c9b5be72b87ea70d",
+    "semantic_hash": "9fdd6342ddba8184c9b5be72b87ea70d"
+  },
+  "docs/Tactics/PLAN_quick_bucket_cylinder_only_final_release_20261007.md": {
+    "mtime": 1791337935.4660084,
+    "ast_hash": "58656d537464d2aea700d5638624b347",
+    "semantic_hash": "58656d537464d2aea700d5638624b347"
+  },
+  "docs/Tactics/PLAN_quick_bucket_relaxed_acquisition.md": {
+    "mtime": 1791302666.0423884,
+    "ast_hash": "7da0841063f9a2daa416b0e9d1152b64",
+    "semantic_hash": "7da0841063f9a2daa416b0e9d1152b64"
+  },
+  "docs/Tactics/PLAN_quick_bucket_servo_speed_20261007.md": {
+    "mtime": 1791360907.3654473,
+    "ast_hash": "158e2689e86092cff1efc5d3392c3cb8",
+    "semantic_hash": "158e2689e86092cff1efc5d3392c3cb8"
+  },
+  "docs/Tactics/PLAN_quick_bucket_visual_first_20261006.md": {
+    "mtime": 1791302803.9527686,
+    "ast_hash": "d93f6ac26dde3477a248c105578945ae",
+    "semantic_hash": "d93f6ac26dde3477a248c105578945ae"
+  },
+  "docs/Tactics/PLAN_quick_drop_cylinder_fine_align.md": {
+    "mtime": 1790328133.605063,
+    "ast_hash": "e2576beb1083cb44a7726c0848308404",
+    "semantic_hash": "e2576beb1083cb44a7726c0848308404"
+  },
+  "docs/Tactics/PLAN_quick_heading_stable.md": {
+    "mtime": 1786677607.3548534,
+    "ast_hash": "37dabf488c18f12ba1e3fcc031fbea6d",
+    "semantic_hash": "37dabf488c18f12ba1e3fcc031fbea6d"
+  },
+  "docs/Tactics/PLAN_quick_incremental_bucket_release_gate.md": {
+    "mtime": 1790391001.334426,
+    "ast_hash": "1786d3f22e6dcc38bd180db749eb7df1",
+    "semantic_hash": "1786d3f22e6dcc38bd180db749eb7df1"
+  },
+  "docs/Tactics/PLAN_quick_small_bucket_sitl_proof.md": {
+    "mtime": 1790440933.4065397,
+    "ast_hash": "19171408b130b729844b3d3e3d9e1568",
+    "semantic_hash": "19171408b130b729844b3d3e3d9e1568"
+  },
+  "docs/Tactics/QUICK_BUCKET_CURRENT_FLOW.md": {
+    "mtime": 1791361502.7523303,
+    "ast_hash": "902f1d7b72a1284f338f61c169fc9752",
+    "semantic_hash": "902f1d7b72a1284f338f61c169fc9752"
+  },
+  "docs/Tactics/REPORT_quick_bucket_sitl_2026-09-26.md": {
+    "mtime": 1790393627.628075,
+    "ast_hash": "155a98ef7a59f27f78d52932b77b3760",
+    "semantic_hash": "155a98ef7a59f27f78d52932b77b3760"
+  },
+  "docs/Tactics/REPORT_quick_small_bucket_diagnosis_2026-09-26.md": {
+    "mtime": 1790394567.6940117,
+    "ast_hash": "5289e8423a2f130d3e3b0b23a65b02df",
+    "semantic_hash": "5289e8423a2f130d3e3b0b23a65b02df"
+  },
+  "docs/Tactics/REPORT_quick_small_bucket_sitl_2026-09-27.md": {
+    "mtime": 1790440933.5005376,
+    "ast_hash": "f74c71f60e4526a7f2932102afcdd777",
+    "semantic_hash": "f74c71f60e4526a7f2932102afcdd777"
+  },
+  "graphify-out/memory/query_20260812_020941_\u6838\u5bf9\u5feb\u901f\u4e0e\u4e3b\u4efb\u52a1\u4efb\u610f\u65b9\u5411\u6539\u9020\u7684\u5171\u4eab\u94fe\u8def\u548c\u5206\u53c9\u70b9.md": {
+    "mtime": 1786500581.9084907,
+    "ast_hash": "1e97fe454a17f1aafb61e43b86bc3c27",
+    "semantic_hash": "1e97fe454a17f1aafb61e43b86bc3c27"
+  },
+  "graphify-out/memory/query_20260814_021653_\u63a2\u7d22pland\u5206\u652f\u6700\u65b0\u7248\u672c\u903b\u8f91_\u5224\u65ad\u662f\u4e0d\u662f\u4f1a\u9047\u5230\u540c\u6837\u7684\u89c6\u89c9\u963b\u65ad\u95ee\u9898.md": {
+    "mtime": 1786673813.32211,
+    "ast_hash": "9ae6dd6d9e9cbf511c2d35c5fef52f81",
+    "semantic_hash": "9ae6dd6d9e9cbf511c2d35c5fef52f81"
+  },
+  "graphify-out/memory/query_20261006_160548_\u89e3\u91ca\u4e00\u4e0b\u73b0\u5728\u7684\u4efb\u52a1\u5728\u6295\u653e\u533a\u6700\u9ad8\u5904\u65f6\u7684\u4efb\u52a1\u903b\u8f91\u6d41\u7a0b_\u76ee\u6807\u5982\u4f55\u9009\u62e9_\u84dd\u5e95\u548c\u5706\u7b52\u8bc6\u522b\u5982\u4f55\u6307\u5411\u63a7\u5236\u903b\u8f91.md": {
+    "mtime": 1791302748.4989223,
+    "ast_hash": "e5a15f77d4d5070632fe9fb2763d477c",
+    "semantic_hash": "e5a15f77d4d5070632fe9fb2763d477c"
+  },
+  "quick_llogs/quick_real_mission_20261006_161615/launch_arguments.txt": {
+    "mtime": 1791274574.0,
+    "ast_hash": "c560ac1738ee0880524dee682c96f46c",
+    "semantic_hash": "c560ac1738ee0880524dee682c96f46c"
+  },
+  "quick_llogs/quick_real_mission_20261006_165356/launch_arguments.txt": {
+    "mtime": 1791276836.0,
+    "ast_hash": "c560ac1738ee0880524dee682c96f46c",
+    "semantic_hash": "c560ac1738ee0880524dee682c96f46c"
+  },
+  "quick_llogs/quick_real_mission_20261006_172247/launch_arguments.txt": {
+    "mtime": 1791278566.0,
+    "ast_hash": "c560ac1738ee0880524dee682c96f46c",
+    "semantic_hash": "c560ac1738ee0880524dee682c96f46c"
+  },
+  "quick_llogs/quick_real_mission_20261007_134746_988213568_2168/launch_arguments.txt": {
+    "mtime": 1791352066.0,
+    "ast_hash": "c560ac1738ee0880524dee682c96f46c",
+    "semantic_hash": "c560ac1738ee0880524dee682c96f46c"
+  },
+  "quick_llogs/quick_real_mission_20261007_145252_379459864_2242/launch_arguments.txt": {
+    "mtime": 1791355972.0,
+    "ast_hash": "c560ac1738ee0880524dee682c96f46c",
+    "semantic_hash": "c560ac1738ee0880524dee682c96f46c"
+  },
+  "src/drone_vision/config/vision_params_quick.yaml": {
+    "mtime": 1791875818.4880123,
+    "ast_hash": "37c9a8af8a552594f6fa60e28df702ae",
+    "semantic_hash": "37c9a8af8a552594f6fa60e28df702ae"
+  },
+  "src/drone_vision/config/vision_params_quick_sim.yaml": {
+    "mtime": 1791875818.4880123,
+    "ast_hash": "bfbc469050f9cafa5084b0386260f023",
+    "semantic_hash": "bfbc469050f9cafa5084b0386260f023"
+  },
+  "scripts/landing_desk_sim.py": {
+    "mtime": 1791885415.0943427,
+    "ast_hash": "2d6dc63c0beb7114ab48c8fb0344e445",
+    "semantic_hash": "2d6dc63c0beb7114ab48c8fb0344e445"
+  },
+  "scripts/vision_rate_from_logs.py": {
+    "mtime": 1791891536.9987385,
+    "ast_hash": "2e207f2476de0befe62f4f0213c32bf0",
+    "semantic_hash": "2e207f2476de0befe62f4f0213c32bf0"
+  },
+  "src/drone_bringup/test/test_pid_tuning_contract.py": {
+    "mtime": 1791869544.8040578,
+    "ast_hash": "7fdcff91a4429705fdd9151762a5c8e6",
+    "semantic_hash": "7fdcff91a4429705fdd9151762a5c8e6"
+  },
+  "src/drone_mission/test/test_landing_target_expiry.py": {
+    "mtime": 1791872552.2530334,
+    "ast_hash": "5881c404336d3fe60121a384a92bcc73",
+    "semantic_hash": "5881c404336d3fe60121a384a92bcc73"
+  },
+  "src/drone_mission/test/test_mission_params_contract.py": {
+    "mtime": 1791891996.6156287,
+    "ast_hash": "d2d31895fa331cc212a91238961d14e3",
+    "semantic_hash": "d2d31895fa331cc212a91238961d14e3"
+  },
+  "src/drone_mission/test/test_vision_measurement_stamp.py": {
+    "mtime": 1791891595.801937,
+    "ast_hash": "85b6c9e5a8e56953d1adfc8cdfaa5aaf",
+    "semantic_hash": "85b6c9e5a8e56953d1adfc8cdfaa5aaf"
+  },
+  "src/drone_utils/drone_utils/landing_estimator.py": {
+    "mtime": 1791891557.064577,
+    "ast_hash": "ab28428bb5902d54c8aac2a81bf88d1d",
+    "semantic_hash": "ab28428bb5902d54c8aac2a81bf88d1d"
+  },
+  "src/drone_utils/drone_utils/landing_profile.py": {
+    "mtime": 1791876160.682549,
+    "ast_hash": "32c6ccc40ac6b6903048aab23b8f9214",
+    "semantic_hash": "32c6ccc40ac6b6903048aab23b8f9214"
+  },
+  "src/drone_utils/drone_utils/lost_target_transit.py": {
+    "mtime": 1791874976.8873818,
+    "ast_hash": "bd16b690af8ec4ca273820cf93b41272",
+    "semantic_hash": "bd16b690af8ec4ca273820cf93b41272"
+  },
+  "src/drone_utils/drone_utils/pose_history.py": {
+    "mtime": 1791891595.8039374,
+    "ast_hash": "81defc776359fbd468df51dce81ad71f",
+    "semantic_hash": "81defc776359fbd468df51dce81ad71f"
+  },
+  "src/drone_utils/drone_utils/servo_pid.py": {
+    "mtime": 1791891557.064577,
+    "ast_hash": "0c39548e2951a4f6206fd9326106836a",
+    "semantic_hash": "0c39548e2951a4f6206fd9326106836a"
+  },
+  "src/drone_utils/test/test_landing_estimator.py": {
+    "mtime": 1791891609.2080445,
+    "ast_hash": "effefa45283613aa2c574b0e354097a4",
+    "semantic_hash": "effefa45283613aa2c574b0e354097a4"
+  },
+  "src/drone_utils/test/test_landing_profile.py": {
+    "mtime": 1791876160.7085497,
+    "ast_hash": "9eb84494077d06b17f6d80a04483cfab",
+    "semantic_hash": "9eb84494077d06b17f6d80a04483cfab"
+  },
+  "src/drone_utils/test/test_lost_target_transit.py": {
+    "mtime": 1791873007.1967614,
+    "ast_hash": "e12cb588ae7bd11a9991773903263ff1",
+    "semantic_hash": "e12cb588ae7bd11a9991773903263ff1"
+  },
+  "src/drone_utils/test/test_pose_history.py": {
+    "mtime": 1791882278.9273312,
+    "ast_hash": "531de2959dc05eecddc5f82f3952fdea",
+    "semantic_hash": "531de2959dc05eecddc5f82f3952fdea"
+  },
+  "src/drone_vision/test/test_landing_target_stamp_contract.py": {
+    "mtime": 1791872588.2020893,
+    "ast_hash": "b00f376fa04c80ee1847f997a757c415",
+    "semantic_hash": "b00f376fa04c80ee1847f997a757c415"
+  },
+  "docs/PRECISION_LANDING_AUTHORITY.md": {
+    "mtime": 1791893234.6632001,
+    "ast_hash": "fcb73d388453649a9b30e13d7d0dfe5a",
+    "semantic_hash": "fcb73d388453649a9b30e13d7d0dfe5a"
+  },
+  "docs/PRECISION_LANDING_DECISIONS.html": {
+    "mtime": 1791884774.252959,
+    "ast_hash": "a3495e342d3c8e3cad2d56572b33dc7a",
+    "semantic_hash": "a3495e342d3c8e3cad2d56572b33dc7a"
+  },
+  "docs/PRECISION_LANDING_PLAN.md": {
+    "mtime": 1791893471.2006845,
+    "ast_hash": "afa861cd270e832d4efd6948b64d05cd",
+    "semantic_hash": "afa861cd270e832d4efd6948b64d05cd"
+  },
+  "src/drone_bringup/config/airframe_params_real.yaml": {
+    "mtime": 1791875785.274529,
+    "ast_hash": "4abfefa2fd1740c98699b3e9b3319d3d",
+    "semantic_hash": "4abfefa2fd1740c98699b3e9b3319d3d"
+  },
+  "src/drone_bringup/config/airframe_params_sitl.yaml": {
+    "mtime": 1791875792.643867,
+    "ast_hash": "3d993f78a6bf8d545e0a9b81cf2fc15e",
+    "semantic_hash": "3d993f78a6bf8d545e0a9b81cf2fc15e"
+  },
+  "src/drone_mission/config/pid_tuning.yaml": {
+    "mtime": 1791891595.801937,
+    "ast_hash": "a2ac6396ee12184e4967acd43fd2b933",
+    "semantic_hash": "a2ac6396ee12184e4967acd43fd2b933"
+  }
+}

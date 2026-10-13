@@ -6,7 +6,7 @@ install/
 log/
 logs/
 real_flight_logs/
-
+quick_llogs/
 # VS Code IntelliSense database
 .vscode/browse.vc.db
 .vscode/browse.vc.db-shm
@@ -17,7 +17,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 tools/
-graphify-out/
 cv_trainer/
 # Compiled extensions
 *.o

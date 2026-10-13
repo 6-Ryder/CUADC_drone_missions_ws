@@ -12,22 +12,24 @@
 
 | 文件 | 主要节点 | 作用 |
 |---|---|---|
-| `src/drone_mission/config/mission_params.yaml` | `mission_state_machine` | 完整任务 FSM、航点、投放、精校和降落 |
+| `src/drone_mission/config/mission_params{,_real,_quick,_quick_sim}.yaml` | `mission_state_machine` | 各任务 profile 的 FSM、航点、投放、精校和降落 |
+| `src/drone_mission/config/pid_tuning.yaml` | `mission_state_machine` | 四个完整任务 launch 最后加载，覆盖任务侧视觉伺服增益 |
+| `src/drone_bringup/config/airframe_params_{real,sitl}.yaml` | `mission_state_machine`、`vision_pipeline` | 机体/相机安装与投放机构几何，真机和仿真分开 |
 | `src/px4_control/config/px4_params.yaml` | `px4_bridge` | PX4 通信、位置控制和安全上限 |
 | `src/drone_vision/config/vision_params.yaml` | `vision_pipeline` | 检测模型、视觉后处理、覆盖率和视觉伺服 |
 | `src/drone_servo2/config/servo_params.yaml` | `drone_servo2` | 真机/SITL 舵机、PWM 和投放时序 |
 | `src/drone_servo/config/servo_params.yaml` | Python `drone_servo` | 旧版参考控制器，完整任务默认使用 `drone_servo2` |
 | `src/drone_vision/training/dataset_config.yaml` | 训练脚本 | 数据集训练，不影响飞行运行参数 |
 
-启动文件可能在加载 YAML 后再次覆盖参数。ROS 2 的优先级通常是：
+启动文件可能在加载 YAML 后再次覆盖参数。对本仓库四个完整任务 launch 的 `mission_state_machine`，参数列表按以下顺序覆盖：
 
 ```text
-代码默认值 < YAML 文件 < launch 文件内联参数 < 命令行 -p 参数
+代码默认值 < 任务 YAML < 机体几何 YAML < launch 内联参数 < 最后加载的 pid_tuning.yaml
 ```
 
 因此必须确认实际启动的 launch 文件。只修改 YAML，不代表 launch 中的覆盖值会改变。
 
-### 1.2 完整任务的四个运行入口
+### 1.2 完整任务与独立测试入口
 
 | 入口 | 适用任务 | 主要参数来源 |
 |---|---|---|
@@ -67,13 +69,15 @@ source install/setup.bash
 | `precision_align_smooth_pixel_tolerance` | 7.0 | `35` | `35.0` |
 | `landing_servo_deadzone_px` | 12.0 | `40` | `40.0` |
 
-改完先验证类型再上机（真机是 `--symlink-install`，改 YAML 无需重新编译，
-重启 launch 即可）：
+改完先验证类型再上机。现有 `test_mission_params_contract.py` 会扫描 double 声明与 YAML 整数值，并检查 launch 是否把 double 参数作为裸字符串下发；它们是针对两次真机启动崩溃的回归守卫。真机是 `--symlink-install`，改 YAML 无需重新编译，重启 launch 即可：
 
 ```bash
 python3 -c "import yaml; v=yaml.safe_load(open('src/drone_mission/config/mission_params_real.yaml'))['/mission_state_machine']['ros__parameters']; print(v['precision_align_raw_pixel_tolerance'], type(v['precision_align_raw_pixel_tolerance']))"
 # 期望: 35.0 <class 'float'>
+python3 -m pytest -q src/drone_mission/test/test_mission_params_contract.py
 ```
+
+2026-07-23 的另一类事故是 `px4_bridge.home_z` 收到字符串 `0.0`，却声明为 double；当前五个 launch 已统一用 `ParameterValue(LaunchConfiguration(...), value_type=float)` 传递浮点覆盖值。新增浮点 launch 参数时也要使用同一写法。
 
 ## 2. 坐标、单位和部署差异
 
@@ -295,41 +299,34 @@ PX4 的 `MPC_XY_VEL_MAX` 等飞控参数仍可能进一步降低实际速度。
 
 ### 3.8 投放区视觉逼近参数状态
 
-| 参数 | 当前值 | 作用 |
-|---|---:|---|
-| `cylinder_approach_fast_speed` | `0.30` m/s | 历史参数，当前 FSM 仅声明，未被现行投放状态消费。 |
-| `cylinder_approach_slow_speed` | `0.15` m/s | 历史参数，当前 FSM 仅声明，未被现行投放状态消费。 |
-| `cylinder_approach_memory_speed` | `0.25` m/s | 历史参数，当前 FSM 仅声明，未被现行投放状态消费。 |
-| `cylinder_approach_pixel_gain` | `0.65` | 历史参数，当前 FSM 仅声明，未被现行投放状态消费。 |
-| `cylinder_approach_max_step` | `0.45` m | 历史参数，当前 FSM 仅声明，未被现行投放状态消费。 |
-| `camera_fx/fy/cx/cy` | `539.9/539.9/640/480` | 任务精校使用的相机内参；真机 launch 覆盖为 400/400/320/240。 |
+`cylinder_approach_fast_speed`、`cylinder_approach_pixel_gain`、`cylinder_approach_max_step` 已从任务参数清理，不要把旧计划里的值重新加回。现行 `state_cylinder_approach.py` 读取 `cylinder_approach_slow_speed` 与 `cylinder_approach_memory_speed`；full 真机分别为 `0.15`、`0.25` m/s，quick 真机慢速档为 `0.18` m/s。任务侧 `camera_fx/fy/cx/cy` 的 full SITL 基线为 `539.9/539.9/640/480`，真机配置为待标定的 `400/400/320/240`。
 
 ### 3.9 精准降落
 
-| 参数 | 当前值 | 作用 |
-|---|---:|---|
-| `landing_search_altitude` | `5.0` m | 搜索 H 标识高度。 |
-| `landing_approach_speed` | `0.5` m/s | 历史参数，当前着陆状态不直接读取。 |
-| `landing_blind_altitude` | `1.5` m | 锁定后切入盲降的高度。 |
-| `landing_blind_align_tolerance_px` | `30` px | 允许进入盲降的最大像素误差。 |
-| `landing_blind_stable_frames` | `10` | 近地交接所需稳定帧数。 |
-| `landing_alignment_latch_max_altitude` | `2.5` m | 允许锁存对心结果的最大高度。 |
-| `landing_precision_target` | `0.1` m | 历史参数，当前着陆状态不直接读取。 |
-| `landing_servo_kp_pixel` | `0.004` | 像素误差到水平速度的比例增益。 |
-| `landing_servo_max_horizontal_vel` | `0.6` m/s | 最大水平修正速度。 |
-| `landing_servo_deadzone_px` | `12` px | 小于该误差时停止水平修正。 |
-| `landing_servo_x/y_to_right/forward_sign` | `1/-1` | 图像轴到机体方向的符号。 |
-| `landing_target_min_confidence` | `0.60` | H 目标最低置信度。 |
-| `landing_target_max_jump_px` | `80` px | 连续帧中心最大允许跳变。 |
-| `landing_descent_fast/medium/slow` | `0.4/0.25/0.12` m/s | 不同高度段下降速度。 |
-| `landing_blind_descent_speed` | `0.30` m/s | 盲降阶段纯垂直下降速度。 |
-| `landing_blind_timeout` | `45.0` s | 盲降超时。 |
-| `landing_touchdown_max_altitude` | `0.10` m | SITL 备用接地高度阈值。 |
-| `landing_touchdown_max_horizontal_speed` | `0.10` m/s | SITL 备用接地水平速度阈值。 |
-| `landing_touchdown_max_vertical_speed` | `0.05` m/s | SITL 备用接地垂直速度阈值。 |
-| `landing_touchdown_hold_time` | `2.0` s | SITL 备用接地保持时间。 |
+降落参数按运行 profile 区分。full 真机读取 `mission_params_real.yaml`，quick 真机读取 `mission_params_quick.yaml`；quick SITL 的交接条件独立，不等于真机回归。两个状态类分别是 `state_precision_land.py` 与 `state_precision_land_simple.py`。
 
-真机最终接地以 PX4 `land_detected` 为准，不能只靠 SITL 的本地备用阈值。
+| 参数 | full 真机 | quick 真机 | 作用 |
+|---|---:|---:|---|
+| `landing_simple_mode` | `false` | `true` | 选择 full 人工接管或 simple PX4 LAND 兜底路径 |
+| `landing_search_altitude` | `5.0` m | `5.0` m | H 搜索高度 |
+| `landing_blind_altitude` | `1.5` m | `1.6` m | 对心锁存后切盲降高度 |
+| `landing_blind_stable_frames` | `10` | `1` | 像素死区内连续稳定帧 |
+| `landing_servo_deadzone_px` | `40.0` px | `30.0` px | 水平速度死区；必须保持 YAML double 类型 |
+| `landing_target_min_confidence` | `0.60` | `0.60` | H 检测置信度门 |
+| `landing_target_max_jump_px` | `80.0` px | `80.0` px | 帧间中心跳变门 |
+| `landing_blind_descent_speed` | `0.30` m/s | `0.15` m/s | 盲降垂直速度 |
+| `landing_blind_timeout` | 默认 `45.0` s | 不使用 | full 到期停止并请求人工接管 |
+| `landing_target_reacquire_timeout` | 不使用 | `1.0` s | quick 丢失 H 后请求 PX4 LAND 的窗口 |
+| `landing_simple_blind_timeout` | 不使用 | `60.0` s | quick 从状态进入起算的兜底超时 |
+| `landing_servo_estimator_gate_enable` | 默认 `false` | 默认 `false` | 让估计器的卡方拒帧阻止该帧驱动伺服；待实测标定 |
+
+任务侧伺服使用 `pid_tuning.yaml` 的 `servo_px_kp/ki/kd`，当前为 `0.0025/0.000125/0.0`，水平合速度上限 `servo_px_max_speed=0.35` m/s；`landing_servo_kp_pixel` 和 `landing_servo_max_horizontal_vel` 已不再是现行调参入口。像素 PID 按新测量的采集时刻推进，目标估计器也只融合新帧，并用 `pose_history.py` 查询拍摄时的载机位姿。当前真机日志测得视觉约 10.5 Hz、采集到消费延迟均值约 95 ms；这些是负载观测，不是飞行收益证据。
+
+`LandingTarget` 消费端在最后一次**含检测**的消息超过 2 秒后返回无目标。短时丢失或估计器拒帧时，成熟的最后已知世界目标可驱动有界水平接近；低于 `landing_lost_transit_min_altitude`（默认 `0.75` m）或没有成熟目标时不做该横移。`landing_estimator_meas_unc_tan2`、`landing_estimator_acc_psd` 等门限仍待真机探测器抖动与丢帧分布标定。
+
+`airframe_params_real.yaml` 给真机相机下偏移 `bucket_camera_down=0.365` m，SITL 文件为 `0.0` m。像素到地面米的换算使用镜头到地面的距离；安装角 `roll/pitch/yaw` 虽有配置，当前降落状态未消费，须单独标定与接线。
+
+接地优先看 PX4 `land_detected`；两条状态实现都可在已锁存、已进入盲降后用高度 `≤0.10` m、水平速度 `≤0.10` m/s、垂直速度 `≤0.05` m/s 并保持 `2.0` s 备用确认。此判据没有 `sim_mode` 门，真机可靠性仍待验证。
 
 ## 4. PX4 Bridge 参数
 

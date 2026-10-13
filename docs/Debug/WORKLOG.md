@@ -2,6 +2,13 @@
 
 本文档记录已经影响当前实现的关键问题、修改和验证。历史方案只保留结论，不再作为运行手册。
 
+## 2026-10-13 — 精准降落链与两类启动参数崩溃的现状复核
+
+- 当前 full 与 quick 降落均已将 `LandingTarget.header.stamp` 贯通到伺服和目标估计器；FSM 只在新测量上融合，并用 `pose_history.py` 查询采集时刻的载机位姿。H 目标消费端在最后一次含检测消息超过 2 s 后返回无目标；full 的 `landing_blind_timeout` 已接线。失去目标或估计器拒帧时，有成熟落点且高于近地横移下限才有界地继续靠近。伺服卡方门默认关闭，参数待实测标定。
+- 历史真机日志取证：视觉约 10.5 Hz（2175 条样本），采集到消费延迟均值约 95 ms。它们用于核对多速率代码前提，不证明新降落链真机有效。`landing_desk_sim.py` 的定量收益结论因时钟与真实 FSM 路径不一致已撤回，工具只用于定性检查和发现自相矛盾。
+- 2026-07-23 `px4_bridge.home_z` 的 STRING→DOUBLE 崩溃与 2026-08-06 `mission_fsm` YAML INTEGER→DOUBLE 崩溃都有真机 exit code 1 日志。当前 5 个 launch 的浮点覆盖值已显式转 double，`test_mission_params_contract.py` 同时检查 YAML double 值与 launch 下发类型；两条守卫已做变异验证。
+- 验证级别：上述代码改动为 L1 单元/契约验证，历史日志为已有真机负载和故障证据；本分支尚无完整 SITL 或真机复飞。详细待办见 [PRECISION_LANDING_PLAN.md](../PRECISION_LANDING_PLAN.md)，残余接地与断流风险见 [RISKS_AND_TODOS.md](RISKS_AND_TODOS.md)。
+
 ## 2026-08-06 — 像素误差参数去掉小数点 → mission_fsm 启动崩溃，真机无法起飞
 
 - 场景：真机全流程启动后无人机不动作，舵机日志反复"等待任务租约 (autonomy_lease)"，FSM 从未进入任何飞行状态。
@@ -50,7 +57,7 @@
 - 证据：两次 `mission.log` 逐字一致 —— `vision_pipeline` 与 `test_forward_recon` 均在 `__init__` 创建话题/服务时崩溃（exit code 1）：
   `ImportError: .../drone_interfaces_s__rosidl_typesupport_c.cpython-310-aarch64-linux-gnu.so: undefined symbol: drone_interfaces__msg__ned_position_setpoint__convert_to_py` → `UnsupportedTypeSupport`。任务从未进入 FSM。
 - 根因：回退后增量 `colcon build` **只重建不回收** —— C typesupport 库已按回退后的源码重新生成（该符号被移除），Python 静态 typesupport 扩展仍是新版本构建的残留（引用已删除的符号），运行时 dlopen 符号解析失败。编译期不报错，运行期每次启动必现。
-- 教训：修改消息接口或切换 / 回退版本后**必须全量清理重建**（`rm -rf build install log && colcon build --symlink-install`），不要在增量构建上赌依赖判断。规范见 [DEPLOYMENT.md §2 构建产物清理](DEPLOYMENT.md)。
+- 教训：修改消息接口或切换 / 回退版本后**必须全量清理重建**（`rm -rf build install log && colcon build --symlink-install`），不要在增量构建上赌依赖判断。规范见 [DEPLOYMENT.md §2 构建产物清理](../Deployment/DEPLOYMENT.md)。
 - 修复验证：待真机全量重建后复飞确认。
 
 ## 2026-08-02 — 真机通信链路纠正

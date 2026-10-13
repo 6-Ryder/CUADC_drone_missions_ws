@@ -147,7 +147,7 @@
     landing_target_reacquire_timeout: 1.0  # 低空目标失效后最多重捕获 1s
     landing_search_altitude: 5.0  # 搜索H标识高度 (m)
     landing_approach_speed: 0.5   # 降落逼近速度 (m/s)
-    landing_blind_altitude: 1.0   # SITL: H 标识近地实测 ~0.9m 失效, 1.0m 切入盲降 (真机 0.5m)
+    landing_blind_altitude: 1.0   # SITL: H 标识近地实测 ~0.9m 失效；真机 quick 当前为 1.6m，交接路径独立
     landing_blind_stable_frames: 10  # 近地交接前连续位于像素死区的帧数
     landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
     landing_visual_handoff_altitude: 1.6  # 圆形几何对心后，开始纯垂直下降高度 (m)

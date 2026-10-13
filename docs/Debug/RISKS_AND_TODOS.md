@@ -2,6 +2,7 @@
 
 > 2026-07-31 基于代码审计、git 历史、WORKLOG 和 SITL 验证结果整理。
 > 2026-08-05 真机链路审计补充：视觉消息停更检测、相机内参固化、落地确认链、PX4 最后防线（见风险 #2/#7-#11）。
+> 2026-10-13 按当前 `Optimization` 分支复核降落链：修订风险 #2/#7 与 T5/T13。历史风险按原审计日期保留，引用行号可能已移动。
 > 更新：修改代码或完成验证后同步更新本文档。
 
 ---
@@ -20,19 +21,13 @@
 
 ---
 
-### 2. 真机落地确认链：`land_detected` 失效时无可靠自动退出 🔴
+### 2. 真机落地确认链：备用判据可靠性待验证 🔴
 
-**位置**: `state_precision_land.py` — 真机以 PX4 `/fmu/out/vehicle_land_detected` 为主判定接地；已知柔软地面/草地触地不报告（WORKLOG "2026-07-28 — H 标识视觉精准降落"）。
+**位置**：`state_precision_land.py` 与 `state_precision_land_simple.py` 都优先使用 PX4 `/fmu/out/vehicle_land_detected`；两者的 `_fallback_touchdown_confirmed()` 在“视觉已锁存且已进入盲降”后允许严格近地静止备用确认，**没有 `sim_mode` 门**，真机也可能进入。柔软地面/草地触地不报告 `land_detected` 的历史记录见 WORKLOG。
 
-**现状不一致（代码/配置/文档三层）**: 代码 `_fallback_touchdown_confirmed()`（`state_precision_land.py:329`）**无 sim_mode 门控**，真机同样激活；`mission_params_real.yaml` 注释允许（"仅已视觉对心且进入盲降后才允许严格静止备用确认"）；但本文档此前写"真机没有 fallback"——已过时。
+**已修复**：full 的 `landing_blind_timeout` 已接线，默认 45 s，到期停止下降并请求人工接管；不能再把它列为无消费者。quick/simple 使用独立超时和 PX4 LAND 兜底。
 
-**物理上不可靠**: 真机 `SYS_HAS_NUM_DIST=0` 无距离传感器，`altitude ≤ 0.10m` 靠气压计（±0.3m 漂移常见）→ 兜底在 `land_detected` 失效的场景大概率同样失效。（补充：兜底含 `vertical_speed ≤ 0.05` 速度门，盲降持续指令 0.30m/s 下降，故不会在空中误触发 force-disarm——问题是"不可靠"而非"危险"。）
-
-**`landing_blind_timeout` 未接线**: 参数在 `mission_state_machine.py:344` 与 yaml 中声明（45s），但 `state_precision_land.py` 的 `_execute_blind` 从未读取；`_blind_start_time` 只写不读 → 盲降无硬性时间上限，退出只剩 land_detected / 不可靠兜底 / 30s 无进展监测。
-
-**场景**: 触地但 land_detected 不报 → 电机持续指令下降 30s+，期间依赖操作者接管。
-
-**缓解方向**: 三选一并统一三层（① 兜底加 sim_mode 门控，真机只信 land_detected；② 真机保留兜底但高度容差提到 0.2-0.3m；③ 加距离传感器）；接线 `landing_blind_timeout` 并真机验证。
+**剩余风险**：真机 `SYS_HAS_NUM_DIST=0`，备用判据的高度门 `≤0.10` m 依赖气压高度，触地后未必能满足；虽有速度和保持时间门，不能把它当成经真机验证的接地保证。需在不同地面材质记录 PX4 接地信号、估计高度/速度与实际触地时序，再决定保留、修改或增加测距来源。
 
 ---
 
@@ -78,17 +73,11 @@
 
 ---
 
-### 7. 视觉"消息停更"在 FSM 消费端不可检测 🔴
+### 7. H 目标消息停更：消费端已加龄期门，端到端故障仍待验证 🟡
 
-**位置**: `mission_state_machine.py` — `_landing_target_cb`（:710）不记录时间戳，`get_landing_target()`（:1264）永不过期；`vision_pipeline.py:484` 的 `ready = initialized && models_validated && frame_count>0`，相机死后永久 `ready=1`；`_cyl_cb`（:554）只在收到消息时调用 `emergency.update_vision`，且主循环（:757-767）只响应 `RTL/LAND/ABORT`，视觉丢失的 `WARN` 被无视。
+**已修复**：`mission_state_machine.py` 的 `_landing_target_cb()` 记录采集时刻、接收时刻和最后一次**含检测**的时刻；`get_landing_target()` 在真实检测超过 2 s 后返回 `None`。因此不能再说最后一条高置信度 `LandingTarget` 会无限留在 FSM 缓存。相机停流与持续 miss 帧均会使消费端目标过期。
 
-**场景**: 真机降落/投放阶段相机断流或视觉进程崩溃 → 消息停止，但最后一条高置信度 `LandingTarget` 永远留在缓存 → 降落伺服用冻结的像素误差继续下降，视觉丢失保护与 `vision_loss_timeout` 全部失效；vision watchdog 通道无 `on_timeout` 且主循环不消费 `watchdog.check()` 结果。
-
-**对照**: `get_cylinders`/`get_markers`/`get_hazards` 均有 2s 新鲜度门，唯独 `landing_target` 缺失——属遗漏而非设计。
-
-**SITL 未暴露原因**: 仿真管线持续发布 `confidence=0` 空目标，confidence 字段偶然充当新鲜度信号；SITL 验证从未执行过"杀掉视觉进程"场景。
-
-**缓解方向**: `get_landing_target` 加时间戳门；vision status 增加帧龄字段；emergency 增加消息停更检测（对关键话题到达时间做检测，而非依赖收到空消息）。
+**剩余风险**：视觉状态 `ready` 与消息龄期不是同一信号；对杀掉视觉进程、相机断流、持续空帧的端到端处置尚未在完整 SITL/真机验证。需检查状态转换、目标失效和 quick/full 各自的兜底是否按预期发生。
 
 ---
 
@@ -98,7 +87,7 @@
 
 **矛盾**: 完成 T1（标定内参）后预检脚本必然 fail——检查脚本固化了它自己承认是错误的占位值。
 
-**影响**: 像素闭环（投放精校/降落伺服）对内参鲁棒；但世界坐标记忆（`vision_pipeline.py:768` `pixel_to_world_simple`）与投放记忆目标受线性放大。例：真实 fx=500 vs 猜测 400 → 5m 高、偏 320px 的目标世界坐标偏 0.8m > `cylinder_memory_merge_distance=0.75` → 同筒记两候选，或低空真实目标落出假设视场 → 检测丢失重试。
+**影响**: 像素闭环（投放精校/降落伺服）可在一定程度容忍内参误差，但世界坐标投影与目标记忆依赖当前 `coordinate_transforms.pixel_to_world()` 的内参。目标世界坐标仅在新鲜 6-DoF pose 可用时才标记有效；内参占位值仍会放大投影误差，并可能让同一圆筒被记成多个候选。降落估计器的像素到米换算也使用任务侧 `camera_fx/fy`，须与视觉侧一起标定。
 
 **缓解方向**: 标定内参；验证脚本改为"有发布者 + 值在合理范围/参数化"断言。
 
@@ -144,8 +133,8 @@
 | T2 | 验证 Jetson-CUAV 7-Nano 的 v1 DDS 连接、遥控器 Arm Switch 和 failsafe | WORKLOG #2 |
 | T3 | 标定 MAIN5 PWM 舵机行程（1150→1700→2150μs），验证两次投放实物结果 | WORKLOG #3 |
 | T4 | 验证真机 `vehicle_land_detected` 触发时序（各种地面材质：水泥/草地/软土） | WORKLOG #4 |
-| T5 | 决策真机接地兜底（① sim_mode 门控 ② 提高高度容差 ③ 加距离传感器），统一代码+yaml+文档；**接线 `landing_blind_timeout`** | 风险 #2 |
-| T13 | 视觉新鲜度闭环：`get_landing_target` 加时间戳门、vision status 增加帧龄、emergency 增加消息停更检测 | 风险 #7 |
+| T5 | 实测真机 `land_detected` 与严格近地静止备用判据；按结果决定判据或测距来源。`landing_blind_timeout` 已接线 | 风险 #2 |
+| T13 | H 目标 2 s 龄期门已实现；补相机断流/视觉进程退出/持续空帧的端到端 SITL 与真机验证，评估 status 帧龄和 watchdog 联动 | 风险 #7 |
 | T14 | `COM_OBL_RC_ACT` 改 2=Land 并真机实测 offboard 丢失行为 | 风险 #9 |
 
 ### 应该做（质量提升）
@@ -178,5 +167,5 @@
 - **环境边界**: SITL 和真机的 px4_msgs overlay 切换必须由脚本保证，不能依赖人类记忆。
 - **信号模型**: 关键输入必须同时检测"收到空消息"与"消息停更"两种失效；消费端对关键话题（如 `/drone/vision/landing_target`）做时间戳新鲜度门。
 - **标定一致性**: 验证脚本不得固化未经标定的占位值；内参标定必须与预检断言联动修改。
-- **声明即接线**: 声明为安全保护的参数必须被代码消费并有测试覆盖（`landing_blind_timeout` 教训）；不留"写了没接"的防护。
+- **声明即接线**: 声明为安全保护的参数必须被代码消费并有测试覆盖（`landing_blind_timeout` 已补接线）；不留"写了没接"的防护。
 - **PX4 级最后防线**: Jetson 侧保护全部失效时，PX4 固件必须仍有自动处置（`COM_OBL_RC_ACT` 不得为 0）。
