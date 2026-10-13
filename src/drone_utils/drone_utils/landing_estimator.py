@@ -207,18 +207,50 @@ class LandingTargetEstimator:
         vel_unc_init: float = 0.25,
         vel_init: float = 0.0,
         meas_unc_tan2: float = 5e-4,
+        min_frames: int = 5,
     ):
         self.acc_psd = float(acc_psd)
         self.pos_unc_init = float(pos_unc_init)
         self.vel_unc_init = float(vel_unc_init)
         self.vel_init = float(vel_init)
         self._meas_unc_tan2 = float(meas_unc_tan2)
+        self.min_frames = max(int(min_frames), 0)
         self._north = TargetAxisFilter()
         self._east = TargetAxisFilter()
+        self._accepted_count = 0
+        self._rejected_count = 0
 
     @property
     def initialized(self) -> bool:
         return self._north.initialized and self._east.initialized
+
+    @property
+    def accepted_count(self) -> int:
+        """自上次 reset 以来被接受的观测帧数."""
+        return self._accepted_count
+
+    @property
+    def rejected_count(self) -> int:
+        """被卡方门拒绝的帧数 (供复盘: 拒绝对了=挡住误检, 拒错了=看得见却不接受)."""
+        return self._rejected_count
+
+    @property
+    def is_mature(self) -> bool:
+        """
+        估计是否已"成熟"到可以驱动动作 (当前用于丢失后继续接近的落点).
+
+        为什么需要这道门: 播种帧**不经过卡方门** (没有先验就无从算新息), 而播种
+        协方差又给得较宽 (pos_unc_init), 于是头几帧实质上不过滤 —— 一次误检可以
+        直接成为继续接近的飞行目标. 权威侧同样承认这个风险 (PX4 就是单帧播种),
+        并把它列为已知缺口; ArduPilot 的对策是要求连续 2s 数据才置
+        target_acquired (`AC_PrecLand.cpp:557-572`).
+
+        本项目取**帧数**而非 2s: 一方面 3-5Hz 下 2s 约 6-10 帧, 与下面的默认值同阶;
+        另一方面本项目播种用的观测**已经过置信度与跳变门**
+        (state_precision_land*._get_stable_landing_target), 不是 PX4 那种裸帧,
+        风险本就低一档, 故不必等满 2s.
+        """
+        return self._accepted_count >= self.min_frames
 
     @property
     def position(self) -> Optional[Tuple[float, float]]:
@@ -259,6 +291,7 @@ class LandingTargetEstimator:
             vel_unc_init=float(fsm.get_param("landing_estimator_vel_unc_init", 0.25)),
             meas_unc_tan2=float(
                 fsm.get_param("landing_estimator_meas_unc_tan2", 5e-4)),
+            min_frames=int(fsm.get_param("landing_estimator_min_frames", 5)),
         )
 
     def measurement_uncertainty(self, altitude_m: float) -> float:
@@ -270,6 +303,8 @@ class LandingTargetEstimator:
     def reset(self) -> None:
         self._north.reset()
         self._east.reset()
+        self._accepted_count = 0
+        self._rejected_count = 0
 
     @staticmethod
     def _to_ned(
@@ -310,11 +345,17 @@ class LandingTargetEstimator:
                              self.pos_unc_init, self.vel_unc_init)
             self._east.init(target_east, self.vel_init,
                             self.pos_unc_init, self.vel_unc_init)
+            self._accepted_count += 1
             return True
 
         ok_north = self._north.update(target_north, meas_unc)
         ok_east = self._east.update(target_east, meas_unc)
-        return ok_north and ok_east
+        accepted = ok_north and ok_east
+        if accepted:
+            self._accepted_count += 1
+        else:
+            self._rejected_count += 1
+        return accepted
 
     def predict(self, dt: float) -> None:
         """

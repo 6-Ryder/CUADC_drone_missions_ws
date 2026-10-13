@@ -400,10 +400,12 @@ def test_lost_target_transits_to_last_known_position_in_metres():
     state = SimplePrecisionLandState(fsm)
     state._phase = state.PHASE_SERVO
 
-    state._execute_servo(has_target=True)
+    # 估计成熟后才锁存 (默认 5 帧), 见 test_immature_estimate_does_not_latch
+    for _ in range(6):
+        state._execute_servo(has_target=True)
     latched = state._lost_transit.target
     assert latched is not None
-    # du=50px, 高度 5.0m, fx=400 → 右向偏移 ≈ 0.625 m (east, yaw=0)
+    # du=50px, 高度 5.0m - 相机偏移 0 (测试桩), fx=400 → 右向偏移 ≈ 0.625 m
     assert latched[0] == pytest.approx(0.0, abs=1e-6)
     assert latched[1] == pytest.approx(50.0 * 5.0 / 400.0, abs=1e-6)
 
@@ -463,8 +465,9 @@ def test_full_precision_land_transits_to_last_known_position():
         "camera_cy": 240.0,
     })
     state = PrecisionLandState(fsm)
-    state._execute_servo(
-        {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9})
+    for _ in range(6):      # 估计成熟后才锁存 (默认 5 帧)
+        state._execute_servo(
+            {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9})
 
     latched = state._lost_transit.target
     assert latched is not None
@@ -594,6 +597,42 @@ def test_full_blind_descent_ran_within_timeout_is_not_interrupted():
 
     assert fsm.takeovers == []
     assert fsm.fc.calls[-1][2] > 0.0, "应在下降"
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_immature_estimate_does_not_latch_the_transit_target(state_cls):
+    """播种帧不过卡方门 ⇒ 头几帧实质不过滤 ⇒ 一次误检不得成为飞行目标.
+
+    这是"播种保护": 估计成熟 (默认 5 帧被接受) 之前**不锁存**继续接近的落点.
+    没有这道门时, 进入降落状态后的**第一个**检测 (无论真假) 就直接决定丢失后
+    往哪飞 —— 而这正是权威侧承认的已知缺口 (PX4 单帧播种).
+    """
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+        "landing_estimator_min_frames": 5,
+    }
+    fsm = _SimpleFSM(params)
+    state = state_cls(fsm)
+    if hasattr(state, "_phase"):
+        state._phase = state.PHASE_SERVO
+    target = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
+
+    state._execute_servo(target)                 # 第 1 帧
+    assert state._lost_transit.target is None, "未成熟就锁存了"
+
+    for _ in range(3):                           # 累计 4 帧, 仍不成熟
+        state._execute_servo(target)
+    assert state._lost_transit.target is None
+
+    state._execute_servo(target)                 # 第 5 帧 → 成熟
+    assert state._lost_transit.target is not None
 
 
 def test_lost_target_transit_reset_on_enter():

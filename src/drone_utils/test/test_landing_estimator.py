@@ -300,3 +300,53 @@ def test_vehicle_motion_does_not_create_phantom_velocity():
     assert est.position == pytest.approx(target, abs=0.15)
     assert abs(est.velocity[0]) < 0.15
     assert abs(est.velocity[1]) < 0.15
+
+
+# ---------------------------------------------------------------------------
+# 成熟度与拒绝计数 (播种保护)
+# ---------------------------------------------------------------------------
+
+def test_estimate_is_not_mature_until_min_frames_accepted():
+    """播种帧不过卡方门 ⇒ 未成熟前不得被拿去驱动动作.
+
+    ArduPilot 的对策是要求连续 2s 数据才置 target_acquired; 本项目取帧数,
+    因为播种用的观测已经过置信度与跳变门, 不是裸帧.
+    """
+    est = LandingTargetEstimator(min_frames=5)
+    assert est.is_mature is False
+
+    for k in range(4):
+        _observe_target(est, (1.0, 1.0), (0.0, 0.0), 0.0)
+        assert est.is_mature is False, f"第 {k+1} 帧就成熟了"
+        assert est.accepted_count == k + 1
+
+    _observe_target(est, (1.0, 1.0), (0.0, 0.0), 0.0)
+    assert est.is_mature is True
+
+
+def test_rejected_frames_do_not_count_toward_maturity():
+    """被门拒绝的帧不算"见过数据" —— 否则连续误检能把估计催熟."""
+    est = LandingTargetEstimator(min_frames=3)
+    for _ in range(10):
+        _observe_target(est, (1.0, 1.0), (0.0, 0.0), 0.0)
+    assert est.is_mature is True
+    before = est.accepted_count
+
+    for _ in range(3):
+        assert _observe_target(est, (80.0, -80.0), (0.0, 0.0), 0.0) is False
+
+    assert est.accepted_count == before
+    assert est.rejected_count == 3
+
+
+def test_counters_reset_with_the_estimate():
+    est = LandingTargetEstimator(min_frames=2)
+    for _ in range(5):
+        _observe_target(est, (1.0, 1.0), (0.0, 0.0), 0.0)
+    assert est.accepted_count == 5
+
+    est.reset()
+
+    assert est.accepted_count == 0
+    assert est.rejected_count == 0
+    assert est.is_mature is False

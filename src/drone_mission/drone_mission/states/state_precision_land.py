@@ -72,6 +72,8 @@ class PrecisionLandState:
         # 接在丢失后继续接近的路径上: 单帧误检不再直接决定继续接近的落点.
         self._target_estimator = LandingTargetEstimator.from_params(self._fsm)
         self._estimator_last_predict = 0.0
+        self._estimator_last_accept = 0.0
+        self._estimator_reject_log_time = 0.0
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -90,6 +92,7 @@ class PrecisionLandState:
         self._lost_transit.reset()
         self._target_estimator.reset()
         self._estimator_last_predict = 0.0
+        self._estimator_last_accept = 0.0
         self._servo_last_log_time = 0.0
         self._last_target_center = None
         self._last_target_jump_log_time = 0.0
@@ -241,6 +244,49 @@ class PrecisionLandState:
             float(self._fsm.get_param("landing_precision_target", 0.1)),
         )
 
+    def _note_estimator_result(self, accepted: bool) -> None:
+        """记录一帧估计结果: 接受时刻 / 拒绝原因日志.
+
+        两件事各自的理由:
+          - 接受时刻: 丢线超时的基准是"距最后一次**被接受**的观测", 不是"距最后
+            一条消息" —— 与权威一致 (PX4 的 _last_update 只在成功时刷新).
+          - 拒绝日志: 拒绝对了=挡住误检, 拒错了=看得见却永远不接受. 没有这条日志
+            事后无法区分这两种情况 (PX4 专门发布 landing_target_innovations)。
+        """
+        now = time.monotonic()
+        if accepted:
+            self._estimator_last_accept = now
+            return
+
+        residual, innov_cov = self._target_estimator.filter_north.last_innovation
+        if now - self._estimator_reject_log_time >= 1.0:
+            self._estimator_reject_log_time = now
+            self._fsm.get_logger().warn(
+                "PRECISION_LAND: 估计器拒绝该帧观测 "
+                f"(north 残差={residual:+.3f}m 新息协方差={innov_cov:.4f} "
+                f"累计拒绝={self._target_estimator.rejected_count})"
+            )
+
+    def _check_estimator_dropout(self) -> None:
+        """长时间没有**被接受**的观测 → 显式重置估计器 (PX4 的 2s 硬复位).
+
+        不重置的后果: 协方差被 update 收敛到极小 (P00 只降不升), 于是长丢线后
+        目标真移动时滤波器会连续拒绝, 只能靠"连续 3 次强制融合"慢慢恢复 ——
+        表现为"看得见却半天不接受".
+        """
+        if not self._target_estimator.initialized:
+            return
+        timeout = float(self._fsm.get_param(
+            "landing_estimator_reset_timeout", 2.0))
+        if timeout <= 0.0 or self._estimator_last_accept <= 0.0:
+            return
+        if time.monotonic() - self._estimator_last_accept > timeout:
+            self._fsm.get_logger().warn(
+                f"PRECISION_LAND: 估计器 {timeout:.1f}s 无被接受的观测, 重置"
+            )
+            self._target_estimator.reset()
+            self._estimator_last_accept = 0.0
+
     def _predict_target_estimator(self) -> None:
         """把目标估计器推进到当前时刻 (**每个伺服 tick 都要调**).
 
@@ -254,6 +300,7 @@ class PrecisionLandState:
         self._estimator_last_predict = now
         if last <= 0.0:
             return
+        self._check_estimator_dropout()
         dt = now - last
         if dt <= 0.0:
             return
@@ -292,20 +339,19 @@ class PrecisionLandState:
         # 先经估计器融合 (卡方门拒绝单帧误检), 再把**融合后**的位置作为锁存点.
         # 观测 = 载机位置 + 机体系偏移 → 目标世界位置; 测量方差随高度平方增长
         # (R ∝ range², PX4 LandingTargetEstimator.cpp:125).
-        self._target_estimator.observe(
+        accepted = self._target_estimator.observe(
             float(pos.north), float(pos.east), yaw,
             error_forward_m, error_right_m,
             self._target_estimator.measurement_uncertainty(altitude),
         )
+        self._note_estimator_result(accepted)
+
+        # 只在估计成熟后驱动"继续接近"的落点. 播种帧不过卡方门 (没有先验就无从
+        # 算新息), 且播种协方差给得宽 → 头几帧实质不过滤, 一次误检可以直接成为
+        # 飞行目标. 不成熟时**不锁存**, 保持上一次成熟时的落点 (或没有落点).
         filtered = self._target_estimator.position
-        if filtered is not None:
+        if filtered is not None and self._target_estimator.is_mature:
             self._lost_transit.latch_world(filtered[0], filtered[1])
-        else:
-            # 估计器尚不可用 (观测非法) → 退回单帧观测, 不因新机制而失去锁存
-            self._lost_transit.latch(
-                float(pos.north), float(pos.east), yaw,
-                error_forward_m, error_right_m,
-            )
 
     def _lost_transit_command(self, altitude: float) -> tuple:
         """丢失目标时的机体系横向指令 (forward, right).
