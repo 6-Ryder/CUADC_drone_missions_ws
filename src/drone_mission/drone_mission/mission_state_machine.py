@@ -352,15 +352,15 @@ class MissionFSM(Node):
         # InvalidParameterTypeException 导致 mission_fsm 启动即崩溃.
         self.declare_parameter("servo_kp", 0.40)
         self.declare_parameter("servo_ki", 0.02)
-        self.declare_parameter("servo_kd", 0.05)
+        self.declare_parameter("servo_kd", 0.0)
         self.declare_parameter("servo_max_speed", 0.25)
         self.declare_parameter("servo_min_speed", 0.012)
         self.declare_parameter("servo_norm_kp", 1.25)
         self.declare_parameter("servo_norm_ki", 0.0625)
-        self.declare_parameter("servo_norm_kd", 0.15)
+        self.declare_parameter("servo_norm_kd", 0.0)
         self.declare_parameter("servo_px_kp", 0.0025)
         self.declare_parameter("servo_px_ki", 0.000125)
-        self.declare_parameter("servo_px_kd", 0.0003)
+        self.declare_parameter("servo_px_kd", 0.0)
         self.declare_parameter("servo_px_max_speed", 0.35)
         # 两域共用: 抗饱和与微分滤波
         self.declare_parameter("servo_integral_limit", 0.03)

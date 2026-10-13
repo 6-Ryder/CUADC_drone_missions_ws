@@ -19,7 +19,7 @@
 #
 # ── 三个误差域 (为什么是三套增益而不是一套) ────────────────────────────
 # 控制系统按误差单位分为三域, 各自独立整定; 三域的积分时间 Ki 与微分时间
-# Kd 已按同一原则取齐 (Ti = Kp/Ki = 20 s, Td = Kd/Kp ≈ 0.12 s):
+# 积分时间 Ti 已按同一原则取齐 (Ti = Kp/Ki = 20 s); 微分项暂时归零, 见下:
 #
 #   米制域   — 误差单位 m.    PrecisionAlignController 连续模式 (真机主用路径)
 #   归一化域 — 误差单位 图像高/宽的比例. PrecisionAlignController 步进模式
@@ -41,8 +41,15 @@
 #       故 Ti 必须取得比"延迟的 8-10 倍"更宽. 本条经设计复核修正,
 #       原按延迟规则取的 Ti=5 s 会吃掉约 30 deg 相位裕度, 对振荡史的平台过奢.
 #       Ti 再小会与延迟打架产生振荡; 再大则常值扰动收敛过慢.
-#   Kd: 取 Td ≈ 0.12 s, 明显小于 0.33 s 采样周期 (采样系统里 Td 接近采样
-#       周期会放大噪声). 配合 alpha=0.30 低通, 实测噪声抑制约 82%.
+#   Kd: 暂时取 0 (PI). 原设计取 Td ≈ 0.12 s, 但两个独立证据都不支持启用:
+#       (a) 微分按控制 tick 求差而非按测量求差 —— 目标 dict 无采集时间戳,
+#           调用点只能传 FSM 时钟. 真机视觉 3-5Hz 而 tick 20Hz, 于是帧间
+#           误差不变 (D≈0), 新帧到达时除以的是 tick 周期 0.05s 而非测量
+#           周期 0.33s, D 被放大约 6.6 倍并以尖峰打出. 2.5m 高度下 30px
+#           抖动即产生 0.19 m/s (速度上限的 76%).
+#       (b) 设计复核独立主张 3Hz + 30px 抖动下微分无实际价值.
+#       要在将来启用, 须先给视觉回调加采集时间戳并让调用点把它作为
+#       stamp 传入 (ServoPid.update 已支持), 届时再按 Td ≈ 0.1·采样周期 取值.
 #
 # ── 整定顺序 (真机试飞时按此顺序) ─────────────────────────────────────
 #   1. 先确认启动日志的 "SERVO_PID 生效参数" 一行与预期一致.
@@ -77,7 +84,7 @@
     # 误差单位 m. 原 precision_align_ground_kp 的 P 值保持不变.
     servo_kp: 0.40                 # 比例增益 [(m/s) per m]
     servo_ki: 0.02                 # 积分增益 [(m/s) per (m·s)]  Ti = Kp/Ki = 20 s
-    servo_kd: 0.05                 # 微分增益 [(m/s) per (m/s)]  Td = Kd/Kp = 0.125 s
+    servo_kd: 0.0                 # 微分增益 —— 暂归零 (见文件头 Kd 说明)
     servo_max_speed: 0.25          # 水平合速度上限 [m/s] (原 precision_align_max_speed)
     servo_min_speed: 0.012         # 最小有效修正速度 [m/s] (原 precision_align_min_correction_speed)
 
@@ -85,13 +92,13 @@
     # 误差单位 = 图像高/宽的比例. 仅在 precision_align_continuous_enable=false 时生效.
     servo_norm_kp: 1.25            # 原 precision_align_gain
     servo_norm_ki: 0.0625            # Ti = 20 s
-    servo_norm_kd: 0.15            # Td = 0.12 s
+    servo_norm_kd: 0.0            # 暂归零 (见文件头 Kd 说明)
 
     # ── 像素域: 投放内联伺服 + 降落伺服 ──────────────────────────────
     # 误差单位 px. 原 landing_servo_kp_pixel 的 P 值保持不变.
     servo_px_kp: 0.0025            # 比例增益 [(m/s) per px]
     servo_px_ki: 0.000125            # 积分增益 [(m/s) per (px·s)]  Ti = 20 s
-    servo_px_kd: 0.0003            # 微分增益 [(m/s) per (px/s)]  Td = 0.12 s
+    servo_px_kd: 0.0            # 微分增益 —— 暂归零 (见文件头 Kd 说明)
     servo_px_max_speed: 0.35       # 水平合速度上限 [m/s] (原 landing_servo_max_horizontal_vel)
 
     # ── 两域共用: 抗饱和与滤波 ────────────────────────────────────────
