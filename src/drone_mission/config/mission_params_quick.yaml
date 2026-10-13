@@ -143,14 +143,6 @@
     bucket_calibration_valid: false       # 兼容旧配置；当前圆筒视觉/超时投放忽略此参数
     # 以下几何为现场静态量测的中值；释放延迟与落点误差仍须实测。
     bucket_rim_height: 0.40              # m；桶口距地高度
-    bucket_home_body_height: 0.40        # m；装载时 O 点距起飞地面约 40 cm
-    bucket_camera_down: 0.365           # m；镜头光学中心距地 3-4 cm
-    bucket_front_forward: 0.045         # m；前舱脱离点在 O 前方 4.5 cm
-    bucket_rear_forward: -0.045         # m；后舱脱离点在 O 后方 4.5 cm
-    bucket_front_right: 0.0             # m；前舱脱离点无左右偏移
-    bucket_rear_right: 0.0              # m；后舱脱离点无左右偏移
-    bucket_front_down: 0.345            # m；前物品脱离点距地 5-6 cm
-    bucket_rear_down: 0.345             # m；后物品脱离点距地 5-6 cm
     bucket_front_delay: 0.0             # s；占位值，须实测
     bucket_rear_delay: 0.0              # s；占位值，须实测
     bucket_front_uncertainty: 0.03      # m；占位值，须重复试投验证

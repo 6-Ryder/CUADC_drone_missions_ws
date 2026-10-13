@@ -69,21 +69,50 @@ def test_quick_sitl_references_quick_sim_params():
 
 
 def test_bucket_camera_geometry_stays_separate_between_real_and_sitl():
+    """机体几何真机/SITL 必须分开, 且只存在于 airframe_params_*.yaml.
+
+    相机安装位姿与投放点是**机体**属性 (随飞机变, 不随任务 profile 变), 所以:
+      - 真机与 SITL 各一份, 数值刻意不同 (仿真相机与机体原点重合, 偏移全 0);
+      - 不再散落在 mission_params_quick.yaml / vision_params_quick*.yaml 里 ——
+        此前相机位姿只在 vision 配置、投放点只在 mission 配置, 而 full 任务
+        两处都没有, 于是"改了配置却不生效"是静默发生的.
+    """
     real_files = _param_files(LAUNCH_DIR / "quick_flight.launch.py")
     sim_files = _param_files(LAUNCH_DIR / "quick_sitl.launch.py")
-    vision_config = WORKSPACE / "src/drone_vision/config"
-    real_vision = yaml.safe_load((vision_config / "vision_params_quick.yaml").read_text())[
-        "/vision_pipeline"]["ros__parameters"]
-    sim_vision = yaml.safe_load((vision_config / "vision_params_quick_sim.yaml").read_text())[
-        "/vision_pipeline"]["ros__parameters"]
+    airframe_dir = WORKSPACE / "src/drone_bringup/config"
 
     assert "vision_params_quick.yaml" in real_files
     assert "vision_params_quick_sim.yaml" in sim_files
+    assert "airframe_params_real.yaml" in real_files
+    assert "airframe_params_sitl.yaml" in sim_files
+
+    def _airframe(filename):
+        doc = yaml.safe_load((airframe_dir / filename).read_text(encoding="utf-8"))
+        return (doc["/vision_pipeline"]["ros__parameters"],
+                doc["/mission_state_machine"]["ros__parameters"])
+
+    real_vision, real_mission = _airframe("airframe_params_real.yaml")
+    sim_vision, sim_mission = _airframe("airframe_params_sitl.yaml")
+
+    # 真机: 相机在机体原点下方 36.5cm, 装载时原点离地 40cm
     assert real_vision["bucket_home_body_height"] == 0.40
     assert real_vision["bucket_camera_down"] == 0.365
+    assert real_mission["bucket_camera_down"] == 0.365
+    assert real_mission["bucket_front_forward"] == 0.045
+    # SITL: 仿真相机与原点重合
     assert sim_vision["bucket_home_body_height"] == 0.0
     assert sim_vision["bucket_camera_down"] == 0.0
-    assert _mission_params("mission_params_quick.yaml")["bucket_calibration_valid"] is False
+    assert sim_mission["bucket_camera_down"] == 0.0
+
+    # 两份文件必须覆盖同一组键, 否则"改了真机忘了仿真"会静默漏掉
+    assert set(real_vision) == set(sim_vision)
+    assert set(real_mission) == set(sim_mission)
+
+    # 几何已从 profile 配置移出
+    quick_mission = _mission_params("mission_params_quick.yaml")
+    assert "bucket_camera_down" not in quick_mission
+    assert "bucket_front_forward" not in quick_mission
+    assert quick_mission["bucket_calibration_valid"] is False
 
 
 def test_original_launches_do_not_reference_quick_params():

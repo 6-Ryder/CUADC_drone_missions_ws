@@ -70,6 +70,7 @@ def generate_launch_description():
     pkg_vision = get_package_share_directory("drone_vision")
     pkg_servo = get_package_share_directory("drone_servo2")
     pkg_mission = get_package_share_directory("drone_mission")
+    pkg_bringup = get_package_share_directory("drone_bringup")
 
     # ---- 参数文件路径 (quick: 独立参数, 不影响原 SITL) ----
     px4_param_file = os.path.join(pkg_control, "config", "px4_params.yaml")
@@ -82,6 +83,11 @@ def generate_launch_description():
         pkg_mission, "config", "mission_params_quick_sim.yaml"
     )
     pid_tuning_file = os.path.join(pkg_mission, "config", "pid_tuning.yaml")
+    # 机体几何 (相机安装 / 机体原点离地 / 投放点): 单一来源, 见该文件头说明.
+    # 真机与 SITL 各一份且**刻意不同** (仿真相机与机体原点重合), 不可合并.
+    airframe_param_file = os.path.join(
+        pkg_bringup, "config", "airframe_params_sitl.yaml"
+    )
 
     # ---- 节点 ----
 
@@ -108,18 +114,23 @@ def generate_launch_description():
         executable="vision_pipeline",
         name="vision_pipeline",
         output="screen",
-        parameters=[vision_param_file, vision_quick_param_file, {
-            "home_x": LaunchConfiguration("home_x"),
-            "home_y": LaunchConfiguration("home_y"),
-            "layout_heading_deg": ParameterValue(
-                LaunchConfiguration("layout_heading_deg"), value_type=float,
-            ),
-            "image_top_faces_forward": True,  # gz 实测: 画面顶朝机头
-            "camera_compressed": True,
-            "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
-            "bucket_rim_height": ParameterValue(
-                LaunchConfiguration("bucket_rim_height"), value_type=float),
-        }],
+        parameters=[
+            vision_param_file,
+            vision_quick_param_file,
+            airframe_param_file,
+            {
+                "home_x": LaunchConfiguration("home_x"),
+                "home_y": LaunchConfiguration("home_y"),
+                "layout_heading_deg": ParameterValue(
+                    LaunchConfiguration("layout_heading_deg"), value_type=float,
+                ),
+                "image_top_faces_forward": True,  # gz 实测: 画面顶朝机头
+                "camera_compressed": True,
+                "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
+                "bucket_rim_height": ParameterValue(
+                    LaunchConfiguration("bucket_rim_height"), value_type=float),
+            },
+        ],
         arguments=[
             "--ros-args",
             "--log-level", "info",
@@ -149,6 +160,7 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
             mission_param_file,
+            airframe_param_file,
             {
                 "home_x": LaunchConfiguration("home_x"),
                 "home_y": LaunchConfiguration("home_y"),

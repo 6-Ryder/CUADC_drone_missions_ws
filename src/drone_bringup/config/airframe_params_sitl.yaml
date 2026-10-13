@@ -1,0 +1,40 @@
+# ══════════════════════════════════════════════════════════════════════════
+# 机体几何参数 —— SITL (airframe geometry, SIM)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# 与 airframe_params_real.yaml 同结构, 但数值是**仿真模型**的, 不是真机的近似:
+#   - 仿真相机与机体原点重合 (偏移全 0), 真机相机在原点下方 36.5 cm;
+#   - 仿真投放点取代码默认值 (前后 ±4 cm, 下方 0), 真机是 ±4.5 cm / 0.345 m.
+# 两者**必须分开维护**: 把真机标定值灌进 SITL 会让仿真里的几何与它实际渲染的
+# 模型不一致, 而仿真结论又被当作真机依据.
+# (src/drone_bringup/test/test_quick_launch_configuration.py 守这条区分.)
+#
+# 这些数值在本次整理前是**代码里的 declare_parameter 默认值** —— 本文件把它们
+# 显式化, 因此 SITL 行为与整理前逐值相同.
+#
+# 详见 airframe_params_real.yaml 的字段说明 (单位/符号/机体原点定义).
+# ══════════════════════════════════════════════════════════════════════════
+
+/vision_pipeline:
+  ros__parameters:
+    # ── 相机安装位姿 (仿真模型: 与机体原点重合) ──
+    bucket_camera_forward: 0.0
+    bucket_camera_right: 0.0
+    bucket_camera_down: 0.0
+    bucket_camera_roll: 0.0
+    bucket_camera_pitch: 0.0
+    bucket_camera_yaw: 0.0
+    # ── 机体站立姿态 (仿真: O 点与地面同高) ──
+    bucket_home_body_height: 0.0
+
+/mission_state_machine:
+  ros__parameters:
+    bucket_camera_down: 0.0
+    bucket_home_body_height: 0.0
+    # ── 投放点 (仿真默认值) ──
+    bucket_front_forward: 0.04
+    bucket_front_right: 0.0
+    bucket_front_down: 0.0
+    bucket_rear_forward: -0.04
+    bucket_rear_right: 0.0
+    bucket_rear_down: 0.0

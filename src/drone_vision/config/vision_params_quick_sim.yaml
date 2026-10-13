@@ -3,13 +3,6 @@
     quick_drop_profile: "bucket" # quick 仿真默认；launch 可覆盖为 blue
     # SITL 保留此前已验证的零高度基准及零相机偏移；不使用真机量测值。
     # blue 配置不读取这些值，保持已飞过的投影行为。
-    bucket_camera_forward: 0.0
-    bucket_camera_right: 0.0
-    bucket_home_body_height: 0.0
-    bucket_camera_down: 0.0
-    bucket_camera_roll: 0.0
-    bucket_camera_pitch: 0.0
-    bucket_camera_yaw: 0.0
     # 快速策略专用：YOLO 建锁/低频守护，OpenCV 跟踪圆形落区中心。
     landing_circle_track_enable: true
     landing_circle_tracker_roi_padding_px: 48

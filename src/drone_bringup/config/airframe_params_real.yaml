@@ -1,0 +1,53 @@
+# ══════════════════════════════════════════════════════════════════════════
+# 机体几何参数 —— 真机 (airframe geometry, REAL)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# 本文件只放**这台飞机长什么样**的量: 相机装在哪、机体原点离地多高、投放点
+# 在机体系哪个位置. 不放:
+#   - 增益/阈值/超时        → src/drone_mission/config/pid_tuning.yaml 与各 profile
+#   - 相机内参 fx/fy/cx/cy  → 那是**标定值**不是机体几何, 仍在 vision_params*.yaml
+#
+# 为什么要单独一份: 这些量随**机体**变化, 不随任务 profile 变化. 此前它们散落
+# 在两处且互不覆盖 —— 相机位姿只在 vision_params_quick.yaml, 投放点只在
+# mission_params_quick.yaml, 而 full 任务两处都没有 (用的是代码里的硬编码默认
+# 值), 于是"改了配置文件但 full 不生效"是静默发生的.
+#
+# ⚠️ 换机体、改相机安装、调整投放机构之后**必须复核本文件**:
+#   这里的每个量都会先乘进"像素→米"的换算再进入控制
+#   (见 drone_utils/landing_profile.ground_error_m 与 drone_utils.quick_release_geometry).
+#
+# ── 与 SITL 的差异 (刻意保留, 不要合并) ──────────────────────────────────
+# SITL 用 airframe_params_sitl.yaml, 其相机与机体原点**重合**(偏移全 0) ——
+# 那是仿真模型的选择, 不是真机的近似. 两者必须分开, 否则会把仿真里成立的
+# 几何当成真机标定值 (src/drone_bringup/test/test_quick_launch_configuration.py
+# 专门守这条).
+#
+# ── 单位与符号 ──────────────────────────────────────────────────────────
+# 位置: m; 机体系 FRD —— forward=机头方向, right=机体右侧, down=向下.
+# 角度: rad. 机体原点 O 定义见 quick_release_geometry.
+# ══════════════════════════════════════════════════════════════════════════
+
+/vision_pipeline:
+  ros__parameters:
+    # ── 相机安装位姿 (镜头光学中心相对机体原点 O) ──
+    bucket_camera_forward: 0.0        # m; 前后偏移
+    bucket_camera_right: 0.0          # m; 左右偏移
+    bucket_camera_down: 0.365         # m; 镜头光学中心在 O 下方 36.5 cm
+    bucket_camera_roll: 0.0           # rad; 安装横滚
+    bucket_camera_pitch: 0.0          # rad; 安装俯仰
+    bucket_camera_yaw: 0.0            # rad; 安装偏航
+    # ── 机体站立姿态 ──
+    bucket_home_body_height: 0.40     # m; 装载时 O 点距起飞地面
+
+/mission_state_machine:
+  ros__parameters:
+    # ── 相机安装 (任务侧只用到下方偏移: 像素→地面米的换算) ──
+    bucket_camera_down: 0.365         # m; 必须与上面 /vision_pipeline 一致
+    bucket_home_body_height: 0.40     # m; 必须与上面 /vision_pipeline 一致
+    # ── 投放点 (前/后舱物品脱离点, 机体系) ──
+    bucket_front_forward: 0.045       # m; 前舱脱离点在 O 前方 4.5 cm
+    bucket_front_right: 0.0           # m; 前舱无左右偏移
+    bucket_front_down: 0.345          # m; 前舱脱离点在 O 下方 34.5 cm
+    bucket_rear_forward: -0.045       # m; 后舱脱离点在 O 后方 4.5 cm
+    bucket_rear_right: 0.0            # m; 后舱无左右偏移
+    bucket_rear_down: 0.345           # m; 后舱脱离点在 O 下方 34.5 cm

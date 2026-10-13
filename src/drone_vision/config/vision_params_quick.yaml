@@ -3,13 +3,6 @@
     quick_drop_profile: "bucket" # quick 真机默认；launch 可覆盖为 blue
     # bucket 真机相机 FRD 安装偏移：O 离地约 40 cm，镜头光学中心离地 3-4 cm。
     # blue 配置不读取这些值，保持已飞过的投影行为。
-    bucket_camera_forward: 0.0
-    bucket_camera_right: 0.0
-    bucket_home_body_height: 0.40
-    bucket_camera_down: 0.365
-    bucket_camera_roll: 0.0
-    bucket_camera_pitch: 0.0
-    bucket_camera_yaw: 0.0
     # 快速策略专用：YOLO 建锁/低频守护，OpenCV 跟踪圆形落区中心。
     landing_circle_track_enable: true
     landing_circle_tracker_roi_padding_px: 48
