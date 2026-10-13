@@ -55,6 +55,7 @@ from drone_mission.quick_bucket_gate import (
 )
 from drone_mission.path_planner import PathPlanner
 
+from drone_utils.pose_history import PoseHistory
 from drone_utils.logger import TaskLogger
 from drone_utils.layout_frame import LayoutFrame
 from drone_utils.watchdog import Watchdog
@@ -228,6 +229,10 @@ class MissionFSM(Node):
         #   *_timestamp      — 消息到达 FSM 的时刻, 用于"这个源还在不在"的
         #                      存活判断 (watchdog / 到达时刻龄门)
         # 统一出口是 vision_measurement_stamp(source), 它优先返回采集时刻.
+        # 载机位姿历史: 视觉测量的采集时刻比到达时刻早 0.2-0.33s (3-5Hz),
+        # 用处理时刻的位姿解析旧帧会引入 v·tau (≈7.5cm @0.25m/s) 的平移误差
+        # 与 |偏移|·Δψ 的旋转误差 (后者是系统偏差, 卡方门抓不到).
+        self._pose_history: Optional[PoseHistory] = None
         self._landing_target_stamp: float = 0.0
         # 降落目标的采集时刻 (消息 header, 相机帧时刻). 与 _landing_target_stamp
         # (到达 FSM 的时刻) 分开, 与另两源的 *_capture_stamp 同形.
@@ -679,6 +684,12 @@ class MissionFSM(Node):
 
         # 启动控制循环
         freq = self.get_param("control_frequency", 20.0)
+        # 位姿历史的取用窗口取"3 个控制周期"与 0.10s 的较大者 —— 固定值在改变
+        # 控制频率后会失效 (5Hz 时一个周期就 0.2s, 固定 0.15 会让历史永远取不到).
+        self._pose_history = PoseHistory(
+            maxlen=max(int(5.0 * freq), 20),
+            max_gap=max(3.0 / freq, 0.10),
+        )
         self._ctrl_timer = self.create_timer(1.0 / freq, self._control_loop)
 
         self._initialized = True
@@ -1092,9 +1103,37 @@ class MissionFSM(Node):
             return
         self._state_machine_busy = True
         try:
+            # 位姿采样放在**重入防护之后**: 被跳过的 tick 不该往历史里插样本
+            # (那会让历史的时间分布与真实控制节拍不符).
+            self._sample_pose_history()
             self._control_loop_impl()
         finally:
             self._state_machine_busy = False
+
+    def _sample_pose_history(self) -> None:
+        """每个控制周期记一次载机位姿 —— 供按采集时刻取位姿 (时间对齐)."""
+        if self._pose_history is None:
+            return
+        try:
+            pos = self.bridge.get_current_position()
+            yaw = float(getattr(self.bridge, "_current_yaw", math.nan))
+            self._pose_history.add(
+                self.get_clock().now().nanoseconds / 1e9,
+                float(pos.north), float(pos.east), float(pos.down), yaw,
+            )
+        except Exception as exc:      # 遥测未就绪等: 不采样, 不影响主循环
+            self.get_logger().debug(f"位姿历史采样跳过: {exc}")
+
+    def pose_at(self, stamp: float) -> Optional[tuple]:
+        """
+        取 `stamp` 时刻的载机位姿 (north, east, down, yaw); 取不到返回 None.
+
+        调用方拿到 None 时的**正确反应是退回处理时刻的位姿**, 而不是放弃这次
+        测量 —— 时间对齐是精度改进, 不是可用性前提.
+        """
+        if self._pose_history is None:
+            return None
+        return self._pose_history.at(stamp)
 
     def _control_loop_impl(self):
 

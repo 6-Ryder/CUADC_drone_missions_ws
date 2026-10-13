@@ -359,18 +359,31 @@ class PrecisionLandState:
             "landing_servo_x_to_right_sign", 1.0))
         fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
         fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
-        plane_m = camera_plane_distance(
-            altitude, float(self._fsm.get_param("bucket_camera_down", 0.0)))
+
+        # ── 时间对齐 ──
+        # 观测必须用**拍摄那一刻**的载机位置/航向/高度, 不是处理这一刻的:
+        # 3-5Hz 下两者相差 0.2-0.33s, 平移误差 ≈ v·tau (0.25m/s 时约 7.5cm),
+        # 旋转误差 ≈ |偏移|·Δψ 且方向随航向变化 (系统偏差, 卡方门抓不到).
+        # 取不到时**退回处理时刻** —— 时间对齐是精度改进, 不是可用性前提.
+        pose = self._fsm.pose_at(self._fsm.vision_measurement_stamp("landing"))
+        if pose is not None:
+            north, east, down, yaw = pose
+            plane_m = camera_plane_distance(
+                abs(float(self._fsm.fc.ned_to_altitude(down))),
+                float(self._fsm.get_param("bucket_camera_down", 0.0)))
+        else:
+            pos = self._fsm.bridge.get_current_position()
+            north, east = float(pos.north), float(pos.east)
+            # nan 默认值: 拿不到航向时 latch/command 都拒绝动作, 而不是把 yaw=0
+            # 当成"机头朝北"去算出一个方向错误的指令 (与 state_drop 的读法一致).
+            yaw = float(getattr(self._fsm.bridge, "_current_yaw", math.nan))
+            plane_m = camera_plane_distance(
+                altitude, float(self._fsm.get_param("bucket_camera_down", 0.0)))
         error_forward_m = sign_forward * float(dv) * plane_m / fy
         error_right_m = sign_right * float(du) * plane_m / fx
 
-        pos = self._fsm.bridge.get_current_position()
-        # nan 默认值: 拿不到航向时 latch/command 都拒绝动作, 而不是把 yaw=0
-        # 当成"机头朝北"去算出一个方向错误的指令 (与 state_drop 的读法一致).
-        yaw = float(getattr(self._fsm.bridge, "_current_yaw", math.nan))
-
         accepted = self._target_estimator.observe(
-            float(pos.north), float(pos.east), yaw,
+            north, east, yaw,
             error_forward_m, error_right_m,
             self._target_estimator.measurement_uncertainty(altitude),
         )

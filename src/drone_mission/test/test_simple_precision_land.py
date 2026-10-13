@@ -123,12 +123,25 @@ class _SimpleFSM:
         self.vision_modes = []
         self.takeovers = []
         self._measurement_stamp = None
+        self._pose_at_result = None
 
     def get_param(self, name, default=None):
         return self._params.get(name, default)
 
     def get_clock(self):
         return _FixedClock()
+
+    def pose_at(self, _stamp):
+        """位姿历史桩. 返回 None = 取不到采集时刻位姿 → 状态退回
+        处理时刻位姿, 与真实 FSM 在历史未覆盖时走同一条路径.
+
+        用 set_pose_at() 给一个采集时刻位姿, 以验证时间对齐确实生效 —
+        注意它与 bridge.get_current_position() 是**两个不同的量**.
+        """
+        return self._pose_at_result
+
+    def set_pose_at(self, north, east, down, yaw):
+        self._pose_at_result = (north, east, down, yaw)
 
     def vision_measurement_stamp(self, _source):
         """测量时刻. 默认固定 (同一份测量在多个 tick 上被复用), 与
@@ -633,6 +646,65 @@ def test_immature_estimate_does_not_latch_the_transit_target(state_cls):
 
     state._execute_servo(target)                 # 第 5 帧 → 成熟
     assert state._lost_transit.target is not None
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_observation_uses_capture_time_pose_not_processing_time(state_cls):
+    """时间对齐: 观测必须用**拍摄那一刻**的载机位姿.
+
+    3-5Hz 下采集时刻比处理时刻早 0.2-0.33s: 平移误差 ≈ v·tau (0.25m/s 时约
+    7.5cm), 旋转误差 ≈ |偏移|·Δψ 且方向随航向变化 —— 后者是系统偏差, 卡方门
+    抓不到 (门只拒零均值离群).
+
+    手法: 让"采集时刻位姿"与"处理时刻位姿"相差 3m, 对心目标 (偏移 0) 锁存下来
+    的点必须落在**采集时刻**那一侧。
+    """
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+    }
+    fsm = _SimpleFSM(params)
+    fsm.bridge._pos = type("P", (), {"north": 0.0, "east": 0.0, "down": -2.0})()
+    fsm.set_pose_at(3.0, 1.5, -2.0, 0.0)      # 拍摄时刻在别处
+    state = state_cls(fsm)
+    if hasattr(state, "_phase"):
+        state._phase = state.PHASE_SERVO
+    centered = {"center_u": 320.0, "center_v": 240.0, "confidence": 0.9}
+
+    for _ in range(6):                          # 让估计成熟
+        state._execute_servo(centered)
+
+    assert state._lost_transit.target == pytest.approx((3.0, 1.5), abs=1e-6)
+
+
+def test_observation_falls_back_to_processing_time_pose():
+    """取不到采集时刻位姿时退回处理时刻 —— 时间对齐是精度改进, 不是可用性前提."""
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+    }
+    fsm = _SimpleFSM(params)
+    fsm.bridge._pos = type("P", (), {"north": 7.0, "east": 8.0, "down": -2.0})()
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+    centered = {"center_u": 320.0, "center_v": 240.0, "confidence": 0.9}
+
+    for _ in range(6):
+        state._execute_servo(centered)
+
+    assert state._lost_transit.target == pytest.approx((7.0, 8.0), abs=1e-6)
 
 
 def test_lost_target_transit_reset_on_enter():
