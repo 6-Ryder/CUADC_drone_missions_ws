@@ -427,6 +427,39 @@ def test_lost_target_holds_position_below_transit_min_altitude():
     assert fsm.fc.calls[-1] == (0.0, 0.0, 0.0)
 
 
+def test_full_precision_land_transits_to_last_known_position():
+    """full 变体 (主任务默认路径) 同样在丢失后继续接近最后已知位置.
+
+    两条降落路径的丢失分支结构不同, 必须各自接线 —— 只修 quick 用的 simple
+    变体会让默认路径继续悬停等待.
+    """
+    fsm = _SimpleFSM({
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.5,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        # full 变体的图像中心默认是 640x480 (simple 是 320x240), 这里显式统一,
+        # 否则 du 会被算成 370-640 = -270 而不是 +50.
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+    })
+    state = PrecisionLandState(fsm)
+    state._execute_servo(
+        {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9})
+
+    latched = state._lost_transit.target
+    assert latched is not None
+    assert latched[1] == pytest.approx(50.0 * 5.0 / 400.0, abs=1e-6)
+
+    state._execute_servo(None)
+    forward, right, descent = fsm.fc.calls[-1]
+    assert right > 0.0
+    assert forward == pytest.approx(0.0, abs=1e-9)
+    assert descent == 0.0
+
+
 def test_lost_target_transit_reset_on_enter():
     """换相进入降落时必须清锁存, 否则上一段的点会继续驱动."""
     fsm = _SimpleFSM({})
@@ -600,19 +633,28 @@ def test_quick_sim_params_keep_circle_geometry_handoff():
     assert params["landing_visual_handoff_max_ground_error_m"] == 0.20
     assert params["landing_visual_handoff_stable_frames"] == 10
 
-    vision_config = ROOT / "drone_vision/config/vision_params_quick.yaml"
     import yaml
-    vision_params = next(iter(yaml.safe_load(
-        vision_config.read_text(encoding="utf-8")
-    ).values()))["ros__parameters"]
-    assert vision_params["landing_circle_track_enable"] is True
-    assert vision_params["landing_yolo_guard_rate_hz"] == 2.0
+    # quick 的两档各自有一份 vision 配置: 真机档 vision_params_quick.yaml,
+    # SITL 档 vision_params_quick_sim.yaml. 上一版测试对**两个** launch 都断言
+    # 出现 "vision_params_quick.yaml", 而 quick_sitl 用的是 quick_sim 那份 ——
+    # 断言因此长期为红, 掩盖了这条链路上真正的回归. 改为按各 launch 实际加载的
+    # 文件断言 (两份都必须带圆形几何交接参数).
+    expected = {
+        "quick_flight.launch.py": "vision_params_quick.yaml",
+        "quick_sitl.launch.py": "vision_params_quick_sim.yaml",
+    }
+    for launch_name, vision_file in expected.items():
+        vision_config = ROOT / "drone_vision/config" / vision_file
+        vision_params = next(iter(yaml.safe_load(
+            vision_config.read_text(encoding="utf-8")
+        ).values()))["ros__parameters"]
+        assert vision_params["landing_circle_track_enable"] is True
+        assert vision_params["landing_yolo_guard_rate_hz"] == 2.0
 
-    for launch_name in ("quick_sitl.launch.py", "quick_flight.launch.py"):
         launch_source = (ROOT / "drone_bringup/launch" / launch_name).read_text(
             encoding="utf-8"
         )
-        assert "vision_params_quick.yaml" in launch_source
+        assert vision_file in launch_source
 
 
 def test_base_params_untouched_by_simple_landing():

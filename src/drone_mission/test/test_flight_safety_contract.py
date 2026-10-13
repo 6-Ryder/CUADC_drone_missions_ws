@@ -13,6 +13,16 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PACKAGE_ROOT.parent
 
 
+def _pos(down, north=0.0, east=0.0):
+    """位置桩 — 形状与 px4_control.telemetry.Position 一致.
+
+    降落链路除 down (高度) 外还会读 north/east: 丢失目标后要飞向
+    最后已知位置, 锁存点由载机 NED 位置 + 机体系偏移算出. 只给 down
+    的桩会让状态在丢失分支抛 AttributeError, 而不是走它该走的路.
+    """
+    return type("P", (), {"north": north, "east": east, "down": down})()
+
+
 class _Logger:
     def info(self, _message):
         pass
@@ -181,7 +191,7 @@ def test_takeoff_reports_control_loop_gap_while_climbing(monkeypatch):
     fsm = _FSM()
     logger = _RecordingLogger()
     fsm.get_logger = lambda: logger
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": 0.0})()
+    fsm.bridge.get_current_position = lambda: _pos(0.0)
     state = TakeoffState(fsm)
     state._sub_phase = state.SUB_CLIMB
     state._start_time = 0.0
@@ -406,7 +416,7 @@ def test_precision_land_blind_descent_stays_offboard_and_can_trigger_land_detect
     monkeypatch,
 ):
     fsm = _FSM()
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
+    fsm.bridge.get_current_position = lambda: _pos(-1.0)
     fsm.bridge.get_telemetry = lambda: type(
         "Telemetry",
         (),
@@ -428,7 +438,7 @@ def test_precision_land_blind_descent_stays_offboard_and_can_trigger_land_detect
 def test_precision_land_reacquires_lost_h_once_then_requests_takeover(monkeypatch):
     fsm = _FSM()
     fsm.get_landing_target = lambda: None
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
+    fsm.bridge.get_current_position = lambda: _pos(-1.0)
     state = PrecisionLandState(fsm)
     state._has_landing_target = True
     state._vision_lost_start = 1.0
@@ -454,7 +464,7 @@ def test_precision_land_sim_touchdown_requires_stable_window_then_disarms(
     monkeypatch,
 ):
     fsm = _FSM()
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    fsm.bridge.get_current_position = lambda: _pos(-0.04)
     fsm.bridge.get_telemetry = lambda: type(
         "Telemetry",
         (),
@@ -486,7 +496,7 @@ def test_precision_land_real_flight_does_not_use_local_altitude_fallback(
 ):
     fsm = _FSM()
     fsm.get_param = lambda name, default: False if name == "sim_mode" else default
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    fsm.bridge.get_current_position = lambda: _pos(-0.04)
     fsm.bridge.get_telemetry = lambda: type(
         "Telemetry",
         (),
@@ -511,7 +521,7 @@ def test_precision_land_real_fallback_requires_alignment_and_blind_descent(
 ):
     fsm = _FSM()
     fsm.get_param = lambda name, default: False if name == "sim_mode" else default
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    fsm.bridge.get_current_position = lambda: _pos(-0.04)
     fsm.bridge.get_telemetry = lambda: type(
         "Telemetry",
         (),
@@ -555,7 +565,7 @@ def test_precision_land_keeps_the_lease_until_px4_confirms_final_disarm():
 def test_precision_land_does_not_resume_descent_while_final_disarm_is_pending():
     fsm = _FSM()
     fsm.bridge.landed = True
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -0.04})()
+    fsm.bridge.get_current_position = lambda: _pos(-0.04)
     state = PrecisionLandState(fsm)
     state._phase = state.PHASE_BLIND
 
@@ -573,7 +583,7 @@ def test_precision_land_does_not_resume_descent_while_final_disarm_is_pending():
 def test_precision_land_holds_position_on_a_single_large_target_jump():
     """A one-frame H misdetection must not create a lateral descent command."""
     fsm = _FSM()
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -3.0})()
+    fsm.bridge.get_current_position = lambda: _pos(-3.0)
     commands = []
     fsm.fc.set_velocity_body = lambda *command: commands.append(command)
     state = PrecisionLandState(fsm)
@@ -599,9 +609,7 @@ def test_precision_land_uses_latched_visual_alignment_before_bad_close_frame():
         "center_v": 480.0,
         "confidence": 0.9,
     }]
-    fsm.bridge.get_current_position = lambda: type(
-        "P", (), {"down": altitude[0]},
-    )()
+    fsm.bridge.get_current_position = lambda: _pos(altitude[0])
     fsm.get_landing_target = lambda: target[0]
     state = PrecisionLandState(fsm)
     state._phase = state.PHASE_SERVO
@@ -626,7 +634,7 @@ def test_precision_land_uses_latched_visual_alignment_before_bad_close_frame():
 
 def test_precision_land_rejects_low_confidence_h_detection():
     fsm = _FSM()
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -3.0})()
+    fsm.bridge.get_current_position = lambda: _pos(-3.0)
     fsm.get_landing_target = lambda: {
         "center_u": 700.0,
         "center_v": 540.0,
@@ -644,7 +652,7 @@ def test_precision_land_blind_phase_does_not_retrigger_vision_loss_fallback(
 ):
     fsm = _FSM()
     fsm.get_landing_target = lambda: None
-    fsm.bridge.get_current_position = lambda: type("P", (), {"down": -1.0})()
+    fsm.bridge.get_current_position = lambda: _pos(-1.0)
     commands = []
     fsm.fc.set_velocity_body = lambda *command: commands.append(command)
     state = PrecisionLandState(fsm)
