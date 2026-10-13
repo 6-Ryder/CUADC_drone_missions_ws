@@ -84,11 +84,8 @@
     precision_align_image_width: 1280.0
     precision_align_image_height: 960.0
     precision_align_alpha: 0.55           # EMA 平滑系数, 兼顾检测抖动和闭环响应
-    precision_align_gain: 1.25            # 归一化像素误差 → 机体系速度比例
-    precision_align_max_speed: 0.25       # 粗调水平合速度上限 (m/s)
     precision_align_fine_pixel_error: 90.0 # 进入精调速度限制的像素误差
     precision_align_fine_max_speed: 0.065 # 精调水平合速度上限 (m/s)
-    precision_align_min_correction_speed: 0.012 # 保证小误差修正高于飞控响应死区
     precision_align_step_s: 0.18          # 粗调速度脉冲持续时间 (s)
     precision_align_fine_step_s: 0.12     # 精调短脉冲, 避免越过中心
     precision_align_hover_s: 0.04         # 每步后短暂停稳并获取新观测 (s)
@@ -132,8 +129,6 @@
     landing_alignment_latch_max_altitude: 2.5  # 低于此高度才锁存对心结果
     landing_precision_target: 0.1 # 目标水平精度 (m)
     # 降落伺服 (图像空间 P 控制器, 与投放区精校同方法)
-    landing_servo_kp_pixel: 0.0025      # 像素增益 (m/s body velocity per px error); 0.004→0.0025 降近地伺服速度
-    landing_servo_max_horizontal_vel: 0.35  # 最大水平修正速度 (m/s); 0.6→0.35 防最后一刻大位移偏离
     landing_servo_deadzone_px: 12.0     # 像素死区 (px), 进入后停止水平修正
     landing_servo_x_to_right_sign: 1.0  # u轴→右移符号
     landing_servo_y_to_forward_sign: -1.0  # v轴→前飞符号 (下视相机 y轴向后)
