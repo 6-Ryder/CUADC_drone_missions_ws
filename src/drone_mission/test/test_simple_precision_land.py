@@ -911,3 +911,107 @@ def test_sustained_jump_is_eventually_accepted(state_cls):
         state._execute_servo(moved)
 
     assert state._lost_transit.target != pytest.approx(settled)
+
+
+# ---------------------------------------------------------------------------
+# 低空误检场景 (复现 2026-08-08 的失败形态) —— B2 的验证靶
+# ---------------------------------------------------------------------------
+
+class _LowAltitudeFalseDetectionScenario:
+    """低空误检序列: 稳定对心 → 近地出现一帧远跳误检 → 回到正常.
+
+    这复现的是 2026-08-08 记录的形态: 低空检测畸变导致偶发误检, 而当时的
+    伺服对**任何**通过置信度与 80px 跳变门的帧都全权响应, 于是飞机去追一个
+    不存在的目标. 注意本场景里的误检帧**能通过**现有两道门 —— 这正是问题所在:
+    80px 是绝对像素阈值, 不随高度缩放, 也不与"滤波器认为目标应该在哪"比较.
+    """
+
+    def __init__(self, state_cls, params=None, altitude=1.2):
+        base = {
+            "servo_px_kp": 0.004,
+            "servo_px_max_speed": 0.6,
+            "landing_servo_deadzone_px": 1.0,
+            "landing_blind_altitude": 0.1,
+            "camera_fx": 400.0,
+            "camera_fy": 400.0,
+            "camera_cx": 320.0,
+            "camera_cy": 240.0,
+        }
+        base.update(params or {})
+        self.fsm = _SimpleFSM(base)
+        self.fsm.bridge._pos = type(
+            "P", (), {"north": 0.0, "east": 0.0, "down": -altitude})()
+        self.state = state_cls(self.fsm)
+        if hasattr(self.state, "_phase"):
+            self.state._phase = self.state.PHASE_SERVO
+        self.centered = {"center_u": 321.0, "center_v": 240.0, "confidence": 0.9}
+
+    def run(self):
+        for _ in range(6):                     # 先稳定对心 (估计成熟)
+            self.state._execute_servo(self.centered)
+        settled = self.fsm.fc.calls[-1]
+
+        # 一帧误检: u 偏 70px (< 80px 跳变门, 所以能过现有两道门)
+        false_frame = {"center_u": 391.0, "center_v": 240.0, "confidence": 0.9}
+        self.state._execute_servo(false_frame)
+        chased = self.fsm.fc.calls[-1]
+
+        self.state._execute_servo(self.centered)
+        recovered = self.fsm.fc.calls[-1]
+        return settled, chased, recovered
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_low_altitude_false_detection_currently_drives_the_servo(state_cls):
+    """**刻画当前行为**: 一帧低空误检会让伺服全权响应.
+
+    这条测试**断言的是现状而不是期望** —— 它把 8/8 的失败机制钉成可复现的靶子,
+    这样"把卡方门延伸到伺服接受判据"(B2) 才有前后对比的依据. 现状: 误差从
+    ~1px 跳到 70px, 指令随之跳到速度上限附近 (0.28 m/s), 飞机去追不存在的目标.
+    """
+    scenario = _LowAltitudeFalseDetectionScenario(state_cls)
+    settled, chased, recovered = scenario.run()
+
+    assert abs(settled[1]) < 0.01, "对心时不该有横向指令"
+    # 误检帧被全权接受: 指令跳到接近速度上限
+    assert chased[1] > 0.2, "现状: 误检帧应当(且确实)驱动了伺服"
+    assert abs(recovered[1]) < 0.01, "误检帧过去后应当恢复"
+
+
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_estimator_gate_stops_the_servo_from_chasing_the_false_frame(state_cls):
+    """打开 `landing_servo_estimator_gate_enable` 后, 误检帧不再驱动伺服.
+
+    这是 B2 的前后对比: 同一条低空误检序列, 门关闭时指令跳到 ~0.28 m/s
+    (见上一条刻画测试), 打开时**本 tick 不下令** (零速保持), 下一帧恢复正常
+    时立刻恢复控制 —— 即"忽略这一帧", 而不是"从此不接受".
+
+    默认关闭的原因写在 _frame_accepted_by_estimator 的 docstring 里: 门限尚未
+    按真机探测器抖动标定, 而"门太紧"的失效形态是真测量被连续拒掉。
+    """
+    scenario = _LowAltitudeFalseDetectionScenario(
+        state_cls, params={"landing_servo_estimator_gate_enable": True})
+    settled, chased, recovered = scenario.run()
+
+    assert abs(settled[1]) < 0.01, "对心时不该有横向指令"
+    assert chased == (0.0, 0.0, 0.0), "误检帧不该驱动伺服"
+    assert abs(recovered[1]) < 0.01, "下一帧正常后必须立刻恢复, 不能卡住"
+
+
+def test_low_altitude_false_detection_is_rejected_by_the_estimator():
+    """同一帧在**估计器**看来是离群 (卡方门拒掉) —— 门是好的, 只是没接上伺服.
+
+    这条把"机制存在"与"机制生效"分开: 估计器已经能识别这一帧不该采信,
+    B2 要做的只是让伺服接受判据也听它的.
+    """
+    from drone_utils.landing_estimator import LandingTargetEstimator, _observe
+    est = LandingTargetEstimator(min_frames=3)
+    # 目标在 (0, 0), 载机在 (0, 0), 稳定观测 6 帧
+    for _ in range(6):
+        _observe(est, 0.0, 0.0, 0.0, 0.0, 0.0)
+    assert est.is_mature
+
+    # 误检: 70px @1.2m/f=400 → 0.21m 的目标位置跳变
+    rejected = not _observe(est, 0.0, 0.0, 0.0, 0.0, 0.21)
+
+    assert rejected, "卡方门应当拒掉这一帧"

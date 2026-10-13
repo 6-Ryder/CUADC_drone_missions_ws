@@ -350,3 +350,41 @@ def test_counters_reset_with_the_estimate():
     assert est.accepted_count == 0
     assert est.rejected_count == 0
     assert est.is_mature is False
+
+
+def test_axis_specific_rejection_is_reported_by_the_combined_verdict():
+    """只影响**一个轴**的误检也必须被判为"未接受" —— 逐轴看会漏.
+
+    这个坑踩过一次: 状态层曾用 `filter_north.reject_streak` 判别本帧可否采信,
+    而图像 u 方向的跳变只影响 **east**, north 的残差是 0 —— 于是误检帧被当成
+    正常帧放行, 门形同虚设。判据必须是"两轴都过门"的组合判决。
+    """
+    est = LandingTargetEstimator(min_frames=3)
+    # 稳定在 (0,0)
+    for _ in range(6):
+        _observe_target(est, (0.0, 0.0), (0.0, 0.0), 0.0)
+    assert est.last_observation_accepted is True
+
+    # 只让 east 跳 0.3m (north 不动)
+    dn = 0.0 - 0.0
+    de = 0.3 - 0.0
+    assert est.observe(0.0, 0.0, 0.0, dn, de, 0.001) is False
+
+    assert est.last_observation_usable is True
+    assert est.last_observation_accepted is False, "单轴误检必须整体判为未接受"
+    assert est.filter_north.reject_streak == 0, "(north 本来就没被拒)"
+    assert est.filter_east.reject_streak == 1
+
+
+def test_invalid_input_is_usable_false_not_accepted():
+    """输入非法要能与"被门拒绝"区分开: 前者不是"与预测不符", 不该额外否决.
+
+    判据是 (usable and not accepted); 只判 accepted 会把"本帧没有可用观测"
+    也当成离群。
+    """
+    est = LandingTargetEstimator()
+    _observe_target(est, (1.0, 1.0), (0.0, 0.0), 0.0)
+
+    assert est.observe(math.nan, 0.0, 0.0, 0.0, 0.0, 0.001) is False
+    assert est.last_observation_usable is False
+    assert est.last_observation_accepted is False

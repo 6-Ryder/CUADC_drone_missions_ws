@@ -457,6 +457,9 @@ class MissionFSM(Node):
         # 过程噪声速率 PSD (m^2/s^3), 频率无关. 0.01 由"丢线 2s 后愿意接受
         # 0.3m 的目标位移"反推: q >= 3*d^2/(3.84*T^3) ≈ 0.0088.
         self.declare_parameter("landing_estimator_acc_psd", 0.01)
+        # B2: 是否让"与估计不符"的帧也失去驱动伺服的资格 (默认关, 见
+        # state_precision_land*._frame_accepted_by_estimator 的理由).
+        self.declare_parameter("landing_servo_estimator_gate_enable", False)
         # 估计成熟前不准它驱动"继续接近"的落点: 播种帧不过卡方门.
         # 5 帧 ≈ 1.0-1.7s (3-5Hz), 短于 ArduPilot 的 2s 冷启动门 ——
         # 本项目播种用的观测已经过置信度与跳变门, 不是裸帧.

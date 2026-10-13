@@ -219,10 +219,27 @@ class LandingTargetEstimator:
         self._east = TargetAxisFilter()
         self._accepted_count = 0
         self._rejected_count = 0
+        self._last_obs_usable = False
+        self._last_obs_accepted = False
 
     @property
     def initialized(self) -> bool:
         return self._north.initialized and self._east.initialized
+
+    @property
+    def last_observation_usable(self) -> bool:
+        """上一次 observe 的输入是否可用 (非有限值一律不可用)."""
+        return self._last_obs_usable
+
+    @property
+    def last_observation_accepted(self) -> bool:
+        """上一次 observe 是否**被融合** (两轴都过门).
+
+        ⚠️ 消费方要判"这一帧该不该采信", 必须用 (usable and not accepted) 这个
+        组合, 而不是去看某一个轴的 reject_streak —— 那是逐轴的, 只看 north 会
+        漏掉只影响 east 的误检 (u 方向跳变), 反之亦然。这个坑踩过一次。
+        """
+        return self._last_obs_accepted
 
     @property
     def accepted_count(self) -> int:
@@ -335,6 +352,8 @@ class LandingTargetEstimator:
         """
         if not all(math.isfinite(v) for v in
                    (north, east, yaw, error_forward_m, error_right_m)):
+            self._last_obs_usable = False
+            self._last_obs_accepted = False
             return False
         dn, de = self._to_ned(yaw, error_forward_m, error_right_m)
         target_north = float(north) + dn
@@ -346,11 +365,15 @@ class LandingTargetEstimator:
             self._east.init(target_east, self.vel_init,
                             self.pos_unc_init, self.vel_unc_init)
             self._accepted_count += 1
+            self._last_obs_usable = True
+            self._last_obs_accepted = True
             return True
 
         ok_north = self._north.update(target_north, meas_unc)
         ok_east = self._east.update(target_east, meas_unc)
         accepted = ok_north and ok_east
+        self._last_obs_usable = True
+        self._last_obs_accepted = accepted
         if accepted:
             self._accepted_count += 1
         else:
@@ -371,3 +394,21 @@ class LandingTargetEstimator:
         """
         self._north.predict(dt, 0.0, self.acc_psd)
         self._east.predict(dt, 0.0, self.acc_psd)
+
+
+def _observe(
+    estimator: LandingTargetEstimator,
+    north: float,
+    east: float,
+    yaw: float,
+    error_forward_m: float,
+    error_right_m: float,
+    meas_unc: float = 0.001,
+) -> bool:
+    """测试/脚本用的薄包装: 用固定测量方差调 observe.
+
+    生产代码里 meas_unc 由 measurement_uncertainty(altitude) 按高度算出;
+    本包装只服务于"给定观测序列"的验证脚本, 不参与飞行路径.
+    """
+    return estimator.observe(north, east, yaw, error_forward_m, error_right_m,
+                             meas_unc)

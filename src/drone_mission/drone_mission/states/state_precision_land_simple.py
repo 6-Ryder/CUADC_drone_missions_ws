@@ -285,14 +285,25 @@ class SimplePrecisionLandState:
             else:
                 self._servo_converged = 0
 
+            # 估计器融合 + (可选) 本帧接受判决. 放在伺服之前: 判决要影响本 tick
+            # 是否据此下令, 而且观测只能喂一次 (喂两次等于重复计入测量).
+            self._observe_target_for_estimator(altitude, du, dv)
+            if not self._frame_accepted_by_estimator():
+                # 本帧与"滤波器认为目标在哪"严重不符 (卡方门) → 不据此下令.
+                # 语义与"无有效测量"一致: 零速保持, 冻结积分, 等下一帧.
+                # 不会永久卡住: 连续 3 次拒绝后估计器会强制融合 (ArduPilot 的
+                # 逃逸), 且有 2s 丢线重置.
+                self._servo_pid.update(
+                    0.0, 0.0, self._now(), measurement_valid=False)
+                self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+                return None
+
             # PID 输出: 符号标定与合速度(向量模长)限幅均由 PID 承担.
             # 传测量时刻而非 FSM 时钟: 同一份缓存测量会在多个 tick 上被复用,
             # 按 tick 推进会把同一份误差重复积分数倍 (3-5Hz 视觉 vs 20Hz tick).
             forward, right = self._servo_pid.update(
                 float(dv), float(du),
                 self._fsm.vision_measurement_stamp("landing"))
-            # 每帧有效测量都刷新"最后已知位置" (丢失后继续接近的落点)
-            self._latch_lost_transit_target(altitude)
 
             # 未通过视觉锁存时，不得穿过盲降交接高度。
             blind_alt = float(self._fsm.get_param("landing_blind_altitude", 0.5))
@@ -367,6 +378,34 @@ class SimplePrecisionLandState:
             float(self._fsm.get_param("landing_descent_slow", 0.12)),
         )
 
+    def _frame_accepted_by_estimator(self) -> bool:
+        """本帧是否可以驱动伺服 (B2).
+
+        ⚠️ 判据是 (输入可用 且 未被融合), 而不是"某一个轴被拒" —— 后者是逐轴的,
+        只看 north 会漏掉只影响 east 的误检 (u 方向跳变), 反之亦然 (这个坑踩过
+        一次, 见 test_east_axis_only_false_frame_is_still_vetoed)。
+
+        也不能直接用 `observe()` 的返回值: 它返回 False 有两种原因 —— 输入非法
+        (非有限等), 或卡方门拒绝。两者必须区分: 输入非法只是"本帧没有可用观测",
+        沿用既有的置信度/跳变门即可; 只有"与滤波器预测严重不符"才该额外否决。
+
+        默认**关闭** (`landing_servo_estimator_gate_enable=False`): 门限
+        (`landing_estimator_meas_unc_tan2` / `acc_psd`) 尚未按真机探测器抖动标定,
+        而"门太紧"的失效形态是**真测量被连续拒掉** → 目标看起来丢失 → 有界兜底
+        (悬停 → PX4 LAND / 交飞手). 那是安全但不理想的结局, 所以不默认改行为;
+        标定后把它打开即可, 机制与两侧测试都已就位.
+
+        即便打开, 也只在估计**成熟**后才有约束力: 播种帧不过卡方门, 用它去否决
+        测量等于拿一个还没有模型的估计当权威.
+        """
+        enabled = bool(self._fsm.get_param(
+            "landing_servo_estimator_gate_enable", False))
+        if not enabled or not self._target_estimator.is_mature:
+            return True
+        est = self._target_estimator
+        return not (est.last_observation_usable
+                    and not est.last_observation_accepted)
+
     def _note_estimator_result(self, accepted: bool) -> None:
         """记录一帧估计结果: 接受时刻 / 拒绝原因日志.
 
@@ -429,40 +468,41 @@ class SimplePrecisionLandState:
             return
         self._target_estimator.predict(dt)
 
-    def _latch_lost_transit_target(self, altitude: float) -> None:
-        """把本帧观测融合进目标估计器, 并锁存**融合后**的位置.
+    def _observe_target_for_estimator(
+        self, altitude: float, du: float, dv: float,
+    ) -> bool:
+        """把本帧观测喂给目标估计器, 返回"这一帧是否被接受".
 
         做两件事:
-          1. 估计器融合 —— 观测 = 载机位置 + 机体系偏移 (旋转到 NED), 即
-             "目标此刻看起来在哪"; 卡方门在这里拒掉单帧误检, 所以单帧远跳
-             不会再直接决定"丢失后继续接近"的落点.
-          2. 把融合结果锁存为 `_lost_transit` 的目标点 (丢失后飞向它).
+          1. 估计器融合 —— 观测 = 载机位置 + 机体系偏移 (旋转到 NED); 卡方门
+             在这里判断本帧是否与"滤波器认为目标在哪"一致.
+          2. 把融合结果锁存为 `_lost_transit` 的目标点 (仅在估计成熟后, 见
+             `is_mature`: 播种帧不过门, 头几帧实质不过滤).
 
-        符号取自 ServoPid 已算好的 error_forward/error_right —— 那是"从载机
-        指向目标"的机体系偏差, 已经过符号标定, 与伺服同向.
+        本帧的接受判决由调用方通过 `_frame_accepted_by_estimator()` 读取
+        (它看的是卡方门拒绝计数, 不是本方法的返回值) —— 见该方法的说明.
 
-        ⚠️ 单位: ServoPidStatus 里是**像素**, 本状态用的是像素域增益
-        (servo_px_*), 所以必须先按高度与焦距折成米 —— 直接把像素当米会得到
-        一个量级完全错误的锁存点 (低空 1px≈cm, 高空 1px≈数十 cm). 折算方式与
-        precision_align_controller._ground_error_m / state_cylinder_search 一致:
-        前向轴用 fy, 右向轴用 fx.
+        符号: 与伺服同源 —— 两个标定符号取自 _new_servo_pid 用的同一组参数,
+        因此本方法算出的机体系偏移与伺服收到的是同一个量 (只是单位换成了米).
+
+        ⚠️ 单位: 传入的 du/dv 是**像素**; 先按"镜头到平面"的距离与焦距折成米.
         """
-        status = self._servo_pid.last_status
-        fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
+        sign_forward = float(self._fsm.get_param(
+            "landing_servo_y_to_forward_sign", -1.0))
+        sign_right = float(self._fsm.get_param(
+            "landing_servo_x_to_right_sign", 1.0))
         fx = max(float(self._fsm.get_param("camera_fx", 400.0)), 1.0)
+        fy = max(float(self._fsm.get_param("camera_fy", 400.0)), 1.0)
         plane_m = camera_plane_distance(
             altitude, float(self._fsm.get_param("bucket_camera_down", 0.0)))
-        error_forward_m = float(status.error_forward) * plane_m / fy
-        error_right_m = float(status.error_right) * plane_m / fx
+        error_forward_m = sign_forward * float(dv) * plane_m / fy
+        error_right_m = sign_right * float(du) * plane_m / fx
 
         pos = self._fsm.bridge.get_current_position()
         # nan 默认值: 拿不到航向时 latch/command 都拒绝动作, 而不是把 yaw=0
         # 当成"机头朝北"去算出一个方向错误的指令 (与 state_drop 的读法一致).
         yaw = float(getattr(self._fsm.bridge, "_current_yaw", math.nan))
 
-        # 先经估计器融合 (卡方门拒绝单帧误检), 再把**融合后**的位置作为锁存点.
-        # 观测 = 载机位置 + 机体系偏移 → 目标世界位置; 测量方差随高度平方增长
-        # (R ∝ range², PX4 LandingTargetEstimator.cpp:125).
         accepted = self._target_estimator.observe(
             float(pos.north), float(pos.east), yaw,
             error_forward_m, error_right_m,
@@ -470,12 +510,12 @@ class SimplePrecisionLandState:
         )
         self._note_estimator_result(accepted)
 
-        # 只在估计成熟后驱动"继续接近"的落点. 播种帧不过卡方门 (没有先验就无从
-        # 算新息), 且播种协方差给得宽 → 头几帧实质不过滤, 一次误检可以直接成为
-        # 飞行目标. 不成熟时**不锁存**, 保持上一次成熟时的落点 (或没有落点).
+        # 只在估计成熟后驱动"继续接近"的落点; 不成熟时保持上一次成熟时的落点
+        # (或没有落点 → 丢失时不动作, 与原有悬停行为一致).
         filtered = self._target_estimator.position
         if filtered is not None and self._target_estimator.is_mature:
             self._lost_transit.latch_world(filtered[0], filtered[1])
+        return accepted
 
     def _lost_transit_command(self, altitude: float) -> tuple:
         """丢失目标时的机体系横向指令 (forward, right).
