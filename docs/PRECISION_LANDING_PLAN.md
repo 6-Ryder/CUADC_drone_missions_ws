@@ -1,0 +1,154 @@
+# 视觉精准降落改造 —— 任务规划与交接
+
+> **用途**：跨会话保存上下文。任何新 session 读这一份 + `docs/PRECISION_LANDING_AUTHORITY.md`
+> 就能接上。**证据与一手来源在 AUTHORITY 文档里，本文只放"做什么/做到哪/下一步"**。
+>
+> 最后更新：2026-10-13（分支 `Optimization`）
+
+---
+
+## 0. 一分钟交接
+
+| 项 | 值 |
+|---|---|
+| 分支 | `Optimization`（开发机工作分支；`jetson` 是真机权威分支，**禁改**） |
+| 调研底稿 | `docs/PRECISION_LANDING_AUTHORITY.md` —— 两批调研 + §5 逐条差距表 + §7 分阶段方案 |
+| 测试命令 | 见 §6（**四套分开跑**，合跑会因同名 `test_copyright.py` 收集冲突） |
+| 基线 | mission **273 通过 / 2 失败**，utils **104 / 2**，bringup **86 / 2**，vision **87 / 2** |
+| 失败说明 | 四套的 2 条失败**全是既有 lint**（`install/`、`build/` 下 rosidl 生成代码），不是回归 |
+| 本次会话产出 | 19 个提交（18 已推送 + B2 待推送，见 §1） |
+
+**开工前必读的三条项目约定**（都已写进各提交信息，此处是索引）：
+1. **不改 `build/`、`install/`**；`src/drone_mission/{build,install}` 是幽灵树。
+2. **先盘清现状再改** —— 本项目反复出现"以为缺、其实已有"与"有配置无实现"。本会话因此
+   产出了参数盘点脚本思路（§6）与多处"空转"发现。
+3. **诚实区分验证级别**：本文所有条目都标了 L0（静态）/L1（单元），**没有一条是 L4（真机）**。
+
+---
+
+## 1. 已完成（按阶段）
+
+| 阶段 | 内容 | 提交 | 验证 |
+|---|---|---|---|
+| 调研 | 第二批四份权威调研 + 六路差距对照 + §5 差距表 | `38716b3` | L0 |
+| 2a | 伺服 PID 按**测量时刻**推进；修正 Stage 1 的语义缺陷（承诺采集时刻、实返到达时刻） | `7f9d2fb` | L1 |
+| 2c | 降落目标**龄期门**（判据=距最后一次**含检测**的消息） | `d9d1e45` | L1 |
+| 2b | `LandingTarget.msg` 加 `std_msgs/Header` + 采集时刻贯通 | `2f0b09c` | L1 |
+| 4a | 丢失后**继续飞向最后已知位置**（simple 分支） | `8d9589f` | L1 |
+| 4b | 同上接入 **full 分支** + 修一条长期为红的陈旧断言 | `229b5de` | L1 |
+| 4c | 近地下降速度按水平误差调度（**两条分支共用** `landing_profile`） | `bf217b9` | L1 |
+| 4d | 搜索高度改为**命令式**（复活 2 个死参数） | `b22b0b0` | L1 |
+| 4e | full 盲降**时间界**（`landing_blind_timeout` 此前零消费者） | `ae315a4` | L1 |
+| 3a | **目标状态估计器**（2 状态卡尔曼 + 卡方门 3.84 + 强制融合） | `72d856d` | L1 |
+| 3a-fix | 修 `predict()` **无调用者**（速度恒 0 / P 只降不升）+ 过程噪声改正率 PSD | `2464b65` | L1 |
+| A1/A3/A4 | 播种保护 / 丢线显式重置 / 拒绝原因日志 | `38e7a26` | L1 |
+| B2 | 卡方门延伸到**伺服接受判据**（默认关闭）+ 复现 8/8 的验证靶 | `2225a44` | L1 |
+| 清理 | 删 2 个真孤儿参数；参数盘点（196 声明 / 12 无消费者） | `6bfca27` | L1 |
+| 几何 | 机体几何独立成 `airframe_params_{real,sitl}.yaml`（与主任务无关的独立任务） | `75b2bb9` | L1 |
+| 几何-fix | 像素→米漏掉**相机安装高度**（近地放大 17%–57%） | `0cc243e` | L1 |
+| B1 | **full 任务接入** airframe 几何 | `1b4fe6c` | L1 |
+
+**量化收益（仿真，非真机）**：目标位置估计误差在 8px 抖动 / 2.5m / 12 帧下
+**单帧锁存 6.38cm（σ3.15）→ 滤波后 2.09cm（σ1.11）**。⚠️ 这是**锁存点**误差，不是落点精度。
+
+---
+
+## 2. 待办（按"对已记录真机失败的直接作用"排序）
+
+| 优先级 | 事项 | 为什么 | 前置条件 | 验证级别 |
+|---|---|---|---|---|
+| **P0** | **时间对齐**：观测用**采集时刻**的位姿，而不是处理时刻 | 3–5Hz 下 τ≈0.2–0.33s、横移 0.25m/s ⇒ **每帧 5–8cm**；姿态还在动时用当前姿态解析旧帧会引入随航向变化的固定方向偏差（8/5 那类）；B2 打开后观测偏差还会污染门判决 | 无（视觉侧已有 `capture_pose.interpolate_pose` 可参考；FSM 需一小段位姿历史） | L1 |
+| P1 | B2 门限标定 → 打开 `landing_servo_estimator_gate_enable` | 这是**唯一**直接堵 8/8 低空追误检的机制；机制已就位，只差标定 | 真机/SITL 实测探测器抖动（`meas_unc_tan2`）与丢帧分布（`acc_psd`） | L4 |
+| P1 | 剩余 5 个"YAML 里有、代码里没有"的参数定性 | 地勤改了不起作用是误导 | 逐个判"接线还是删除"；删除要同时改 4 个 profile 与 profile 契约测试 | L0/L1 |
+| P2 | `landing_blind_align_tolerance_px` 删除 | 已判定**不宜接线**（与死区职责重叠，死区>30px 时会阻止进盲降→近地悬停）；应删而非接 | 需同步 profile 契约测试的键集合 | L1 |
+| P2 | 重试阶梯（改变几何：爬升 1.5m 再降回） | 针对 8/14"卡在投放区"——现在的重试是原地重发，不产生新观测几何 | 与 S1/S8 的兜底策略一起设计（见 §4） | L1→L4 |
+| P2 | 相机安装角标定（roll/pitch/yaw） | vision 配置里有这三个参数，但**降落链路不消费**；固定安装角误差会被滤波器吸收成位置甚至速度，**卡方门抓不到**（门只拒零均值离群） | 需实测安装角 | L4 |
+| P3 | 路径 B（PX4 原生 precland）评估 | 见 §3 的固件问题 | 见 §3 | — |
+
+---
+
+## 3. ⚠️ 需要**你**决策或动作的事项
+
+> 这些我**不能自行决定**（涉及真机行为、外部资源或你的策略偏好）。按阻塞程度排序。
+
+| # | 事项 | 需要你做什么 | 不做会怎样 |
+|---|---|---|---|
+| **U1** | **B2 默认开关** | 决定是否在标定前就打开 `landing_servo_estimator_gate_enable`。我默认设为 **False**（门限未标定，"门太紧"会让真测量被拒→悬停兜底） | 保持现状：低空误检仍会全权驱动伺服（8/8 形态） |
+| **U2** | **门限标定数据** | 提供/安排一次实测：相机探测器在静止悬停时的**像素抖动分布**（用于 `meas_unc_tan2`）、以及典型**丢帧分布**（用于 `acc_psd`） | B2 无法打开；估计器的门宽度只能靠猜 |
+| **U3** | **飞控固件** | 决定是否接受"改 `dds_topics.yaml` + 重刷"以解锁：① A2 角速率项（`/fmu/out/vehicle_angular_velocity` 目前是**注释掉的**）；② 路径 B。飞控是**冻结基线** `params_v4`，重刷意味着整套基线要复验 | A2 与路径 B 永久搁置；**其余所有已交付改动都不需要动固件** |
+| **U4** | **SITL 是否复现真机降落路径** | 目前 SITL 与真机 quick 档**刻意不同**（`landing_blind_stable_frames` 真机=1 / SITL=10，且 SITL 保留了真机已关闭的圆形几何交接，有测试注明"SITL 档独立"）。代价是**仿真看不见真机那条路径的回归** | 真机降落路径的改动只能靠真机发现，而历史失败正集中在这一带 |
+| **U5** | **B2 的 SITL 场景** | 我建议的下一层验证是"低空注入误检"的 SITL 飞行回放；是否要投入做 | B2 的打开决定只能靠单测依据 |
+| **U6** | **CUAV 7-Nano 板型核对** | 查 `boards/cuav/.../*.px4board` 是否含 `CONFIG_MODULES_LANDING_TARGET_ESTIMATOR` | 路径 B 的可行性未知（不影响其它任何工作） |
+
+---
+
+## 4. 明确**不做**（附理由，防止后人重开）
+
+| 事项 | 理由 |
+|---|---|
+| 用估计器速度做阻尼/前馈 | 正典对静止目标有明文结论：`∂e/∂t = 0` 时"用最简单的估计 `∂e/∂t̂ = 0` 即可"。本项目被估计量是目标**世界位置**，静止降落垫下其速度状态本就≈0；被误检污染时是沿 NED 的伪指令 |
+| 恢复 `kd`（对原始误差的 D 项） | 正典控制律中不存在对原始误差的 D 项；导数只作为"被滤波的目标运动估计"以**前馈**注入 |
+| S8 终端兜底（悬停 N 秒后自主降落） | 与本项目**被测试钉住**的策略冲突：`request_takeover` 之后只零速度悬停交飞手，**绝不自主 RTL/降落**（`test_operator_takeover_contract.py`） |
+| S5 的"未对准保持高度"那一半 | 单独上会让持续偏心的目标永不下降 → 悬停 → 超时接管，把 8/14 的"卡住"放大 |
+| S1 驻留改测量键控 | quick 真机档的 1 帧阈值是**针对真机观察到的"10 帧锁存常不达成"刻意放宽的**，改严会让近地更容易悬停等待 → 更容易异地降落。要改必须先有配套兜底 |
+| 用 50Hz 姿态差分替代角速度 | 姿态流带宽看不到 80Hz 振动，而 A2 存在的意义正是振动/机动降权 → 会给虚假的覆盖感 |
+
+---
+
+## 5. 上真机才能确认的清单
+
+- `meas_unc_tan2` / `acc_psd`（估计器门限与过程噪声，见 U2）
+- `landing_estimator_min_frames`（播种保护帧数：太短则误检能催熟，太长则丢目标前还没建立落点）
+- `landing_lost_transit_max_speed` / `landing_lost_transit_min_altitude`（0.15 m/s、0.75 m）
+- 相机安装偏移的**实测值**（`airframe_params_real.yaml` 里的 36.5cm 是地面量取值）
+- 相机安装角 roll/pitch/yaw（目前未消费，见 P2）
+- `landing_descent_slow` 是否提高（当前 0.12 与下限 0.1 只差 0.02，使 4c 的调度律几乎没有作用空间）
+- 所有本会话改动的**实际收益方向**（尤其 4a/4b 的"继续接近"是否真的改善落点——可从 ULog 的 OFFBOARD 位置序列直接比对）
+
+---
+
+## 6. 关键文件与命令
+
+**代码**
+```
+src/drone_utils/drone_utils/
+  landing_estimator.py   # 2 状态卡尔曼 + 卡方门 + 成熟度 + 逐次调用判决
+  landing_profile.py     # 像素→米 / 三档下降 / 误差降速调度 / 相机平面距离
+  lost_target_transit.py # 最后已知位置锁存与追踪
+  servo_pid.py           # 多速率 PID (按测量时刻推进)
+src/drone_mission/drone_mission/states/
+  state_precision_land.py        # full (主任务默认)
+  state_precision_land_simple.py # quick
+src/drone_bringup/config/
+  airframe_params_real.yaml / airframe_params_sitl.yaml   # 机体几何 (只放几何)
+src/drone_bringup/launch/
+  sitl / real_flight / quick_sitl / quick_flight  # 四个 launch 都需同步
+```
+
+**测试**
+```bash
+source /opt/ros/humble/setup.bash && source install/setup.bash
+export PYTHONPATH=$PWD/src/drone_mission:$PWD/src/drone_utils:$PWD/src/drone_vision:$PWD/src/px4_control:$PYTHONPATH
+python3 -m pytest src/drone_mission/test/ -q     # 273 通过 / 2 失败
+python3 -m pytest src/drone_utils/test/   -q     # 104 通过 / 2 失败
+python3 -m pytest src/drone_bringup/test/ -q     #  86 通过 / 2 失败
+python3 -m pytest src/drone_vision/test/  -q     #  87 通过 / 2 失败
+# 四套**分开跑** (合跑会在 test_copyright.py 上收集冲突)
+```
+
+**参数盘点（判断"有配置无实现"的可复用做法）**
+> 解析 `mission_state_machine.py` 里的 `declare_parameter("...")` 得全集，再在
+> 非 test/install/build 源码里统计名字出现 —— **必须先剔除 `declare_parameter(...)`
+> 本身**，否则会自我匹配得出"零死参数"的错误结论（踩过一次）。
+> 2026-10-13 结果：196 个声明 → 12 个无消费者。
+
+---
+
+## 7. 环境事实（避免重复踩）
+
+- **本机内存吃紧**：跑全套测试时出现过进程被 SIGKILL（exit 137）；Gazebo 曾涨到 28GB 被 OOM。
+  四套测试**分开跑**，仿真勿空转。
+- **网络**：`github.com` 在本机经常连不上（2026-10-13 就断过一次，提交留在本地待推送），
+  但其它站点正常。推送失败时先 `git log origin/Optimization..HEAD` 看有没有欠账。
+- **时钟域**：全仓无 `use_sim_time`，ROS 时钟 == 系统时钟。这一巧合是当前一切时间戳比较
+  成立的前提（一旦启用 sim time 或跨机器部署，现有的 `0 < stamp <= now` 会静默失效）。
