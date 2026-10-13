@@ -241,6 +241,29 @@ class MissionFSM(Node):
         self.get_logger().info("  无人机自主任务状态机 v2.0 已启动")
         self.get_logger().info("=" * 60)
 
+        # 伺服 PID 生效参数回显 —— 请勿当作日志噪音删除.
+        # config/pid_tuning.yaml 的顶层 node key 若写错 (缺前导斜杠 "/mission_state_machine"),
+        # ROS 2 会整份静默忽略该文件, 不报错也不警告; 本行是判断该文件是否真的被加载的
+        # 唯一手段. 真机地面调试必须先核对此行, 数值与预期不符时不要起飞调参.
+        self.get_logger().info(
+            "SERVO_PID 生效参数: "
+            f"kp={self.get_param('servo_kp', 0.40):.4f} "
+            f"ki={self.get_param('servo_ki', 0.08):.4f} "
+            f"kd={self.get_param('servo_kd', 0.05):.4f} "
+            f"max={self.get_param('servo_max_speed', 0.25):.4f} "
+            f"min={self.get_param('servo_min_speed', 0.012):.4f} | "
+            f"norm kp={self.get_param('servo_norm_kp', 1.25):.4f} "
+            f"ki={self.get_param('servo_norm_ki', 0.25):.4f} "
+            f"kd={self.get_param('servo_norm_kd', 0.15):.4f} | "
+            f"px kp={self.get_param('servo_px_kp', 0.0025):.4f} "
+            f"ki={self.get_param('servo_px_ki', 0.0005):.4f} "
+            f"kd={self.get_param('servo_px_kd', 0.0003):.4f} "
+            f"px_max={self.get_param('servo_px_max_speed', 0.35):.4f} | "
+            f"ilim={self.get_param('servo_integral_limit', 0.10):.4f} "
+            f"dalpha={self.get_param('servo_derivative_alpha', 0.30):.4f} "
+            f"band={self.get_param('servo_integral_band', 0.0):.4f}"
+        )
+
     def _declare_params(self):
         """声明所有 YAML 参数."""
         # 全局
@@ -319,6 +342,31 @@ class MissionFSM(Node):
         self.declare_parameter("precision_align_continuous_enable", False)
         self.declare_parameter("precision_align_ground_kp", 0.40)
         self.declare_parameter("precision_align_max_speed", 0.25)
+        # ── 伺服 PID 增益 (三误差域) ──
+        # 契约文件: config/pid_tuning.yaml —— 真机 PID 标定只改那一个文件.
+        # 米制域    → 原 precision_align_ground_kp / max_speed / min_correction_speed
+        # 归一化域  → 原 precision_align_gain (precision_align_continuous_enable=false 回退路径)
+        # 像素域    → 原 landing_servo_kp_pixel / landing_servo_max_horizontal_vel
+        # 默认值必须与 pid_tuning.yaml 逐项一致; 全部写成 Python float (0.0 而非 0):
+        # YAML 传整数而此处按 double 声明时, rclpy 会抛
+        # InvalidParameterTypeException 导致 mission_fsm 启动即崩溃.
+        self.declare_parameter("servo_kp", 0.40)
+        self.declare_parameter("servo_ki", 0.08)
+        self.declare_parameter("servo_kd", 0.05)
+        self.declare_parameter("servo_max_speed", 0.25)
+        self.declare_parameter("servo_min_speed", 0.012)
+        self.declare_parameter("servo_norm_kp", 1.25)
+        self.declare_parameter("servo_norm_ki", 0.25)
+        self.declare_parameter("servo_norm_kd", 0.15)
+        self.declare_parameter("servo_px_kp", 0.0025)
+        self.declare_parameter("servo_px_ki", 0.0005)
+        self.declare_parameter("servo_px_kd", 0.0003)
+        self.declare_parameter("servo_px_max_speed", 0.35)
+        # 两域共用: 抗饱和与微分滤波
+        self.declare_parameter("servo_integral_limit", 0.10)
+        self.declare_parameter("servo_derivative_alpha", 0.30)
+        # 积分分离带, 0.0 = 不启用 (保持 float, 勿写成 0)
+        self.declare_parameter("servo_integral_band", 0.0)
         self.declare_parameter("bucket_servo_mid_max_speed", 0.14)
         self.declare_parameter("bucket_blue_predescent_enable", True)
         self.declare_parameter("precision_align_fine_pixel_error", 90.0)
@@ -1407,6 +1455,21 @@ class MissionFSM(Node):
             ("precision_align_alpha", 0.01, 1.0),
             ("precision_align_gain", 0.1, 10.0),
             ("precision_align_ground_kp", 0.01, 3.0),
+            ("servo_kp", 0.0, 10.0),
+            ("servo_ki", 0.0, 5.0),
+            ("servo_kd", 0.0, 5.0),
+            ("servo_max_speed", 0.0, 2.0),
+            ("servo_min_speed", 0.0, 0.5),
+            ("servo_norm_kp", 0.0, 10.0),
+            ("servo_norm_ki", 0.0, 5.0),
+            ("servo_norm_kd", 0.0, 5.0),
+            ("servo_px_kp", 0.0, 0.1),
+            ("servo_px_ki", 0.0, 0.05),
+            ("servo_px_kd", 0.0, 0.05),
+            ("servo_px_max_speed", 0.0, 2.0),
+            ("servo_integral_limit", 0.0, 1.0),
+            ("servo_derivative_alpha", 0.01, 1.0),
+            ("servo_integral_band", 0.0, 100.0),
             ("precision_align_max_speed", 0.01, 2.0),
             ("precision_align_timeout", 2.0, 120.0),
             ("precision_align_stable_frames", 1, 50),
