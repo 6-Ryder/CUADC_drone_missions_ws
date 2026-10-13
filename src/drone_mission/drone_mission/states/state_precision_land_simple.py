@@ -72,6 +72,7 @@ class SimplePrecisionLandState:
         # 目标世界位置的 2 状态卡尔曼 (权威的"微分项"来源 + 卡方误检门).
         # 接在丢失后继续接近的路径上: 单帧误检不再直接决定继续接近的落点.
         self._target_estimator = LandingTargetEstimator.from_params(self._fsm)
+        self._estimator_last_predict = 0.0
 
     def enter(self):
         self._fsm.logger.log_state("RETURN_TO_HOME", "PRECISION_LAND",
@@ -85,6 +86,7 @@ class SimplePrecisionLandState:
         self._servo_pid.reset()
         self._lost_transit.reset()
         self._target_estimator.reset()
+        self._estimator_last_predict = 0.0
         self._vertical_only_latched = False
         self._handoff_stable_frames = 0
         self._last_target_center = None
@@ -212,6 +214,7 @@ class SimplePrecisionLandState:
         has_target: Optional[bool] = None,
     ) -> Optional[str]:
         """图像空间 PID 控制器: 像素误差 → 机体速度, 对心下降."""
+        self._predict_target_estimator()
         pos = self._fsm.bridge.get_current_position()
         altitude = abs(self._fsm.fc.ned_to_altitude(pos.down))
 
@@ -354,6 +357,24 @@ class SimplePrecisionLandState:
             float(self._fsm.get_param("landing_descent_medium", 0.25)),
             float(self._fsm.get_param("landing_descent_slow", 0.12)),
         )
+
+    def _predict_target_estimator(self) -> None:
+        """把目标估计器推进到当前时刻 (**每个伺服 tick 都要调**).
+
+        不调用的后果不是性能问题而是功能缺失, 见
+        LandingTargetEstimator.predict 的 docstring: 速度状态恒为 0、
+        P00 只降不升(重捕获门不会变松)。dt 用真实经过时间而非 tick 周期,
+        所以调用节拍变化不会改变滤波效果 (过程噪声是频率无关的速率 PSD)。
+        """
+        now = time.monotonic()
+        last = self._estimator_last_predict
+        self._estimator_last_predict = now
+        if last <= 0.0:
+            return
+        dt = now - last
+        if dt <= 0.0:
+            return
+        self._target_estimator.predict(dt)
 
     def _latch_lost_transit_target(self, altitude: float) -> None:
         """把本帧观测融合进目标估计器, 并锁存**融合后**的位置.

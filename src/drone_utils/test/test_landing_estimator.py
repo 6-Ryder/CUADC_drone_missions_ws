@@ -30,7 +30,7 @@ def test_predict_propagates_state_and_grows_covariance():
     f.init(position=0.0, velocity=1.0, pos_unc=0.1, vel_unc=0.1)
     before = f.covariance
 
-    f.predict(dt=1.0, acc=0.0, acc_unc=0.5)
+    f.predict(dt=1.0, acc=0.0, acc_psd=0.5)
 
     assert f.position == pytest.approx(1.0)      # p += v·dt
     assert f.velocity == pytest.approx(1.0)
@@ -41,8 +41,8 @@ def test_predict_ignores_non_positive_dt():
     f = TargetAxisFilter()
     f.init(0.0, 1.0, 0.1, 0.1)
 
-    f.predict(dt=0.0, acc=0.0, acc_unc=1.0)
-    f.predict(dt=-1.0, acc=0.0, acc_unc=1.0)
+    f.predict(dt=0.0, acc=0.0, acc_psd=1.0)
+    f.predict(dt=-1.0, acc=0.0, acc_psd=1.0)
 
     assert f.position == pytest.approx(0.0)
 
@@ -99,7 +99,7 @@ def test_gate_loosens_after_dropout():
     assert f.update(0.5, 0.01) is False          # 收敛后 0.5m 的跳变被拒
 
     for _ in range(50):                          # 丢线 5s
-        f.predict(dt=0.1, acc=0.0, acc_unc=1.0)
+        f.predict(dt=0.1, acc=0.0, acc_psd=1.0)
 
     assert f.update(0.5, 0.01) is True           # 重捕获被接受
 
@@ -221,3 +221,82 @@ def test_non_finite_observation_is_refused(bad):
 def test_gate_threshold_is_the_authoritative_value():
     """门限取 PX4 的 3.84 (卡方 1 DOF, 5% 误报); 改它必须是有意的."""
     assert CHI2_GATE_95 == pytest.approx(3.84)
+
+
+# ---------------------------------------------------------------------------
+# predict 是功能前提, 不是可选优化
+# ---------------------------------------------------------------------------
+
+def test_velocity_is_unobservable_without_predict():
+    """没有 predict 时速度状态恒为 0 —— 记录这个前提, 防止再次误以为在跑.
+
+    单轴增益 k1 = P01/innov_cov, 而 P01 只被 predict 抬起 (p01 += dt*p11),
+    init 置 0、update 只收缩。所以"忘了调 predict"= "估计器只输出位置、
+    速度状态不存在", 而模块对外宣称的"权威微分项"就不成立。
+    """
+    f = TargetAxisFilter()
+    f.init(0.0, 0.0, 0.01, 0.01)
+    for k in range(50):
+        f.update(0.05 * k, 0.01)          # 目标在动
+
+    assert f.covariance[1] == pytest.approx(0.0)   # P01 恒 0
+    assert f.velocity == pytest.approx(0.0)        # 于是速度恒 0
+
+
+def test_velocity_becomes_observable_with_predict():
+    """补上 predict 后, 速度状态必须能跟踪真实运动 —— 这才是"微分项"成立.
+
+    这条是本模块最容易静默失效的地方: 少一次 predict 调用, 速度永远是 0,
+    而所有位置类断言仍然通过。
+    """
+    f = TargetAxisFilter()
+    f.init(0.0, 0.0, 0.01, 0.01)
+    true_v = 0.25                                  # m/s
+    pos = 0.0
+
+    for _ in range(60):
+        f.predict(dt=0.05, acc=0.0, acc_psd=0.01)
+        pos += true_v * 0.05
+        f.update(pos, 0.0004)
+
+    assert f.velocity == pytest.approx(true_v, abs=0.05)
+    assert f.position == pytest.approx(pos, abs=0.05)
+
+
+def test_estimate_is_frequency_independent_after_psd_change():
+    """过程噪声用速率 PSD ⇒ 同样的物理时长, 预测节拍不同结果应基本一致.
+
+    这是 PX4 VTE 把 per-step 方差改成 rate-based PSD 的原因; 若将来误用
+    per-step 形式, 换个调用频率就等于换了滤波器带宽。
+    """
+    def run(steps, dt):
+        f = TargetAxisFilter()
+        f.init(0.0, 0.0, 0.01, 0.01)
+        for _ in range(steps):
+            f.predict(dt=dt, acc=0.0, acc_psd=0.01)
+        return f.covariance[0]
+
+    coarse = run(steps=20, dt=0.1)     # 2s, 10Hz
+    fine = run(steps=200, dt=0.01)     # 2s, 100Hz
+
+    assert fine == pytest.approx(coarse, rel=0.05)
+
+
+def test_vehicle_motion_does_not_create_phantom_velocity():
+    """载机螺旋机动时, 静止目标的速度估计仍应趋零 —— 且这次断言非平凡.
+
+    之前的版本没有 predict, 速度恒 0, 断言恒真 (等于没测)。现在带 predict
+    推进时间, 速度是滤波器真算出来的量。
+    """
+    est = LandingTargetEstimator()
+    target = (6.0, 3.0)
+
+    for i in range(60):
+        est.predict(dt=0.2)                       # 3-5Hz 的真实间隔量级
+        yaw = i * 0.15
+        vehicle = (5.0 + 0.05 * i, 2.0 - 0.04 * i)
+        _observe_target(est, target, vehicle, yaw)
+
+    assert est.position == pytest.approx(target, abs=0.15)
+    assert abs(est.velocity[0]) < 0.15
+    assert abs(est.velocity[1]) < 0.15

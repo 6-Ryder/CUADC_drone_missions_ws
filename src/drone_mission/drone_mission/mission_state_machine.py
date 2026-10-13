@@ -454,7 +454,9 @@ class MissionFSM(Node):
         # 速度取保守值: 这段是在没有测量的情况下飞行.
         # 降落目标状态估计器 (drone_utils.landing_estimator). 权威的"微分项"
         # 来源是滤波器状态而非对测量求差; 参数含义见该模块 docstring.
-        self.declare_parameter("landing_estimator_acc_unc", 0.5)
+        # 过程噪声速率 PSD (m^2/s^3), 频率无关. 0.01 由"丢线 2s 后愿意接受
+        # 0.3m 的目标位移"反推: q >= 3*d^2/(3.84*T^3) ≈ 0.0088.
+        self.declare_parameter("landing_estimator_acc_psd", 0.01)
         self.declare_parameter("landing_estimator_pos_unc_init", 0.25)
         self.declare_parameter("landing_estimator_vel_unc_init", 0.25)
         # 角噪声方差 (tan²). σ_tan≈0.022 ≈ f=400 时 9px 抖动; 位置方差 = 该值×高度².

@@ -115,11 +115,27 @@ class TargetAxisFilter:
         self._initialized = True
         self._reject_streak = 0
 
-    def predict(self, dt: float, acc: float, acc_unc: float) -> None:
-        """常速模型 + 白噪声加速度过程噪声 (PX4 KalmanFilter.cpp:69-86)."""
+    def predict(self, dt: float, acc: float, acc_psd: float) -> None:
+        """
+        常速模型 + 白噪声加速度过程噪声.
+
+        与 PX4 `KalmanFilter.cpp:69-86` 同构, 但过程噪声用**速率型 PSD**而不是
+        per-step 方差: Q = q·[[dt³/3, dt²/2], [dt²/2, dt]], q 单位 m²/s³。
+
+        为什么不用 PX4 旧式 Q = acc_unc·GGᵀ: 那个 acc_unc 是 per-step 量, 其
+        效果随预测频率变化 —— 换个调用频率就等于换了滤波器带宽。PX4 自己在 VTE
+        里就是因为这个缺陷改成了 rate-based PSD, 参数文档原文 "This is a variance
+        rate, not a per-step variance; the value is independent of the filter
+        update rate" (`vision_target_estimator_params.yaml`, VTE_ACC_D_UNC 描述)。
+        本项目 predict 频率可能变 (20Hz tick / 未来别的节拍), 所以从一开始就用
+        频率无关的形式。
+
+        `acc` 保留为控制输入入口 (PX4 用它喂载机加速度, 那是"相对量"建模的需要);
+        本模块估计的是静止目标的**世界位置**, 调用方传 0 即可。
+        """
         if not self._initialized:
             return
-        if not all(math.isfinite(v) for v in (dt, acc, acc_unc)):
+        if not all(math.isfinite(v) for v in (dt, acc, acc_psd)):
             return
         if dt <= 0.0:
             return
@@ -132,11 +148,12 @@ class TargetAxisFilter:
         p00 = self._p00 + 2.0 * dt * self._p01 + dt2 * self._p11
         p01 = self._p01 + dt * self._p11
         p11 = self._p11
-        # Q = acc_unc * G Gᵀ, G = [dt²/2, dt]
-        q = max(acc_unc, 0.0)
-        self._p00 = p00 + q * dt2 * dt2 / 4.0
-        self._p01 = p01 + q * dt2 * dt / 2.0
-        self._p11 = p11 + q * dt2
+        # Q = q * [[dt³/3, dt²/2], [dt²/2, dt]] (连续白噪声加速度的离散化)
+        q = max(acc_psd, 0.0)
+        dt3 = dt2 * dt
+        self._p00 = p00 + q * dt3 / 3.0
+        self._p01 = p01 + q * dt2 / 2.0
+        self._p11 = p11 + q * dt
 
     def update(self, measurement: float, meas_unc: float) -> bool:
         """
@@ -185,13 +202,13 @@ class LandingTargetEstimator:
 
     def __init__(
         self,
-        acc_unc: float = 0.5,
+        acc_psd: float = 0.01,
         pos_unc_init: float = 0.25,
         vel_unc_init: float = 0.25,
         vel_init: float = 0.0,
         meas_unc_tan2: float = 5e-4,
     ):
-        self.acc_unc = float(acc_unc)
+        self.acc_psd = float(acc_psd)
         self.pos_unc_init = float(pos_unc_init)
         self.vel_unc_init = float(vel_unc_init)
         self.vel_init = float(vel_init)
@@ -230,11 +247,14 @@ class LandingTargetEstimator:
           landing_estimator_meas_unc_tan2 — 角噪声方差 (tan²). 位置的测量方差
             由它乘高度平方得到 (R ∝ range², 见 PX4 LandingTargetEstimator.cpp:125).
             默认 5e-4 对应 σ_tan≈0.022, 即 f=400 时约 9px 的检测抖动.
-          landing_estimator_acc_unc — 过程噪声 ("目标不会动"这一假设的松弛量).
-            取小值使门收敛后较紧; 丢帧期间 P 增长, 重捕获时门自动放松.
+          landing_estimator_acc_psd — 过程噪声速率 PSD (m²/s³). 它决定"丢线多久
+            之后估计器愿意接受多大的目标位移": 丢线 T 秒后 P00 ≈ q·T³/3, 要接受
+            位移 Δ 需 P00 ≥ Δ²/3.84。默认 0.01 由 Δ=0.3m、T=2s (与本项目降落
+            目标 2s 龄期门同阶) 反推: q ≥ 3Δ²/(3.84·T³) ≈ 0.0088。**频率无关**
+            (rate-based PSD), 改 predict 频率不必重算。
         """
         return cls(
-            acc_unc=float(fsm.get_param("landing_estimator_acc_unc", 0.5)),
+            acc_psd=float(fsm.get_param("landing_estimator_acc_psd", 0.01)),
             pos_unc_init=float(fsm.get_param("landing_estimator_pos_unc_init", 0.25)),
             vel_unc_init=float(fsm.get_param("landing_estimator_vel_unc_init", 0.25)),
             meas_unc_tan2=float(
@@ -297,6 +317,16 @@ class LandingTargetEstimator:
         return ok_north and ok_east
 
     def predict(self, dt: float) -> None:
-        """把估计推进到当前时刻 (目标静止, 故无控制输入)."""
-        self._north.predict(dt, 0.0, self.acc_unc)
-        self._east.predict(dt, 0.0, self.acc_unc)
+        """
+        把估计推进到当前时刻 (目标静止, 故无控制输入 acc=0).
+
+        ⚠️ **必须每个控制 tick 调用**. 不调用会有两个隐蔽后果, 都不是性能问题
+        而是功能缺失:
+          - 速度状态恒等于 vel_init: 单轴增益 k1 = P01/innov_cov, 而 P01 只被
+            predict 抬起 (p01 += dt·p11), init 置 0、update 只收缩 —— 没有
+            predict 则 k1≡0, 速度永不更新, "权威的微分项"运行时不成立。
+          - P00 只降不升: 于是"丢线期间 P 增长 → 重捕获瞬间门变松"这条性质在
+            运行时不存在, 长丢线后目标真移动会被连拒。
+        """
+        self._north.predict(dt, 0.0, self.acc_psd)
+        self._east.predict(dt, 0.0, self.acc_psd)
