@@ -91,6 +91,20 @@ class _FlightController:
         return self.origin_down - ned_down
 
 
+class _FixedClock:
+    """固定时钟桩 — 真 FSM 由 get_clock() 提供时间戳.
+
+    这些用例只验证单帧 P 行为与保持/锁存判决, 时间不需要推进:
+    PID 因此只体现 P 项, 与迁移前纯 P 的数值期望一致.
+    """
+
+    class _Now:
+        nanoseconds = 1_000_000_000
+
+    def now(self):
+        return self._Now()
+
+
 class _FSM:
     def __init__(self):
         self.bridge = _Bridge()
@@ -104,6 +118,9 @@ class _FSM:
 
     def get_param(self, _name, default):
         return default
+
+    def get_clock(self):
+        return _FixedClock()
 
     def check_drop_service_result(self):
         return False

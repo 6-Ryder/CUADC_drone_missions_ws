@@ -79,6 +79,20 @@ class _FC:
         pass
 
 
+class _FixedClock:
+    """固定时钟桩 — 真 FSM 由 get_clock() 提供时间戳.
+
+    这些用例只验证单帧 P 行为与保持/锁存判决, 时间不需要推进:
+    PID 因此只体现 P 项, 与迁移前纯 P 的数值期望一致.
+    """
+
+    class _Now:
+        nanoseconds = 1_000_000_000
+
+    def now(self):
+        return self._Now()
+
+
 class _SimpleFSM:
     def __init__(self, params=None, landed=False, target=None):
         self._params = params or {}
@@ -91,6 +105,9 @@ class _SimpleFSM:
 
     def get_param(self, name, default=None):
         return self._params.get(name, default)
+
+    def get_clock(self):
+        return _FixedClock()
 
     def get_landing_target(self):
         return self._target
@@ -239,10 +256,14 @@ def test_blind_timeout_requests_px4_land():
 
 
 def test_servo_p_control_uses_test_mission_defaults():
-    """照搬 test_mission: kp 0.004 / deadzone 12px / max_vel 0.6."""
+    """照搬 test_mission: kp 0.004 / deadzone 12px / max_vel 0.6.
+
+    增益名已迁移到 pid_tuning.yaml 契约 (原 landing_servo_kp_pixel /
+    landing_servo_max_horizontal_vel), 数值期望保持不变.
+    """
     fsm = _SimpleFSM({
-        "landing_servo_kp_pixel": 0.004,
-        "landing_servo_max_horizontal_vel": 0.6,
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
         "landing_servo_deadzone_px": 12.0,
         "landing_blind_altitude": 0.5,
     })

@@ -10,6 +10,7 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 MISSION_CONFIG = WORKSPACE / "src/drone_mission/config"
 REAL_PROFILE = MISSION_CONFIG / "mission_params_real.yaml"
 BASE_PROFILE = MISSION_CONFIG / "mission_params.yaml"
+PID_TUNING = MISSION_CONFIG / "pid_tuning.yaml"
 REAL_LAUNCH = WORKSPACE / "src/drone_bringup/launch/real_flight.launch.py"
 
 
@@ -34,13 +35,19 @@ def _assigned_node_call(source: str, variable_name: str) -> ast.Call:
 
 
 def _last_parameter_mapping(call: ast.Call) -> ast.Dict:
+    """取 parameters 列表里最后一个内联映射.
+
+    列表末尾允许追加参数文件路径 (pid_tuning.yaml 必须排在最后才能压过
+    内联 dict 生效, 见 config/pid_tuning.yaml 的生效性自检), 因此不能假定
+    最后一个元素就是 dict; 契约只关心内联映射里不重复任务参数值.
+    """
     for keyword in call.keywords:
         if keyword.arg != "parameters" or not isinstance(keyword.value, ast.List):
             continue
-        mapping = keyword.value.elts[-1]
-        if isinstance(mapping, ast.Dict):
-            return mapping
-    raise AssertionError("Node does not end its parameters list with a mapping")
+        for element in reversed(keyword.value.elts):
+            if isinstance(element, ast.Dict):
+                return element
+    raise AssertionError("Node has no inline mapping in its parameters list")
 
 
 def _literal_mapping(mapping: ast.Dict) -> dict:
@@ -95,8 +102,11 @@ def test_real_profile_preserves_full_mission_and_uses_proven_real_values():
     assert real["visual_progress_min_improvement"] == 2.0
     assert real["landing_search_progress_window"] == 15.0
 
-    assert real["landing_servo_kp_pixel"] == 0.0025
-    assert real["landing_servo_max_horizontal_vel"] == 0.35
+    # 降落伺服增益已迁移到 pid_tuning.yaml (原 landing_servo_kp_pixel /
+    # landing_servo_max_horizontal_vel), 真机生效值不变: 0.0025 / 0.35.
+    tuning = _parameters(PID_TUNING)
+    assert tuning["servo_px_kp"] == 0.0025
+    assert tuning["servo_px_max_speed"] == 0.35
     assert real["landing_servo_deadzone_px"] == 40.0
     assert real["landing_servo_x_to_right_sign"] == 1.0
     assert real["landing_servo_y_to_forward_sign"] == -1.0

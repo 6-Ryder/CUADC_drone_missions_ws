@@ -347,12 +347,29 @@ def test_default_search_does_not_request_marker_only():
 # 3. DropState 超时兜底四态
 # ---------------------------------------------------------------------------
 
+class _FixedClock:
+    """固定时钟桩 — 真 FSM 由 get_clock() 提供时间戳.
+
+    伺服用例只验证单帧 P 行为与分层下降速度, 时间不需要推进:
+    PID 因此只体现 P 项, 与迁移前纯 P 的数值期望一致.
+    """
+
+    class _Now:
+        nanoseconds = 1_000_000_000
+
+    def now(self):
+        return self._Now()
+
+
 class _DropFSM:
     def __init__(self, params=None):
         self._params = params or {}
 
     def get_param(self, name, default=None):
         return self._params.get(name, default)
+
+    def get_clock(self):
+        return _FixedClock()
 
     def get_logger(self):
         return _Logger()
@@ -615,11 +632,13 @@ def test_default_descend_keeps_goto():
 
 
 def test_servo_descend_tick_p_control_and_fast_layer():
+    # 像素域增益名已迁移 (原 landing_servo_kp_pixel / max_horizontal_vel),
+    # 数值期望保持不变.
     fsm = _servo_fsm({
         "camera_cx": 640.0, "camera_cy": 480.0,
         "precision_align_min_confidence": 0.25,
-        "landing_servo_kp_pixel": 0.004,
-        "landing_servo_max_horizontal_vel": 0.6,
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
         "landing_servo_deadzone_px": 12.0,
         "landing_servo_x_to_right_sign": 1.0,
         "landing_servo_y_to_forward_sign": -1.0,
@@ -638,8 +657,8 @@ def test_servo_descend_tick_p_control_and_fast_layer():
 def test_servo_descend_tick_slow_layer_and_deadzone():
     fsm = _servo_fsm({
         "camera_cx": 640.0, "camera_cy": 480.0,
-        "landing_servo_kp_pixel": 0.004,
-        "landing_servo_max_horizontal_vel": 0.6,
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
         "landing_servo_deadzone_px": 12.0,
         "drop_servo_descend_fast": 0.5,
         "drop_servo_descend_slow": 0.3,
@@ -724,10 +743,14 @@ def test_quick_params_include_servo_descend_speeds():
 
 
 def test_quick_params_enable_continuous_ground_error_drop_servo():
+    # 米制域 P 增益已迁移到 pid_tuning.yaml: 原 precision_align_ground_kp
+    # 改名 servo_kp, 数值期望保持不变 (0.40). 每个 quick profile 都吃同一份
+    # 增益 (4 个 launch 都把该文件排在参数列表最末位).
+    tuning = _load_parameters(ROOT / "drone_mission/config/pid_tuning.yaml")
     for name in ("mission_params_quick.yaml", "mission_params_quick_sim.yaml"):
         p = _quick_params(name)
         assert p["precision_align_continuous_enable"] is True
-        assert p["precision_align_ground_kp"] == 0.40
+        assert tuning["servo_kp"] == 0.40
 
 
 def test_base_params_untouched_by_servo_descend():

@@ -68,11 +68,14 @@ class _Fsm:
             "precision_align_image_width": 1280.0,
             "precision_align_image_height": 960.0,
             "precision_align_alpha": 1.0,
-            "precision_align_gain": 0.65,
-            "precision_align_max_speed": 1.0,
+            # 增益名已迁移到 pid_tuning.yaml 契约, 数值保持原测试取值:
+            # precision_align_gain→servo_norm_kp, max_speed→servo_max_speed,
+            # min_correction_speed→servo_min_speed.
+            "servo_norm_kp": 0.65,
+            "servo_max_speed": 1.0,
             "precision_align_fine_pixel_error": 80.0,
             "precision_align_fine_max_speed": 0.022,
-            "precision_align_min_correction_speed": 0.006,
+            "servo_min_speed": 0.006,
             "precision_align_fine_step_s": 0.08,
             "precision_align_raw_pixel_tolerance": 6.0,
             "precision_align_smooth_pixel_tolerance": 5.0,
@@ -434,8 +437,8 @@ def test_bucket_continuous_servo_speed_cap_decreases_with_height():
         fsm = _Fsm({
             "quick_drop_profile": "bucket",
             "precision_align_continuous_enable": True,
-            "precision_align_ground_kp": 0.40,
-            "precision_align_max_speed": 0.25,
+            "servo_kp": 0.40,
+            "servo_max_speed": 0.25,
             "bucket_servo_mid_max_speed": 0.14,
             "precision_align_fine_max_speed": 0.065,
             "bucket_home_body_height": 0.40,
@@ -464,8 +467,8 @@ def test_blue_continuous_servo_keeps_original_speed_cap_at_low_height():
     fsm = _Fsm({
         "quick_drop_profile": "blue",
         "precision_align_continuous_enable": True,
-        "precision_align_ground_kp": 0.40,
-        "precision_align_max_speed": 0.25,
+        "servo_kp": 0.40,
+        "servo_max_speed": 0.25,
         "bucket_servo_mid_max_speed": 0.14,
         "precision_align_fine_max_speed": 0.065,
         "camera_fx": 400.0,
@@ -487,10 +490,10 @@ def test_blue_continuous_servo_keeps_original_speed_cap_at_low_height():
 def test_continuous_step_keeps_horizontal_servo_and_descent_in_one_command():
     fsm = _Fsm({
         "precision_align_continuous_enable": True,
-        "precision_align_ground_kp": 0.40,
+        "servo_kp": 0.40,
         "camera_fx": 400.0,
         "camera_fy": 400.0,
-        "precision_align_max_speed": 1.0,
+        "servo_max_speed": 1.0,
         "precision_align_raw_pixel_tolerance": 6.0,
         "precision_align_smooth_pixel_tolerance": 5.0,
     })
@@ -524,10 +527,10 @@ def test_continuous_descent_keeps_correcting_inside_release_pixel_window():
     """下降阶段不能因投放容差而暂停横向伺服。"""
     fsm = _Fsm({
         "precision_align_continuous_enable": True,
-        "precision_align_ground_kp": 0.40,
+        "servo_kp": 0.40,
         "camera_fx": 400.0,
         "camera_fy": 400.0,
-        "precision_align_max_speed": 1.0,
+        "servo_max_speed": 1.0,
         "precision_align_raw_pixel_tolerance": 80.0,
         "precision_align_smooth_pixel_tolerance": 80.0,
         "precision_align_threshold_norm_x": 0.10,
