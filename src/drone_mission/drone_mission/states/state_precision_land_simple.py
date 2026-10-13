@@ -291,13 +291,21 @@ class SimplePrecisionLandState:
             # 是否据此下令, 而且观测只能喂一次 (喂两次等于重复计入测量).
             self._observe_target_for_estimator(altitude, du, dv)
             if not self._frame_accepted_by_estimator():
-                # 本帧与"滤波器认为目标在哪"严重不符 (卡方门) → 不据此下令.
-                # 语义与"无有效测量"一致: 零速保持, 冻结积分, 等下一帧.
-                # 不会永久卡住: 连续 3 次拒绝后估计器会强制融合 (ArduPilot 的
-                # 逃逸), 且有 2s 丢线重置.
+                # 本帧与"滤波器认为目标在哪"严重不符 (卡方门) → 不据此下令,
+                # 但**也不停下**: 与"本帧没有可用测量"完全同一条处置 ——
+                # 继续朝**最后已知位置**接近 (见上面 target is None 分支).
+                #
+                # 曾经的写法是零速悬停, 与紧邻的丢失分支自相矛盾, 也违背本项目的
+                # 控制核心 (对心连续伺服、持续靠近目标). 权威同此: 被拒的测量
+                # PX4 根本不发布, 消费方看到的是"没有新测量", 于水平接近段继续
+                # 飞向最后目击点, 而不是停住.
+                #
+                # 不会永久卡住: 连续 3 次拒绝后估计器强制融合 (ArduPilot 逃逸),
+                # 且有 2s 丢线重置.
                 self._servo_pid.update(
                     0.0, 0.0, self._now(), measurement_valid=False)
-                self._fsm.fc.set_velocity_body(0.0, 0.0, 0.0)
+                self._fsm.fc.set_velocity_body(
+                    *self._lost_transit_command(altitude), 0.0)
                 return None
 
             # PID 输出: 符号标定与合速度(向量模长)限幅均由 PID 承担.

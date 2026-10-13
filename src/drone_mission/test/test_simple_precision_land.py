@@ -715,6 +715,49 @@ def test_observation_falls_back_to_processing_time_pose():
     assert state._lost_transit.target == pytest.approx((7.0, 8.0), abs=1e-6)
 
 
+@pytest.mark.parametrize("state_cls", [SimplePrecisionLandState, PrecisionLandState])
+def test_rejected_frame_continues_approach_not_hover(state_cls):
+    """被门拒绝的帧: 不据此下令, 但也**不停下** —— 继续朝最后已知位置接近.
+
+    项目控制核心是"对心连续伺服、持续靠近目标"; 曾经的写法是零速悬停, 与紧邻的
+    "目标丢失"分支自相矛盾. 权威同此: PX4 不发布被拒的测量, 消费方看到的是
+    "没有新测量", 水平接近段继续飞向最后目击点.
+
+    做法: 把"继续接近"的命令替身成已知值, 断言被拒帧确实用了它 ——
+    若实现退回零速, 这条会失败.
+    """
+    params = {
+        "servo_px_kp": 0.004,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.1,
+        "camera_fx": 400.0,
+        "camera_fy": 400.0,
+        "camera_cx": 320.0,
+        "camera_cy": 240.0,
+        "landing_servo_estimator_gate_enable": True,
+    }
+    fsm = _SimpleFSM(params)
+    state = state_cls(fsm)
+    if hasattr(state, "_phase"):
+        state._phase = state.PHASE_SERVO
+    centered = {"center_u": 321.0, "center_v": 240.0, "confidence": 0.9}
+    for i in range(6):                       # 让估计成熟
+        fsm.set_measurement_stamp(100.0 + i * 0.25)
+        state._execute_servo(centered)
+
+    state._lost_transit_command = lambda altitude: (0.123, 0.456)   # 可辨识的替身
+
+    fsm.set_measurement_stamp(200.0)         # 一帧远跳, 必被门拒
+    state._execute_servo({"center_u": 600.0, "center_v": 240.0,
+                          "confidence": 0.9})
+
+    scripted = state._fsm.fc.calls[-1]
+    assert scripted[0] == pytest.approx(0.123), "被拒帧应走继续接近, 而不是零速"
+    assert scripted[1] == pytest.approx(0.456)
+    assert scripted[2] == 0.0
+
+
 def test_lost_target_transit_reset_on_enter():
     """换相进入降落时必须清锁存, 否则上一段的点会继续驱动."""
     fsm = _SimpleFSM({})
@@ -1081,7 +1124,10 @@ def test_estimator_gate_stops_the_servo_from_chasing_the_false_frame(state_cls):
     settled, chased, recovered = scenario.run()
 
     assert abs(settled[1]) < 0.01, "对心时不该有横向指令"
-    assert chased == (0.0, 0.0, 0.0), "误检帧不该驱动伺服"
+    # 误检帧**不驱动**伺服: 指令里不该出现幻影带来的那一大坨 (门关时是 0.284).
+    # 但也不是停下 —— 处置与"本帧没有可用测量"一致: 继续朝最后已知位置接近.
+    assert abs(chased[1]) < 0.05, f"误检帧不该驱动伺服 (得到 {chased[1]:.3f})"
+    assert chased[2] == 0.0, "接近途中不下降"
     assert abs(recovered[1]) < 0.01, "下一帧正常后必须立刻恢复, 不能卡住"
 
 
