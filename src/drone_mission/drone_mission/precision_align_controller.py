@@ -164,6 +164,25 @@ class PrecisionAlignController:
     def _now(self) -> float:
         return self._fsm.get_clock().now().nanoseconds / 1e9
 
+    def _measurement_stamp(self) -> float:
+        """
+        所选目标的**采集时刻** (秒), 无测量时返回 0.0.
+
+        伺服 PID 必须按测量时刻而非 FSM tick 推进: 本控制器每个 tick 都被
+        调用, 而复用的是同一份缓存目标, 按 tick 推进会把同一份误差重复积分
+        数倍 (真机视觉 3-5Hz vs 20Hz tick). 传 0.0 时 ServoPid 判定"无新测量",
+        积分/微分不推进 —— 失败方向是"停止积累", 不是"按错误步长继续".
+
+        源名映射与 _select_target 的 source 取值一致:
+          bucket/cylinder -> cylinders 话题, marker -> markers 话题.
+        """
+        source = {
+            "bucket": "cylinder",
+            "cylinder": "cylinder",
+            "marker": "marker",
+        }.get(self._locked_source, "")
+        return self._fsm.vision_measurement_stamp(source)
+
     def _param(self, key: str, default):
         return self._fsm.get_param(key, default)
 
@@ -408,7 +427,7 @@ class PrecisionAlignController:
         # active until the height handoff.
         if continuous and not allow_release:
             forward, right = self._continuous_command(
-                ground_forward_error_m, ground_right_error_m, now, altitude,
+                ground_forward_error_m, ground_right_error_m, altitude,
             )
             self._last_forward = forward
             self._last_right = right
@@ -426,7 +445,7 @@ class PrecisionAlignController:
 
         if continuous:
             forward, right = self._continuous_command(
-                ground_forward_error_m, ground_right_error_m, now, altitude,
+                ground_forward_error_m, ground_right_error_m, altitude,
             )
         else:
             # 步进模式: 归一化域 PID. 图像方向→机体方向的标定符号在这里预先
@@ -447,7 +466,7 @@ class PrecisionAlignController:
             forward, right = pid.update(
                 y_to_forward_sign * float(self._smooth_dy),
                 x_to_right_sign * float(self._smooth_dx),
-                now,
+                self._measurement_stamp(),
             )
             self._active_pid = pid
 
@@ -510,17 +529,19 @@ class PrecisionAlignController:
         self,
         error_forward_m: float,
         error_right_m: float,
-        stamp: float,
         altitude_m: float,
     ) -> Tuple[float, float]:
         """连续模式: 米制域 PID, 每 tick 刷新一次限速上限.
 
         限幅 (向量模长) 与最小修正速度抬升都在 ServoPid 内部完成, 这里只负责
         把按高度算出的 max_speed 交给它 —— bucket 分层限速因此得以保留.
+
+        时间戳取所选目标的采集时刻 (见 _measurement_stamp), 不取 FSM 时钟.
         """
         pid = self._pid_continuous
         pid.max_speed = self._continuous_max_speed(altitude_m)
-        command = pid.update(error_forward_m, error_right_m, stamp)
+        command = pid.update(error_forward_m, error_right_m,
+                             self._measurement_stamp())
         self._active_pid = pid
         return command
 

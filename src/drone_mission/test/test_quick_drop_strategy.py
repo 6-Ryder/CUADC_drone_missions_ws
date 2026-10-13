@@ -371,6 +371,11 @@ class _DropFSM:
     def get_clock(self):
         return _FixedClock()
 
+    def vision_measurement_stamp(self, _source):
+        """测量时刻. 固定时钟 => 恒为同一时刻, 即"同一份测量在多个 tick 上
+        被复用"; 与 _FixedClock 的意图一致 —— 这些用例只验证单帧 P 行为."""
+        return self.get_clock().now().nanoseconds / 1e9
+
     def get_logger(self):
         return _Logger()
 

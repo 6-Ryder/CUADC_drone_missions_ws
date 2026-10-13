@@ -94,6 +94,7 @@ class _Fsm:
         self.cylinder_selector = _Selector()
         self.clock = _Clock()
         self.bridge = _Bridge()
+        self._frozen_measurement_stamp = None
 
     def get_param(self, key, default=None):
         return self.params.get(key, default)
@@ -103,6 +104,18 @@ class _Fsm:
 
     def get_logger(self):
         return _Logger()
+
+    def vision_measurement_stamp(self, source):
+        """测量时刻 (秒). 默认跟随测试时钟, 即每 tick 到一份新测量 ——
+        与这些用例的既有假设一致. 用 freeze_measurement() 模拟真机行为:
+        同一份 3-5Hz 测量在多个 20Hz tick 上被复用."""
+        if self._frozen_measurement_stamp is not None:
+            return self._frozen_measurement_stamp
+        return self.clock.seconds
+
+    def freeze_measurement(self, seconds):
+        """把测量时刻钉死在给定值: 之后的 tick 都算"无新测量"."""
+        self._frozen_measurement_stamp = seconds
 
 
 def test_default_image_y_sign_matches_cuadc_for_target_above_center():

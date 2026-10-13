@@ -222,10 +222,15 @@ class MissionFSM(Node):
         self._next_known_marker_id: int = 1001
         self._hazards: List[Any] = []
         self._landing_target: Optional[Dict] = None
-        # 各视觉源的测量时刻 (秒, 单调时钟). 消费方用它判断测量新鲜度
-        # 并按真实测量间隔推进积分/微分, 而非按 FSM tick.
-        # 注意: 圆柱与标识另有 *_capture_stamp (消息 header 的采集时刻);
-        # LandingTarget.msg 无 header 字段, 故降落目标目前只有到达时刻.
+        # 每个视觉源各记两个时刻 (秒, 单调时钟):
+        #   *_capture_stamp  — 消息 header 的采集时刻 (相机帧时刻), 用于控制:
+        #                      新鲜度门控、积分/微分真实步长、按帧去重
+        #   *_timestamp      — 消息到达 FSM 的时刻, 用于"这个源还在不在"的
+        #                      存活判断 (watchdog / 到达时刻龄门)
+        # 统一出口是 vision_measurement_stamp(source), 它优先返回采集时刻.
+        # LandingTarget.msg 无 header 字段, 故降落目标目前只有到达时刻 ——
+        # 这是已记录的缺口 (见 docs/PRECISION_LANDING_AUTHORITY.md §5.1),
+        # 不是与另两源等价的机制.
         self._landing_target_stamp: float = 0.0
         self._coverage_status: Optional[Dict] = None
         self._cylinders_timestamp: float = 0.0
@@ -765,21 +770,36 @@ class MissionFSM(Node):
 
     def vision_measurement_stamp(self, source: str) -> float:
         """
-        返回指定视觉源最近一次测量的时刻 (秒), 无测量时返回 0.0.
+        返回指定视觉源最近一次测量的**采集时刻** (秒), 无测量时返回 0.0.
 
-        消费方用它做两件事:
+        这里的"采集时刻"取消息 header 的时刻 (相机帧时刻), 而不是消息到达
+        FSM 的时刻 —— 与权威约定一致: MAVLink LANDING_TARGET.time_usec 与
+        PX4 的 FiducialMarkerPosReport.timestamp_sample 都是"这次测量是什么
+        时候拍的". 两者在 3-5Hz 下相差约一个推理周期, 但按到达时刻求差会把
+        每帧的推理耗时抖动带进积分/微分步长.
+
+        消费方用它做三件事:
           - 新鲜度门控: 过期测量不得继续驱动控制 (stale -> 视为无目标).
           - 真实步长: 积分/微分按相邻两次测量的时间差推进, 而不是按 FSM
             tick 周期. 真机视觉 3-5Hz 而 tick 20Hz, 按 tick 推进会把同一份
             误差重复累加数倍, 微分也会被放大.
+          - 按帧去重: 同一份测量在多个 tick 上被复用时传入相同 stamp,
+            ServoPid 只在 stamp 前进时推进积分/微分.
 
         source 取 "cylinder" | "marker" | "landing".
+
+        降级路径 (与 PX4 sync_stamp 未收敛时退回接收时刻同构, 但必须能被
+        察觉): cylinder/marker 的 header 缺失时 _capture_seconds 返回 0.0,
+        此时退回到达时刻; landing 目前只有到达时刻 (LandingTarget.msg 尚无
+        header), 其采集时刻是已记录的缺口而非等价物.
         """
-        return {
-            "cylinder": self._cylinders_timestamp,
-            "marker": self._markers_timestamp,
-            "landing": self._landing_target_stamp,
-        }.get(source, 0.0)
+        if source == "cylinder":
+            return self._cylinder_capture_stamp or self._cylinders_timestamp
+        if source == "marker":
+            return self._marker_capture_stamp or self._markers_timestamp
+        if source == "landing":
+            return self._landing_target_stamp
+        return 0.0
 
     @staticmethod
     def _capture_seconds(msg) -> float:

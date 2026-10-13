@@ -257,8 +257,11 @@ class PrecisionLandState:
                 self._servo_converged_count = 0
 
             # ── 3. PID 输出: 符号标定与合速度(向量模长)限幅均由 PID 承担 ──
+            # 传测量时刻而非 FSM 时钟: 同一份缓存测量会在多个 tick 上被复用,
+            # 按 tick 推进会把同一份误差重复积分数倍 (3-5Hz 视觉 vs 20Hz tick).
             forward, right = self._servo_pid.update(
-                float(dv), float(du), self._now())
+                float(dv), float(du),
+                self._fsm.vision_measurement_stamp("landing"))
 
             # ── 4. 高度分层下降速度 ──
             if altitude > 3.0:

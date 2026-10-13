@@ -325,9 +325,11 @@ class CylinderSearchState:
         # 米制域误差 (m): 蓝盘在地面, 用平面距离把像素偏差换算成地面偏差
         error_forward_m = (target[1] - cy) * plane_distance / fy
         error_right_m = (target[0] - cx) * plane_distance / fx
-        # 米制域 PID: 符号标定与合速度(向量模长)限幅均由 PID 承担
+        # 米制域 PID: 符号标定与合速度(向量模长)限幅均由 PID 承担.
+        # 蓝盘走 markers 话题, 故测量时刻取 "marker" (采集时刻优先).
         forward, right = self._blue_servo_pid.update(
-            error_forward_m, error_right_m, self._now())
+            error_forward_m, error_right_m,
+            self._fsm.vision_measurement_stamp("marker"))
         in_view = (abs(target[0] - cx) <= 0.35 * width
                    and abs(target[1] - cy) <= 0.35 * height)
         descent = (float(self._fsm.get_param("drop_servo_descend_slow", 0.28))

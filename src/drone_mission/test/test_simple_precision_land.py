@@ -15,6 +15,8 @@ import ast
 import time
 from pathlib import Path
 
+import pytest
+
 from drone_mission.mission_state_machine import MissionFSM
 from drone_mission.states.state_precision_land import PrecisionLandState
 from drone_mission.states.state_precision_land_simple import SimplePrecisionLandState
@@ -102,12 +104,24 @@ class _SimpleFSM:
         self.fc = _FC()
         self.logger = _LogState()
         self.vision_modes = []
+        self._measurement_stamp = None
 
     def get_param(self, name, default=None):
         return self._params.get(name, default)
 
     def get_clock(self):
         return _FixedClock()
+
+    def vision_measurement_stamp(self, _source):
+        """测量时刻. 默认固定 (同一份测量在多个 tick 上被复用), 与
+        _FixedClock 的意图一致; 用例可用 set_measurement_stamp() 模拟新帧."""
+        if self._measurement_stamp is not None:
+            return self._measurement_stamp
+        return self.get_clock().now().nanoseconds / 1e9
+
+    def set_measurement_stamp(self, seconds):
+        """模拟一帧新测量的采集时刻."""
+        self._measurement_stamp = seconds
 
     def get_landing_target(self):
         return self._target
@@ -279,6 +293,71 @@ def test_servo_p_control_uses_test_mission_defaults():
     assert abs(right - 0.2) < 1e-9
     # 高度 5.0 > 3.0 → fast 0.4
     assert descent == 0.4
+
+
+def test_servo_does_not_integrate_when_measurement_is_reused():
+    """同一份测量在多个 tick 上复用时, 积分不得累加.
+
+    真机视觉 3-5Hz 而 FSM tick 20Hz: 若把 FSM 时钟当测量时刻传入, 同一份
+    误差会在两帧之间被积分 4-7 次, 迅速顶到 integral_limit, 并在目标丢失时
+    变成速度踢出. 契约是传测量时刻 —— stamp 不前进就不推进积分.
+    """
+    fsm = _SimpleFSM({
+        "servo_px_kp": 0.004,
+        "servo_px_ki": 0.002,
+        "servo_px_kd": 0.0,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.5,
+    })
+    fsm._target = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
+    fsm.set_measurement_stamp(100.0)
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    for _ in range(6):
+        state._execute_servo(has_target=True)
+
+    assert state._servo_pid.integral == (0.0, 0.0)
+
+
+def test_servo_integrates_by_measurement_interval_not_tick_count():
+    """积分步长 = 相邻两次测量的时间差, 与中间跑了多少 tick 无关.
+
+    这里在两次测量之间多跑几个 tick, 积分量必须仍等于 ki·e·Δt (Δt=0.33s,
+    即 3Hz 的测量间隔), 而不是 ki·e·(tick 数 × 0.05s).
+    """
+    fsm = _SimpleFSM({
+        "servo_px_kp": 0.004,
+        "servo_px_ki": 0.002,
+        "servo_px_kd": 0.0,
+        "servo_px_max_speed": 0.6,
+        "landing_servo_deadzone_px": 1.0,
+        "landing_blind_altitude": 0.5,
+    })
+    fsm._target = {"center_u": 370.0, "center_v": 240.0, "confidence": 0.9}
+    state = SimplePrecisionLandState(fsm)
+    state._phase = state.PHASE_SERVO
+
+    # 第一帧: 只建立测量时刻, dt=0, 不积分
+    fsm.set_measurement_stamp(100.0)
+    state._execute_servo(has_target=True)
+    assert state._servo_pid.integral == (0.0, 0.0)
+
+    # 测量之间的 5 个 tick: 仍是同一份测量, 不得积分
+    for _ in range(5):
+        state._execute_servo(has_target=True)
+    assert state._servo_pid.integral == (0.0, 0.0)
+
+    # 新一帧到达 (Δt = 0.33s): 积分 = ki·du·Δt = 0.002·50·0.33
+    fsm.set_measurement_stamp(100.33)
+    state._execute_servo(has_target=True)
+    assert state._servo_pid.integral[1] == pytest.approx(0.002 * 50.0 * 0.33)
+
+    # 该帧再被复用 5 个 tick: 积分不变
+    for _ in range(5):
+        state._execute_servo(has_target=True)
+    assert state._servo_pid.integral[1] == pytest.approx(0.002 * 50.0 * 0.33)
 
 
 def test_servo_rejects_low_confidence_target_and_holds_position():

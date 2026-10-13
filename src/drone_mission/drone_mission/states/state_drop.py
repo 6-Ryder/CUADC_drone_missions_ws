@@ -751,8 +751,10 @@ class DropState:
         du = u - cx
         dv = v - cy
 
-        # 像素域 PID: 死区内输出零并冻结积分, 符号标定与合速度限幅均由 PID 承担
-        forward, right = self._servo_descend_pid.update(dv, du, self._now())
+        # 像素域 PID: 死区内输出零并冻结积分, 符号标定与合速度限幅均由 PID 承担.
+        # 传测量时刻而非 FSM 时钟 —— 同一份缓存测量会在多个 tick 上被复用.
+        forward, right = self._servo_descend_pid.update(
+            dv, du, self._fsm.vision_measurement_stamp("cylinder"))
 
         # 分层垂直速度: 高空快降, 近投放高度减速保对心稳定
         if altitude > 3.0:
