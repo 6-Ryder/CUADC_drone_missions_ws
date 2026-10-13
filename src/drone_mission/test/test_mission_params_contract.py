@@ -140,3 +140,119 @@ def test_profiles_do_not_declare_parameters_outside_expected_namespace():
         f"只解析出 {len(declared)} 个声明 —— 声明方式可能变了, 本契约需要同步更新"
     )
     assert re.match(r"^[a-z0-9_]+$", sorted(declared)[0])
+
+
+# ---------------------------------------------------------------------------
+# 两类"真机起不来"的参数类型崩溃 (都由真机日志证实发生过)
+# ---------------------------------------------------------------------------
+
+def _double_parameter_names() -> set:
+    """全仓用**浮点默认值**声明的参数名 —— 它们不接受整数或字符串."""
+    names = set()
+    for package in PACKAGES:
+        root = WORKSPACE / "src" / package
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            text = str(path)
+            if "/install/" in text or "/build/" in text or "/test/" in text:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "declare_parameter"
+                        and len(node.args) >= 2
+                        and isinstance(node.args[0], ast.Constant)
+                        and isinstance(node.args[1], ast.Constant)
+                        and isinstance(node.args[1].value, float)):
+                    names.add(node.args[0].value)
+    return names
+
+
+def _yaml_int_values(path: Path, names: set) -> list:
+    """配置里被写成**整数**的 double 参数 (rclpy 会抛 InvalidParameterTypeException)."""
+    found = []
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return found
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if (key in names and isinstance(value, int)
+                        and not isinstance(value, bool)):
+                    found.append((str(path.name), key, value))
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(document)
+    return found
+
+
+def test_double_parameters_are_not_given_integer_values():
+    """double 参数写成整数 → 节点创建时抛异常并**直接死掉**.
+
+    真机证据: 2026-08-06 的 `mission_fsm` 就是被
+    `Trying to set parameter 'precision_align_raw_pixel_tolerance' to '35' of
+    type 'INTEGER', expecting type 'DOUBLE'` 打死 (exit code 1), 当天无法起飞。
+    现行配置已全部带小数点, 但没有任何机制阻止它再现 —— 这条就是那个机制。
+    """
+    names = _double_parameter_names()
+    assert names, "没解析到任何 double 声明 —— 解析方式可能变了"
+
+    problems = []
+    for path in sorted(WORKSPACE.glob("src/*/config/*.yaml")):
+        problems += _yaml_int_values(path, names)
+
+    assert problems == [], (
+        "以下 double 参数被写成整数, 会让对应节点在创建时崩溃并退出: "
+        f"{problems}. 改成 35.0 这样的浮点字面量。"
+    )
+
+
+def _launch_bare_configurations() -> list:
+    """launch 里直接把 `LaunchConfiguration` 当参数值的 (name, 文件) 对.
+
+    这种写法会把 launch 参数以**字符串**下发; 若接收方把该参数声明为 double,
+    rclpy 抛 InvalidParameterTypeException —— 真机证据: 2026-07-23 `px4_bridge`
+    被 `home_z` 的 STRING vs DOUBLE 打死 (exit code 1)。
+    正确写法是 `ParameterValue(LaunchConfiguration("home_z"), value_type=float)`,
+    本项目在 layout_heading_deg / bucket_rim_height 上已经是这么写的。
+    """
+    pairs = []
+    for path in sorted((WORKSPACE / "src/drone_bringup/launch").glob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values):
+                if (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                        and isinstance(value, ast.Call)
+                        and isinstance(value.func, ast.Name)
+                        and value.func.id == "LaunchConfiguration"):
+                    pairs.append((key.value, path.name))
+    return pairs
+
+
+def test_launches_do_not_pass_bare_strings_for_double_parameters():
+    """launch 不得把 double 参数以裸 LaunchConfiguration(字符串) 下发."""
+    doubles = _double_parameter_names()
+    offenders = sorted({(name, f) for name, f in _launch_bare_configurations()
+                        if name in doubles})
+
+    assert offenders == [], (
+        "以下参数在 launch 里以裸字符串下发, 而接收节点把它声明为 double —— "
+        "曾因此打死 px4_bridge。请改成 "
+        "ParameterValue(LaunchConfiguration(...), value_type=float): "
+        f"{offenders}"
+    )

@@ -99,9 +99,9 @@ def generate_launch_description():
         output="screen",
         emulate_tty=True,
         parameters=[px4_param_file, {
-            "home_x": LaunchConfiguration("home_x"),
-            "home_y": LaunchConfiguration("home_y"),
-            "home_z": LaunchConfiguration("home_z"),
+            "home_x": ParameterValue(LaunchConfiguration("home_x"), value_type=float),
+            "home_y": ParameterValue(LaunchConfiguration("home_y"), value_type=float),
+            "home_z": ParameterValue(LaunchConfiguration("home_z"), value_type=float),
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "quick_drop_profile": LaunchConfiguration("quick_drop_profile"),
         }],
@@ -119,8 +119,8 @@ def generate_launch_description():
             vision_quick_param_file,
             airframe_param_file,
             {
-                "home_x": LaunchConfiguration("home_x"),
-                "home_y": LaunchConfiguration("home_y"),
+                "home_x": ParameterValue(LaunchConfiguration("home_x"), value_type=float),
+                "home_y": ParameterValue(LaunchConfiguration("home_y"), value_type=float),
                 "layout_heading_deg": ParameterValue(
                     LaunchConfiguration("layout_heading_deg"), value_type=float,
                 ),
@@ -162,9 +162,9 @@ def generate_launch_description():
             mission_param_file,
             airframe_param_file,
             {
-                "home_x": LaunchConfiguration("home_x"),
-                "home_y": LaunchConfiguration("home_y"),
-                "home_z": LaunchConfiguration("home_z"),
+                "home_x": ParameterValue(LaunchConfiguration("home_x"), value_type=float),
+                "home_y": ParameterValue(LaunchConfiguration("home_y"), value_type=float),
+                "home_z": ParameterValue(LaunchConfiguration("home_z"), value_type=float),
                 "layout_heading_deg": ParameterValue(
                     LaunchConfiguration("layout_heading_deg"), value_type=float,
                 ),

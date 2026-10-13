@@ -24,6 +24,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -81,8 +82,8 @@ def generate_launch_description():
         output="screen",
         emulate_tty=True,
         parameters=[px4_param_file, {
-            "home_x": LaunchConfiguration("home_x"),
-            "home_y": LaunchConfiguration("home_y"),
+            "home_x": ParameterValue(LaunchConfiguration("home_x"), value_type=float),
+            "home_y": ParameterValue(LaunchConfiguration("home_y"), value_type=float),
             "home_z": 0.0,
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
         }],
@@ -97,13 +98,17 @@ def generate_launch_description():
         output="screen",
         emulate_tty=True,
         parameters=[{
-            "cruise_altitude": LaunchConfiguration("cruise_altitude"),
-            "takeoff_height": LaunchConfiguration("cruise_altitude"),
-            "drop_x": LaunchConfiguration("drop_x"),
-            "drop_y": LaunchConfiguration("drop_y"),
-            "home_x": LaunchConfiguration("home_x"),
-            "home_y": LaunchConfiguration("home_y"),
-            "loiter_time": LaunchConfiguration("loiter_time"),
+            "cruise_altitude": ParameterValue(
+                LaunchConfiguration("cruise_altitude"), value_type=float,
+            ),
+            "takeoff_height": ParameterValue(
+                LaunchConfiguration("cruise_altitude"), value_type=float,
+            ),
+            "drop_x": ParameterValue(LaunchConfiguration("drop_x"), value_type=float),
+            "drop_y": ParameterValue(LaunchConfiguration("drop_y"), value_type=float),
+            "home_x": ParameterValue(LaunchConfiguration("home_x"), value_type=float),
+            "home_y": ParameterValue(LaunchConfiguration("home_y"), value_type=float),
+            "loiter_time": ParameterValue(LaunchConfiguration("loiter_time"), value_type=float),
             "sim_mode": LaunchConfiguration("sim_mode"),
             "vehicle_status_topic": LaunchConfiguration("vehicle_status_topic"),
             "rc_require_arm_signal": LaunchConfiguration("rc_require_arm_signal"),
