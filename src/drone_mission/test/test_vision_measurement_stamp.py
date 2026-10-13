@@ -30,6 +30,7 @@ def _bare_fsm(mod, **stamps):
     fsm._cylinders_timestamp = 0.0
     fsm._markers_timestamp = 0.0
     fsm._landing_target_stamp = 0.0
+    fsm._landing_target_capture_stamp = 0.0
     for key, value in stamps.items():
         setattr(fsm, key, value)
     return fsm
@@ -50,7 +51,7 @@ def test_measurement_stamp_is_per_source():
         _fsm_module(),
         _cylinder_capture_stamp=11.0,
         _marker_capture_stamp=22.0,
-        _landing_target_stamp=33.0,
+        _landing_target_capture_stamp=33.0,
     )
 
     assert fsm.vision_measurement_stamp("cylinder") == 11.0
@@ -70,10 +71,13 @@ def test_capture_stamp_wins_over_arrival_stamp():
         _cylinders_timestamp=100.4,   # 到达晚 0.4s (推理耗时)
         _marker_capture_stamp=200.0,
         _markers_timestamp=200.3,
+        _landing_target_capture_stamp=300.0,
+        _landing_target_stamp=300.2,
     )
 
     assert fsm.vision_measurement_stamp("cylinder") == 100.0
     assert fsm.vision_measurement_stamp("marker") == 200.0
+    assert fsm.vision_measurement_stamp("landing") == 300.0
 
 
 def test_missing_header_falls_back_to_arrival_stamp():
@@ -94,13 +98,17 @@ def test_missing_header_falls_back_to_arrival_stamp():
     assert fsm.vision_measurement_stamp("marker") == 66.0
 
 
-def test_landing_source_has_no_capture_stamp_yet():
-    """降落源目前只有到达时刻 —— 这是已记录的缺口, 不是等价机制.
+def test_landing_source_falls_back_to_arrival_without_header():
+    """LandingTarget 的 header 为空 (旧发布端/未填时间戳) 时退回到达时刻.
 
-    一旦 LandingTarget.msg 加上 header, 本测试应当被改写为与
-    test_capture_stamp_wins_over_arrival_stamp 同形, 而不是悄悄删掉.
+    这是降级路径: 步长会重新带上推理耗时抖动, 但比"无测量"可用. 判据是
+    _capture_seconds 返回 0.0 —— 非有限或非正值一律视为"没有采集时刻".
     """
-    fsm = _bare_fsm(_fsm_module(), _landing_target_stamp=33.0)
+    fsm = _bare_fsm(
+        _fsm_module(),
+        _landing_target_capture_stamp=0.0,
+        _landing_target_stamp=33.0,
+    )
 
     assert fsm.vision_measurement_stamp("landing") == 33.0
 

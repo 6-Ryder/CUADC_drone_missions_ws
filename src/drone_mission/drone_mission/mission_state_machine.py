@@ -228,10 +228,10 @@ class MissionFSM(Node):
         #   *_timestamp      — 消息到达 FSM 的时刻, 用于"这个源还在不在"的
         #                      存活判断 (watchdog / 到达时刻龄门)
         # 统一出口是 vision_measurement_stamp(source), 它优先返回采集时刻.
-        # LandingTarget.msg 无 header 字段, 故降落目标目前只有到达时刻 ——
-        # 这是已记录的缺口 (见 docs/PRECISION_LANDING_AUTHORITY.md §5.1),
-        # 不是与另两源等价的机制.
         self._landing_target_stamp: float = 0.0
+        # 降落目标的采集时刻 (消息 header, 相机帧时刻). 与 _landing_target_stamp
+        # (到达 FSM 的时刻) 分开, 与另两源的 *_capture_stamp 同形.
+        self._landing_target_capture_stamp: float = 0.0
         # 最后一次"含真实检测"的降落目标消息时刻 (confidence > 0). 与
         # _landing_target_stamp (每条消息都刷新, 含 miss 帧) 分开, 因为二者
         # 回答不同问题: "这个源还在发消息吗" vs "还有可用的测量吗".
@@ -793,16 +793,16 @@ class MissionFSM(Node):
         source 取 "cylinder" | "marker" | "landing".
 
         降级路径 (与 PX4 sync_stamp 未收敛时退回接收时刻同构, 但必须能被
-        察觉): cylinder/marker 的 header 缺失时 _capture_seconds 返回 0.0,
-        此时退回到达时刻; landing 目前只有到达时刻 (LandingTarget.msg 尚无
-        header), 其采集时刻是已记录的缺口而非等价物.
+        察觉): 三个源的 header 缺失时 _capture_seconds 返回 0.0, 此时退回
+        到达时刻 —— 步长会重新带上推理耗时抖动, 是降级不是等价物.
         """
         if source == "cylinder":
             return self._cylinder_capture_stamp or self._cylinders_timestamp
         if source == "marker":
             return self._marker_capture_stamp or self._markers_timestamp
         if source == "landing":
-            return self._landing_target_stamp
+            return (self._landing_target_capture_stamp
+                    or self._landing_target_stamp)
         return 0.0
 
     @staticmethod
@@ -1024,6 +1024,9 @@ class MissionFSM(Node):
     def _landing_target_cb(self, msg):
         now = time.time()
         self._landing_target_stamp = now
+        capture_stamp = self._capture_seconds(msg)
+        if capture_stamp > 0.0:
+            self._landing_target_capture_stamp = capture_stamp
         # "有测量"的判据: 视觉节点对"本帧没看到 H 标识"发布的是 confidence
         # 恰为 0.0 的合成样本 (vision_pipeline._process_landing_v2 三个发布
         # 分支), 所以 >0 就是"这一帧真的检测到了", 与置信度门槛 (消费侧的

@@ -36,10 +36,22 @@ class _Watchdog:
         self.feeds.append(name)
 
 
+class _Stamp:
+    def __init__(self, seconds):
+        self.sec = int(seconds)
+        self.nanosec = int((seconds - int(seconds)) * 1e9)
+
+
+class _Header:
+    def __init__(self, seconds):
+        self.stamp = _Stamp(seconds)
+
+
 class _Msg:
     """LandingTarget 的最小替身."""
 
-    def __init__(self, confidence):
+    def __init__(self, confidence, capture_stamp=0.0):
+        self.header = _Header(capture_stamp)
         self.center_u = 320.0
         self.center_v = 240.0
         self.world_x = 1.0
@@ -52,6 +64,7 @@ def _bare_fsm(mod):
     fsm = object.__new__(mod.MissionFSM)
     fsm._landing_target = None
     fsm._landing_target_stamp = 0.0
+    fsm._landing_target_capture_stamp = 0.0
     fsm._landing_target_detection_stamp = 0.0
     fsm._watchdog = _Watchdog()
     return fsm
@@ -114,3 +127,31 @@ def test_callback_advances_detection_stamp_only_on_real_detection():
 
     fsm._landing_target_cb(_Msg(confidence=0.0))
     assert fsm._landing_target_detection_stamp == detected_at
+
+
+def test_callback_records_capture_stamp_from_header():
+    """采集时刻 (header.stamp) 与到达时刻分开记录.
+
+    控制用采集时刻 (真实步长), 存活判断用到达时刻 —— 二者不能合并, 否则
+    要么步长带上推理耗时抖动, 要么回到"帧流即存活"的误判.
+    """
+    fsm = _bare_fsm(_fsm_module())
+
+    fsm._landing_target_cb(_Msg(confidence=0.9, capture_stamp=123.5))
+
+    assert fsm._landing_target_capture_stamp == pytest.approx(123.5)
+    assert fsm._landing_target_stamp != pytest.approx(123.5)
+
+
+def test_callback_without_header_keeps_previous_capture_stamp():
+    """header 缺失 (空 stamp, 解析为 0.0) 不得把采集时刻抹成 0.
+
+    抹成 0 会让 vision_measurement_stamp("landing") 突然退回到达时刻,
+    相当于在控制中途悄悄换时间基准 —— 宁可保留上一帧的采集时刻.
+    """
+    fsm = _bare_fsm(_fsm_module())
+
+    fsm._landing_target_cb(_Msg(confidence=0.9, capture_stamp=123.5))
+    fsm._landing_target_cb(_Msg(confidence=0.9, capture_stamp=0.0))
+
+    assert fsm._landing_target_capture_stamp == pytest.approx(123.5)

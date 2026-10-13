@@ -1127,6 +1127,13 @@ class VisionPipelineNode(Node):
     def _process_landing_v2(self, image: np.ndarray, dets: List[Detection]):
         target = LandingTarget()
         target.confidence = 0.0
+        # 采集时刻随消息走, 与 _new_cylinder_array 同源同写法 (_frame_stamp
+        # 在 _image_cb 里取自图像 header.stamp). 即便本帧无检测也填 —— stamp
+        # 描述的是"这帧是什么时候拍的", 有没有测量由 confidence 表达.
+        frame_stamp = getattr(self, "_frame_stamp", None)
+        target.header.stamp = (frame_stamp if frame_stamp is not None
+                               else self.get_clock().now().to_msg())
+        target.header.frame_id = "world"
 
         if self._circle_tracking_active():
             track, source = self._select_landing_circle_track(image, dets)
