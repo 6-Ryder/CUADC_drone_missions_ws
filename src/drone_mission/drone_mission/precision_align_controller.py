@@ -170,7 +170,7 @@ class PrecisionAlignController:
 
         伺服 PID 必须按测量时刻而非 FSM tick 推进: 本控制器每个 tick 都被
         调用, 而复用的是同一份缓存目标, 按 tick 推进会把同一份误差重复积分
-        数倍 (真机视觉 3-5Hz vs 20Hz tick). 传 0.0 时 ServoPid 判定"无新测量",
+        数倍 (实测 ≈10.5Hz vs 20Hz tick). 传 0.0 时 ServoPid 判定"无新测量",
         积分/微分不推进 —— 失败方向是"停止积累", 不是"按错误步长继续".
 
         源名映射与 _select_target 的 source 取值一致:

@@ -292,7 +292,7 @@ def test_vehicle_motion_does_not_create_phantom_velocity():
     target = (6.0, 3.0)
 
     for i in range(60):
-        est.predict(dt=0.2)                       # 3-5Hz 的真实间隔量级
+        est.predict(dt=0.095)                     # 实测间隔量级 (≈10.5Hz)
         yaw = i * 0.15
         vehicle = (5.0 + 0.05 * i, 2.0 - 0.04 * i)
         _observe_target(est, target, vehicle, yaw)

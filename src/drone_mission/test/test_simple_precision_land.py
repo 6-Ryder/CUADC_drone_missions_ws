@@ -332,7 +332,7 @@ def test_servo_p_control_uses_test_mission_defaults():
 def test_servo_does_not_integrate_when_measurement_is_reused():
     """同一份测量在多个 tick 上复用时, 积分不得累加.
 
-    真机视觉 3-5Hz 而 FSM tick 20Hz: 若把 FSM 时钟当测量时刻传入, 同一份
+    真机视觉实测 ≈10.5Hz 而 FSM tick 20Hz: 若把 FSM 时钟当测量时刻传入, 同一份
     误差会在两帧之间被积分 4-7 次, 迅速顶到 integral_limit, 并在目标丢失时
     变成速度踢出. 契约是传测量时刻 —— stamp 不前进就不推进积分.
     """
@@ -414,7 +414,7 @@ def test_lost_target_transits_to_last_known_position_in_metres():
     state._phase = state.PHASE_SERVO
 
     # 估计成熟后才锁存 (默认 5 帧), 见 test_immature_estimate_does_not_latch.
-    # 每次推进测量时刻 —— 伺服 20Hz 而视觉 3-5Hz, 同一份测量不该被重复融合.
+    # 每次推进测量时刻 —— 伺服 20Hz 而视觉 ≈10.5Hz, 同一份测量不该被重复融合.
     for i in range(6):
         fsm.set_measurement_stamp(100.0 + i * 0.25)
         state._execute_servo(has_target=True)
@@ -658,8 +658,8 @@ def test_immature_estimate_does_not_latch_the_transit_target(state_cls):
 def test_observation_uses_capture_time_pose_not_processing_time(state_cls):
     """时间对齐: 观测必须用**拍摄那一刻**的载机位姿.
 
-    3-5Hz 下采集时刻比处理时刻早 0.2-0.33s: 平移误差 ≈ v·tau (0.25m/s 时约
-    7.5cm), 旋转误差 ≈ |偏移|·Δψ 且方向随航向变化 —— 后者是系统偏差, 卡方门
+    采集时刻比处理时刻早 τ (实测均值 95ms, 95% 199ms): 平移误差 ≈ v·tau
+    (0.25m/s 时约 2.4cm / 5cm), 旋转误差 ≈ |偏移|·Δψ 且方向随航向变化 —— 后者是系统偏差, 卡方门
     抓不到 (门只拒零均值离群).
 
     手法: 让"采集时刻位姿"与"处理时刻位姿"相差 3m, 对心目标 (偏移 0) 锁存下来

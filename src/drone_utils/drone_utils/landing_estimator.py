@@ -262,7 +262,8 @@ class LandingTargetEstimator:
         并把它列为已知缺口; ArduPilot 的对策是要求连续 2s 数据才置
         target_acquired (`AC_PrecLand.cpp:557-572`).
 
-        本项目取**帧数**而非 2s: 一方面 3-5Hz 下 2s 约 6-10 帧, 与下面的默认值同阶;
+        本项目取**帧数**而非 2s: 实测约 10.5Hz 下 2s 约 21 帧, 而默认只取 5 帧 —— 取帧数
+        是**有意的宽松**(播种用的观测已经过置信度与跳变门), 不是等价换算;
         另一方面本项目播种用的观测**已经过置信度与跳变门**
         (state_precision_land*._get_stable_landing_target), 不是 PX4 那种裸帧,
         风险本就低一档, 故不必等满 2s.

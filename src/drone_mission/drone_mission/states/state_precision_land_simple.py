@@ -310,7 +310,7 @@ class SimplePrecisionLandState:
 
             # PID 输出: 符号标定与合速度(向量模长)限幅均由 PID 承担.
             # 传测量时刻而非 FSM 时钟: 同一份缓存测量会在多个 tick 上被复用,
-            # 按 tick 推进会把同一份误差重复积分数倍 (3-5Hz 视觉 vs 20Hz tick).
+            # 按 tick 推进会把同一份误差重复积分数倍 (实测 ≈10.5Hz 视觉 vs 20Hz tick).
             forward, right = self._servo_pid.update(
                 float(dv), float(du),
                 self._fsm.vision_measurement_stamp("landing"))
@@ -497,7 +497,7 @@ class SimplePrecisionLandState:
 
         ⚠️ 单位: 传入的 du/dv 是**像素**; 先按"镜头到平面"的距离与焦距折成米.
         """
-        # ⚠️ 只在**新测量**上融合: 伺服 tick 20Hz 而视觉 3-5Hz, 同一份测量会被
+        # ⚠️ 只在**新测量**上融合: 伺服 tick 20Hz 而视觉实测 ≈10.5Hz, 同一份测量会被
         # 复用 4-7 个 tick. 每个 tick 都喂一次等于把同一份测量重复计入 ——
         # 协方差被虚假地收缩、门随之过紧 (表现为"看得见却越来越不接受").
         # 权威同此: PX4 估计器在没有新 irlock_report 时 update() 直接返回.
@@ -515,7 +515,7 @@ class SimplePrecisionLandState:
 
         # ── 时间对齐 ──
         # 观测必须用**拍摄那一刻**的载机位置/航向/高度, 不是处理这一刻的:
-        # 3-5Hz 下两者相差 0.2-0.33s, 平移误差 ≈ v·tau (0.25m/s 时约 7.5cm),
+        # 两者相差实测均值 95ms (95% 199ms), 平移误差 ≈ v·tau (0.25m/s → 2.4cm/5cm),
         # 旋转误差 ≈ |偏移|·Δψ 且方向随航向变化 (系统偏差, 卡方门抓不到).
         # 取不到时**退回处理时刻** —— 时间对齐是精度改进, 不是可用性前提.
         pose = self._fsm.pose_at(stamp)

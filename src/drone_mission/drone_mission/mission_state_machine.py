@@ -232,8 +232,8 @@ class MissionFSM(Node):
         #   *_timestamp      — 消息到达 FSM 的时刻, 用于"这个源还在不在"的
         #                      存活判断 (watchdog / 到达时刻龄门)
         # 统一出口是 vision_measurement_stamp(source), 它优先返回采集时刻.
-        # 载机位姿历史: 视觉测量的采集时刻比到达时刻早 0.2-0.33s (3-5Hz),
-        # 用处理时刻的位姿解析旧帧会引入 v·tau (≈7.5cm @0.25m/s) 的平移误差
+        # 载机位姿历史: 采集时刻比到达时刻早 τ (实测均值 95ms, 95% 199ms),
+        # 用处理时刻的位姿解析旧帧会引入 v·tau (实测 2.4cm @0.25m/s, 均值 95ms) 的平移误差
         # 与 |偏移|·Δψ 的旋转误差 (后者是系统偏差, 卡方门抓不到).
         self._pose_history: Optional[PoseHistory] = None
         self._landing_target_stamp: float = 0.0
@@ -464,7 +464,7 @@ class MissionFSM(Node):
         # state_precision_land*._frame_accepted_by_estimator 的理由).
         self.declare_parameter("landing_servo_estimator_gate_enable", False)
         # 估计成熟前不准它驱动"继续接近"的落点: 播种帧不过卡方门.
-        # 5 帧 ≈ 1.0-1.7s (3-5Hz), 短于 ArduPilot 的 2s 冷启动门 ——
+        # 5 帧 ≈ 0.5s (实测 ≈10.5Hz), 短于 ArduPilot 的 2s 冷启动门 ——
         # 本项目播种用的观测已经过置信度与跳变门, 不是裸帧.
         self.declare_parameter("landing_estimator_min_frames", 5)
         # 距最后一次**被接受**观测的超时 → 显式重置 (PX4 的 2s 硬复位).
@@ -812,13 +812,13 @@ class MissionFSM(Node):
         这里的"采集时刻"取消息 header 的时刻 (相机帧时刻), 而不是消息到达
         FSM 的时刻 —— 与权威约定一致: MAVLink LANDING_TARGET.time_usec 与
         PX4 的 FiducialMarkerPosReport.timestamp_sample 都是"这次测量是什么
-        时候拍的". 两者在 3-5Hz 下相差约一个推理周期, 但按到达时刻求差会把
+        时候拍的". 两者相差一个推理周期 (实测均值 95ms), 按到达时刻求差会把
         每帧的推理耗时抖动带进积分/微分步长.
 
         消费方用它做三件事:
           - 新鲜度门控: 过期测量不得继续驱动控制 (stale -> 视为无目标).
           - 真实步长: 积分/微分按相邻两次测量的时间差推进, 而不是按 FSM
-            tick 周期. 真机视觉 3-5Hz 而 tick 20Hz, 按 tick 推进会把同一份
+            tick 周期. 实测 ≈10.5Hz 而 tick 20Hz, 按 tick 推进会把同一份
             误差重复累加数倍, 微分也会被放大.
           - 按帧去重: 同一份测量在多个 tick 上被复用时传入相同 stamp,
             ServoPid 只在 stamp 前进时推进积分/微分.
