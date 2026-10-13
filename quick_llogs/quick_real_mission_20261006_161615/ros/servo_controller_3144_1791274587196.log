@@ -1,0 +1,7 @@
+[INFO] [1791274587.228474032] [servo_controller]: 舵机: PX4 VehicleCommand → MAIN5 模式 (Actuator Set 1, pwm=[1150..2150] init=1150μs)
+[INFO] [1791274587.233170352] [servo_controller]: 投放序列 (1 次):
+[INFO] [1791274587.233259216] [servo_controller]:   [0] 1150 μs ← 初始/闭合
+[INFO] [1791274587.233288944] [servo_controller]:   [1] 2150 μs
+[INFO] [1791274587.233301520] [servo_controller]: 舵机投放服务已就绪
+[WARN] [1791274588.233258608] [servo_controller]: 等待任务租约 (autonomy_lease), 租约生效后才初始化 MAIN5
+[INFO] [1791274592.241195024] [servo_controller]: MAIN5 已确认处于初始闭合位置

@@ -1,0 +1,8 @@
+1791355983.3821707 [INFO] [launch]: All log files can be found below /home/nvidia/CUADC_drone_missions_ws/log/quick_real_mission_20261007_145252_379459864_2242/ros/2026-10-07-14-53-03-379987-nvidia-desktop-3569
+1791355983.3825123 [INFO] [launch]: Default logging verbosity is set to INFO
+1791355983.4900255 [INFO] [launch.user]: === 无人机实飞快速投放启动 (Jetson) ===
+1791355983.5031755 [INFO] [camera_node-1]: process started with pid [3574]
+1791355983.5036860 [INFO] [px4_bridge-2]: process started with pid [3576]
+1791355984.5207951 [INFO] [vision_pipeline-3]: process started with pid [3836]
+1791355984.5214887 [INFO] [servo_controller-4]: process started with pid [3838]
+1791355986.5151548 [INFO] [mission_fsm-5]: process started with pid [3896]

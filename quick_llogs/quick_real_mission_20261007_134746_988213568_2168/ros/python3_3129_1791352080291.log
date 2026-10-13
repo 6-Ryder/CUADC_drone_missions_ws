@@ -1,0 +1,32 @@
+[INFO] [1791352080.454223360] [vision_pipeline]: 统一视觉管线 v2 已创建 (姿态补偿 + 高度自适应)
+[INFO] [1791352081.956388736] [vision_pipeline]: 圆筒 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/cylinder_model_new.engine
+[INFO] [1791352081.957157536] [vision_pipeline]: 蓝色标识 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/drop_marker_new_new.engine
+[INFO] [1791352081.957802112] [vision_pipeline]: 统一视觉管线 v2 初始化完成 (姿态补偿已启用)
+[INFO] [1791352082.043028160] [vision_pipeline]: DROP_MARKER: refine 门槛切换 -> 放宽 (下降段) blue_ratio=0.3 circularity=0.25 alt=0.4m
+[INFO] [1791352097.325719424] [vision_pipeline]: FPS: 13 | 耗时: 74ms | 高度: 0.4m | 模式: none
+[INFO] [1791352112.612344512] [vision_pipeline]: FPS: 19 | 耗时: 52ms | 高度: 0.1m | 模式: none
+[INFO] [1791352127.951619488] [vision_pipeline]: FPS: 13 | 耗时: 77ms | 高度: 0.1m | 模式: none
+[INFO] [1791352143.272434464] [vision_pipeline]: FPS: 14 | 耗时: 72ms | 高度: 0.1m | 模式: none
+[INFO] [1791352158.646977600] [vision_pipeline]: FPS: 20 | 耗时: 50ms | 高度: 0.1m | 模式: none
+[INFO] [1791352173.827689920] [vision_pipeline]: FPS: 19 | 耗时: 53ms | 高度: 0.1m | 模式: none
+[INFO] [1791352189.060910240] [vision_pipeline]: FPS: 20 | 耗时: 50ms | 高度: 0.1m | 模式: none
+[INFO] [1791352196.640422144] [vision_pipeline]: DROP_MARKER: refine 门槛切换 -> 标定 blue_ratio=0.4 circularity=0.35 alt=4.5m
+[INFO] [1791352204.445150464] [vision_pipeline]: FPS: 14 | 耗时: 73ms | 高度: 5.6m | 模式: none
+[INFO] [1791352210.496275584] [vision_pipeline]: DROP_MARKER: n=2 source=yolo+blue conf=0.97
+[INFO] [1791352210.512487616] [vision_pipeline]: 伺服模式: none → none (cyl_id=-1)
+[INFO] [1791352212.319109888] [vision_pipeline]: DROP_MARKER: refine 门槛切换 -> 放宽 (下降段) blue_ratio=0.3 circularity=0.25 alt=4.5m
+[INFO] [1791352213.698121536] [vision_pipeline]: DROP_MARKER: refine 门槛切换 -> 标定 blue_ratio=0.4 circularity=0.35 alt=4.5m
+[INFO] [1791352214.001014176] [vision_pipeline]: DROP_MARKER: refine 门槛切换 -> 放宽 (下降段) blue_ratio=0.3 circularity=0.25 alt=4.5m
+[INFO] [1791352215.058453056] [vision_pipeline]: DROP_MARKER: n=3 source=yolo+blue conf=0.97
+[INFO] [1791352219.785387840] [vision_pipeline]: FPS: 15 | 耗时: 66ms | 高度: 4.2m | 模式: none
+[INFO] [1791352229.075131776] [vision_pipeline]: DROP_MARKER: n=3 source=yolo+blue conf=0.97
+[INFO] [1791352235.168187008] [vision_pipeline]: FPS: 11 | 耗时: 92ms | 高度: 4.1m | 模式: none
+[INFO] [1791352238.337235072] [vision_pipeline]: DROP_MARKER: n=1 source=yolo+blue conf=0.93
+[INFO] [1791352250.644112224] [vision_pipeline]: FPS: 15 | 耗时: 67ms | 高度: 1.1m | 模式: none
+[INFO] [1791352266.128530848] [vision_pipeline]: FPS: 14 | 耗时: 69ms | 高度: 1.1m | 模式: none
+[INFO] [1791352281.738201024] [vision_pipeline]: FPS: 18 | 耗时: 55ms | 高度: 1.1m | 模式: none
+[INFO] [1791352299.230166752] [vision_pipeline]: FPS: 5 | 耗时: 219ms | 高度: 1.1m | 模式: none
+[INFO] [1791352315.351631904] [vision_pipeline]: FPS: 12 | 耗时: 86ms | 高度: 1.1m | 模式: none
+[INFO] [1791352332.155656864] [vision_pipeline]: FPS: 14 | 耗时: 73ms | 高度: 1.1m | 模式: none
+[INFO] [1791352348.535117184] [vision_pipeline]: FPS: 12 | 耗时: 86ms | 高度: 1.1m | 模式: none
+[INFO] [1791352363.967571104] [vision_pipeline]: FPS: 15 | 耗时: 68ms | 高度: 1.1m | 模式: none

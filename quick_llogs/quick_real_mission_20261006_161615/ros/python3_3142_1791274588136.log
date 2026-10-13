@@ -1,0 +1,17 @@
+[INFO] [1791274588.318101936] [vision_pipeline]: 统一视觉管线 v2 已创建 (姿态补偿 + 高度自适应)
+[INFO] [1791274589.866929424] [vision_pipeline]: 圆筒 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/cylinder_model_new.engine
+[INFO] [1791274589.867680400] [vision_pipeline]: 蓝色标识 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/drop_marker_new_new.engine
+[INFO] [1791274589.868361488] [vision_pipeline]: 统一视觉管线 v2 初始化完成 (姿态补偿已启用)
+[INFO] [1791274589.955673488] [vision_pipeline]: DROP_MARKER: refine 门槛切换 -> 标定 blue_ratio=0.4 circularity=0.35 alt=-7.8m
+[INFO] [1791274605.281749104] [vision_pipeline]: FPS: 13 | 耗时: 78ms | 高度: -7.8m | 模式: none
+[INFO] [1791274620.789783280] [vision_pipeline]: FPS: 11 | 耗时: 90ms | 高度: -6.3m | 模式: none
+[INFO] [1791274636.668673104] [vision_pipeline]: DROP_MARKER: n=2 source=yolo+blue conf=0.96
+[INFO] [1791274636.687441936] [vision_pipeline]: FPS: 11 | 耗时: 90ms | 高度: -2.7m | 模式: none
+[INFO] [1791274636.690552368] [vision_pipeline]: 伺服模式: none → none (cyl_id=-1)
+[INFO] [1791274641.377599792] [vision_pipeline]: DROP_MARKER: n=3 source=yolo+blue conf=0.96
+[INFO] [1791274646.031387536] [vision_pipeline]: DROP_MARKER: n=3 source=yolo+blue conf=0.96
+[INFO] [1791274650.870451216] [vision_pipeline]: DROP_MARKER: n=2 source=yolo+blue conf=0.96
+[INFO] [1791274652.427607664] [vision_pipeline]: FPS: 12 | 耗时: 86ms | 高度: -2.2m | 模式: none
+[INFO] [1791274655.453007344] [vision_pipeline]: DROP_MARKER: n=2 source=yolo+blue conf=0.96
+[INFO] [1791274660.036741360] [vision_pipeline]: DROP_MARKER: n=1 source=yolo+blue conf=0.96
+[INFO] [1791274667.811705456] [vision_pipeline]: FPS: 13 | 耗时: 79ms | 高度: -4.5m | 模式: none

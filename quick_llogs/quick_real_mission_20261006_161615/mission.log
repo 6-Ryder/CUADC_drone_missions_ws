@@ -1,0 +1,131 @@
+[INFO] [launch]: All log files can be found below /home/nvidia/CUADC_drone_missions_ws/log/quick_real_mission_20261006_161615/ros/2026-10-06-16-16-26-027274-nvidia-desktop-3114
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: === 无人机实飞快速投放启动 (Jetson) ===
+[INFO] [camera_node-1]: process started with pid [3118]
+[INFO] [px4_bridge-2]: process started with pid [3120]
+[INFO] [vision_pipeline-3]: process started with pid [3142]
+[INFO] [servo_controller-4]: process started with pid [3144]
+[servo_controller-4] [INFO] [1791274587.228474032] [servo_controller]: 舵机: PX4 VehicleCommand → MAIN5 模式 (Actuator Set 1, pwm=[1150..2150] init=1150μs)
+[servo_controller-4] [INFO] [1791274587.233170352] [servo_controller]: 投放序列 (1 次):
+[servo_controller-4] [INFO] [1791274587.233259216] [servo_controller]:   [0] 1150 μs ← 初始/闭合
+[servo_controller-4] [INFO] [1791274587.233288944] [servo_controller]:   [1] 2150 μs
+[servo_controller-4] [INFO] [1791274587.233301520] [servo_controller]: 舵机投放服务已就绪
+[px4_bridge-2] [0m[INFO] [1791274587.271288688] [px4_bridge]: PX4 Bridge 已启动 (等待 DDS 连接...)[0m
+[camera_node-1] [0m[INFO] [1791274587.628239408] [camera_driver]: 实飞模式: 初始化 V4L2 相机...[0m
+[servo_controller-4] [WARN] [1791274588.233258608] [servo_controller]: 等待任务租约 (autonomy_lease), 租约生效后才初始化 MAIN5
+[vision_pipeline-3] [INFO] [1791274588.318101936] [vision_pipeline]: 统一视觉管线 v2 已创建 (姿态补偿 + 高度自适应)
+[camera_node-1] [0m[INFO] [1791274589.114710672] [camera_driver]: V4L2 相机已打开: /dev/v4l/by-id/usb-D-VITEC_U3344W-video-index0 (640x480 @ 30.0Hz)[0m
+[camera_node-1] [0m[INFO] [1791274589.117310064] [camera_driver]: 相机驱动已启动 (sim_mode=False)[0m
+[INFO] [mission_fsm-5]: process started with pid [3200]
+[vision_pipeline-3] [10/06/2026-16:16:29] [TRT] [W] Using an engine plan file across different models of devices is not recommended and is likely to affect performance or even cause errors.
+[vision_pipeline-3] [INFO] [1791274589.866929424] [vision_pipeline]: 圆筒 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/cylinder_model_new.engine
+[vision_pipeline-3] [INFO] [1791274589.867680400] [vision_pipeline]: 蓝色标识 YOLO 已加载: /home/nvidia/CUADC_drone_missions_ws/build/drone_vision/drone_vision/models/drop_marker_new_new.engine
+[vision_pipeline-3] [INFO] [1791274589.868361488] [vision_pipeline]: 统一视觉管线 v2 初始化完成 (姿态补偿已启用)
+[vision_pipeline-3] [INFO] [1791274589.955673488] [vision_pipeline]: DROP_MARKER: refine 门槛切换 -> 标定 blue_ratio=0.4 circularity=0.35 alt=-7.8m
+[mission_fsm-5] [0m[INFO] [1791274590.219907888] [mission_state_machine]: ============================================================[0m
+[mission_fsm-5] [0m[INFO] [1791274590.220726672] [mission_state_machine]:   无人机自主任务状态机 v2.0 已启动[0m
+[mission_fsm-5] [0m[INFO] [1791274590.221374704] [mission_state_machine]: ============================================================[0m
+[mission_fsm-5] [0m[INFO] [1791274591.149174384] [mission_state_machine]: MISSION_LAYOUT: heading=124.0deg home=(0.00, 0.00, 0.00) drop_ned=(-18.17, 26.94) recon_ned=(-32.57, 47.39)[0m
+[mission_fsm-5] [0m[INFO] [1791274591.161670256] [mission_state_machine]: 已订阅视觉检测话题[0m
+[mission_fsm-5] [0m[INFO] [1791274591.166011920] [mission_state_machine]: 已订阅 /drone/pose (standalone 遥测)[0m
+[mission_fsm-5] [0m[INFO] [1791274591.191288240] [mission_state_machine]: Mission FSM 初始化完成, 开始任务[0m
+[mission_fsm-5] [0m[INFO] [1791274591.193845456] [mission_state_machine]: [EVENT #2] state_transition: {'from': 'INIT', 'to': 'ARM', 'reason': '初始化完成'}[0m
+[mission_fsm-5] [0m[INFO] [1791274591.194663408] [mission_state_machine]: [EVENT #3] state_transition: {'from': 'INIT', 'to': 'INIT', 'reason': '开始初始化'}[0m
+[mission_fsm-5] [0m[INFO] [1791274591.195729904] [mission_state_machine]: INIT: 等待系统就绪...[0m
+[mission_fsm-5] [0m[INFO] [1791274591.196373296] [mission_state_machine]: [FSM] INIT → INIT[0m
+[servo_controller-4] [INFO] [1791274592.241195024] [servo_controller]: MAIN5 已确认处于初始闭合位置
+[mission_fsm-5] [0m[INFO] [1791274596.201194256] [mission_state_machine]: INIT: waiting=rc, odom=101, telemetry=OK, vision=OK, vision_ready=OK, servo=OK, battery=OK, land=OK, rc=[armed=N preflight=Y], elapsed=5s[0m
+[mission_fsm-5] [0m[INFO] [1791274601.202440880] [mission_state_machine]: INIT: waiting=rc, odom=201, telemetry=OK, vision=OK, vision_ready=OK, servo=OK, battery=OK, land=OK, rc=[armed=N preflight=Y], elapsed=10s[0m
+[vision_pipeline-3] [INFO] [1791274605.281749104] [vision_pipeline]: FPS: 13 | 耗时: 78ms | 高度: -7.8m | 模式: none
+[mission_fsm-5] [0m[INFO] [1791274606.251100944] [mission_state_machine]: INIT: waiting=rc, odom=302, telemetry=OK, vision=OK, vision_ready=OK, servo=OK, battery=OK, land=OK, rc=[armed=N preflight=Y], elapsed=15s[0m
+[mission_fsm-5] [0m[INFO] [1791274611.251488752] [mission_state_machine]: INIT: waiting=rc, odom=402, telemetry=OK, vision=OK, vision_ready=OK, servo=OK, battery=OK, land=OK, rc=[armed=N preflight=Y], elapsed=20s[0m
+[mission_fsm-5] [0m[INFO] [1791274614.151113136] [mission_state_machine]: INIT: 系统就绪 (含遥控器确认), 进入 ARM[0m
+[mission_fsm-5] [0m[INFO] [1791274614.152195504] [mission_state_machine]: [EVENT #4] state_transition: {'from': 'INIT', 'to': 'ARM', 'reason': '初始化完成'}[0m
+[mission_fsm-5] [0m[INFO] [1791274614.152920400] [mission_state_machine]: ARM: 准备起飞[0m
+[mission_fsm-5] [0m[INFO] [1791274614.153687696] [mission_state_machine]: [EVENT #5] state_transition: {'from': 'ARM', 'to': 'TAKEOFF', 'reason': '开始起飞'}[0m
+[mission_fsm-5] [0m[INFO] [1791274614.155799024] [mission_state_machine]: TAKEOFF: 目标高度 5.0m[0m
+[mission_fsm-5] [0m[INFO] [1791274614.156507984] [mission_state_machine]: [FSM] ARM → TAKEOFF[0m
+[mission_fsm-5] [0m[INFO] [1791274614.204546928] [mission_state_machine]: TAKEOFF: RC 已解锁 (遥控器 Arm Switch), 切换 Offboard[0m
+[mission_fsm-5] [0m[INFO] [1791274615.202659728] [mission_state_machine]: [StandaloneBridge] 请求 Offboard 模式[0m
+[mission_fsm-5] [0m[INFO] [1791274615.252057040] [mission_state_machine]: TAKEOFF: PX4 已确认 Offboard, 开始爬升[0m
+[mission_fsm-5] [0m[INFO] [1791274615.253656944] [mission_state_machine]: [PX4] takeoff → NED(0.0, 0.0, 2.817544460296631)[0m
+[mission_fsm-5] [0m[INFO] [1791274619.201297488] [mission_state_machine]: TAKEOFF: alt_error=4.56m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.252287120] [mission_state_machine]: TAKEOFF: alt_error=4.53m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.302112560] [mission_state_machine]: TAKEOFF: alt_error=4.50m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.352565520] [mission_state_machine]: TAKEOFF: alt_error=4.47m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.403054576] [mission_state_machine]: TAKEOFF: alt_error=4.44m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.453161008] [mission_state_machine]: TAKEOFF: alt_error=4.41m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.501878864] [mission_state_machine]: TAKEOFF: alt_error=4.39m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.552168720] [mission_state_machine]: TAKEOFF: alt_error=4.36m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.602447440] [mission_state_machine]: TAKEOFF: alt_error=4.33m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.652228464] [mission_state_machine]: TAKEOFF: alt_error=4.29m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.702550288] [mission_state_machine]: TAKEOFF: alt_error=4.26m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.752113872] [mission_state_machine]: TAKEOFF: alt_error=4.23m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.802455088] [mission_state_machine]: TAKEOFF: alt_error=4.20m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.852254544] [mission_state_machine]: TAKEOFF: alt_error=4.16m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.902589712] [mission_state_machine]: TAKEOFF: alt_error=4.13m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274619.952574352] [mission_state_machine]: TAKEOFF: alt_error=4.10m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274620.002875984] [mission_state_machine]: TAKEOFF: alt_error=4.06m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274620.051672272] [mission_state_machine]: TAKEOFF: alt_error=4.02m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274620.102678000] [mission_state_machine]: TAKEOFF: alt_error=3.99m stable=0 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274620.151953328] [mission_state_machine]: TAKEOFF: alt_error=3.95m stable=0 armed=True[0m
+[vision_pipeline-3] [INFO] [1791274620.789783280] [vision_pipeline]: FPS: 11 | 耗时: 90ms | 高度: -6.3m | 模式: none
+[mission_fsm-5] [0m[INFO] [1791274624.202380400] [mission_state_machine]: TAKEOFF: alt_error=0.08m stable=10 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.251846768] [mission_state_machine]: TAKEOFF: alt_error=0.07m stable=11 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.301590480] [mission_state_machine]: TAKEOFF: alt_error=0.05m stable=12 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.352162512] [mission_state_machine]: TAKEOFF: alt_error=0.04m stable=13 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.402201360] [mission_state_machine]: TAKEOFF: alt_error=0.03m stable=14 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.451595184] [mission_state_machine]: TAKEOFF: alt_error=0.02m stable=15 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.501167184] [mission_state_machine]: TAKEOFF: alt_error=0.01m stable=16 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.552691184] [mission_state_machine]: TAKEOFF: alt_error=0.01m stable=17 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.602472976] [mission_state_machine]: TAKEOFF: alt_error=0.00m stable=18 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.652837584] [mission_state_machine]: TAKEOFF: alt_error=0.00m stable=19 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.702697616] [mission_state_machine]: TAKEOFF: alt_error=0.00m stable=20 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.752032304] [mission_state_machine]: TAKEOFF: alt_error=0.01m stable=21 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.802646736] [mission_state_machine]: TAKEOFF: alt_error=0.01m stable=22 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.852511216] [mission_state_machine]: TAKEOFF: alt_error=0.01m stable=23 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.901853424] [mission_state_machine]: TAKEOFF: alt_error=0.01m stable=24 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274624.952160400] [mission_state_machine]: TAKEOFF: alt_error=0.00m stable=25 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274625.004232720] [mission_state_machine]: TAKEOFF: alt_error=0.00m stable=26 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274625.052605200] [mission_state_machine]: TAKEOFF: alt_error=0.00m stable=27 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274625.102186608] [mission_state_machine]: TAKEOFF: alt_error=0.00m stable=28 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274625.152197744] [mission_state_machine]: TAKEOFF: alt_error=0.01m stable=29 armed=True[0m
+[mission_fsm-5] [0m[INFO] [1791274625.701797488] [mission_state_machine]: TAKEOFF: 到达巡航高度 5.0m[0m
+[mission_fsm-5] [0m[INFO] [1791274625.703596240] [mission_state_machine]: [EVENT #6] state_transition: {'from': 'TAKEOFF', 'to': 'TRANSIT_TO_DROP_ZONE', 'reason': '起飞完成'}[0m
+[mission_fsm-5] [0m[INFO] [1791274625.706220144] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: 飞向 World(26.9, -18.2, 5.0) → CYLINDER_SEARCH[0m
+[mission_fsm-5] [0m[INFO] [1791274625.707700240] [mission_state_machine]: [EVENT #7] state_transition: {'from': 'TRANSIT_TO_DROP_ZONE', 'to': 'TRANSIT_TO_DROP_ZONE', 'reason': '飞向 (26.9,-18.2)'}[0m
+[mission_fsm-5] [0m[INFO] [1791274625.709005264] [mission_state_machine]: [FSM] TAKEOFF → TRANSIT_TO_DROP_ZONE[0m
+[mission_fsm-5] [0m[INFO] [1791274630.751115248] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=18.31m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274630.801283440] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=18.13m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274630.851142992] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=17.96m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274630.901172624] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=17.78m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274635.751694224] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=3.31m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274635.802133744] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=3.13m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274635.851712464] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=2.96m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274635.901535664] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=2.79m tol=0.5m[0m
+[mission_fsm-5] [0m[INFO] [1791274636.652237840] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: 到达目标区域 → CYLINDER_SEARCH[0m
+[mission_fsm-5] [0m[INFO] [1791274636.654380720] [mission_state_machine]: [EVENT #8] state_transition: {'from': 'TRANSIT_TO_DROP_ZONE', 'to': 'CYLINDER_SEARCH', 'reason': '过渡完成'}[0m
+[mission_fsm-5] [0m[INFO] [1791274636.656121072] [mission_state_machine]: [EVENT #9] state_transition: {'from': 'TRANSIT_TO_DROP_ZONE', 'to': 'CYL_SEARCH', 'reason': '开始搜索圆筒'}[0m
+[mission_fsm-5] [0m[INFO] [1791274636.658022384] [mission_state_machine]: CYL_SEARCH: 投放区中心 NED(-18.2, 26.9, 2.2)[0m
+[mission_fsm-5] [0m[INFO] [1791274636.658895344] [mission_state_machine]: [FSM] TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH[0m
+[vision_pipeline-3] [INFO] [1791274636.668673104] [vision_pipeline]: DROP_MARKER: n=2 source=yolo+blue conf=0.96
+[vision_pipeline-3] [INFO] [1791274636.687441936] [vision_pipeline]: FPS: 11 | 耗时: 90ms | 高度: -2.7m | 模式: none
+[vision_pipeline-3] [INFO] [1791274636.690552368] [vision_pipeline]: 伺服模式: none → none (cyl_id=-1)
+[vision_pipeline-3] [INFO] [1791274641.377599792] [vision_pipeline]: DROP_MARKER: n=3 source=yolo+blue conf=0.96
+[vision_pipeline-3] [INFO] [1791274646.031387536] [vision_pipeline]: DROP_MARKER: n=3 source=yolo+blue conf=0.96
+[mission_fsm-5] [0m[INFO] [1791274646.702300816] [mission_state_machine]: CYL_SEARCH: 启动慢速扫描[0m
+[vision_pipeline-3] [INFO] [1791274650.870451216] [vision_pipeline]: DROP_MARKER: n=2 source=yolo+blue conf=0.96
+[vision_pipeline-3] [INFO] [1791274652.427607664] [vision_pipeline]: FPS: 12 | 耗时: 86ms | 高度: -2.2m | 模式: none
+[vision_pipeline-3] [INFO] [1791274655.453007344] [vision_pipeline]: DROP_MARKER: n=2 source=yolo+blue conf=0.96
+[mission_fsm-5] [31m[ERROR] [1791274657.251591376] [mission_state_machine]: 任务等待人工接管: PX4 left Offboard[0m
+[mission_fsm-5] [0m[INFO] [1791274657.253399408] [mission_state_machine]: [EVENT #10] state_transition: {'from': 'CYL_SEARCH', 'to': 'SELECT_TARGET', 'reason': '搜索完成, 累计 3 个投放候选'}[0m
+[mission_fsm-5] [0m[INFO] [1791274657.255252944] [mission_state_machine]: [FSM] CYLINDER_SEARCH → HOLD_FOR_TAKEOVER[0m
+[mission_fsm-5] [0m[INFO] [1791274657.301737744] [mission_state_machine]: ============================================================[0m
+[mission_fsm-5] [0m[INFO] [1791274657.302784336] [mission_state_machine]:   任务失败[0m
+[mission_fsm-5] [0m[INFO] [1791274657.303488144] [mission_state_machine]:   投放: 0/0[0m
+[mission_fsm-5] [0m[INFO] [1791274657.304184400] [mission_state_machine]:   侦察覆盖: 0.0%[0m
+[mission_fsm-5] [0m[INFO] [1791274657.304857008] [mission_state_machine]: ============================================================[0m
+[mission_fsm-5] [0m[INFO] [1791274657.306266960] [mission_state_machine]: [EVENT #11] mission_end: {'success': False, 'layout_heading_deg': 124.0, 'strategy': 'quick', 'drops_completed': 0, 'drops_total': 0, 'coverage_ratio': 0.0, 'final_state': 'HOLD_FOR_TAKEOVER', 'mission_id': 2, 'total_duration_s': 67.15770721435547, 'event_count': 10, 'timestamp_iso': '2026-10-06T16:17:37.304940'}[0m
+[mission_fsm-5] [0m[INFO] [1791274657.307159056] [mission_state_machine]: [FSM] HOLD_FOR_TAKEOVER → COMPLETE[0m
+[vision_pipeline-3] [INFO] [1791274660.036741360] [vision_pipeline]: DROP_MARKER: n=1 source=yolo+blue conf=0.96
+[vision_pipeline-3] [INFO] [1791274667.811705456] [vision_pipeline]: FPS: 13 | 耗时: 79ms | 高度: -4.5m | 模式: none

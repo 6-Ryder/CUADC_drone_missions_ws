@@ -1,0 +1,70 @@
+[INFO] [1791278583.658152384] [mission_state_machine]: ============================================================
+[INFO] [1791278583.658916160] [mission_state_machine]:   无人机自主任务状态机 v2.0 已启动
+[INFO] [1791278583.659540000] [mission_state_machine]: ============================================================
+[INFO] [1791278584.589054752] [mission_state_machine]: MISSION_LAYOUT: heading=124.0deg home=(0.00, 0.00, 0.00) drop_ned=(-18.17, 26.94) recon_ned=(-32.57, 47.39)
+[INFO] [1791278584.599264832] [mission_state_machine]: 已订阅视觉检测话题
+[INFO] [1791278584.603141760] [mission_state_machine]: 已订阅 /drone/pose (standalone 遥测)
+[INFO] [1791278584.625739360] [mission_state_machine]: Mission FSM 初始化完成, 开始任务
+[INFO] [1791278584.628162560] [mission_state_machine]: [EVENT #2] state_transition: {'from': 'INIT', 'to': 'ARM', 'reason': '初始化完成'}
+[INFO] [1791278584.628929920] [mission_state_machine]: [EVENT #3] state_transition: {'from': 'INIT', 'to': 'INIT', 'reason': '开始初始化'}
+[INFO] [1791278584.629910880] [mission_state_machine]: INIT: 等待系统就绪...
+[INFO] [1791278584.630525216] [mission_state_machine]: [FSM] INIT → INIT
+[INFO] [1791278586.390865184] [mission_state_machine]: INIT: 系统就绪 (含遥控器确认), 进入 ARM
+[INFO] [1791278586.391948448] [mission_state_machine]: [EVENT #4] state_transition: {'from': 'INIT', 'to': 'ARM', 'reason': '初始化完成'}
+[INFO] [1791278586.392613056] [mission_state_machine]: ARM: 准备起飞
+[INFO] [1791278586.393407616] [mission_state_machine]: [EVENT #5] state_transition: {'from': 'ARM', 'to': 'TAKEOFF', 'reason': '开始起飞'}
+[INFO] [1791278586.394742304] [mission_state_machine]: TAKEOFF: 目标高度 5.0m
+[INFO] [1791278586.395540192] [mission_state_machine]: [FSM] ARM → TAKEOFF
+[INFO] [1791278586.440807648] [mission_state_machine]: TAKEOFF: RC 已解锁 (遥控器 Arm Switch), 切换 Offboard
+[INFO] [1791278587.442207136] [mission_state_machine]: [StandaloneBridge] 请求 Offboard 模式
+[INFO] [1791278587.490928032] [mission_state_machine]: TAKEOFF: PX4 已确认 Offboard, 开始爬升
+[INFO] [1791278587.491701024] [mission_state_machine]: [PX4] takeoff → NED(0.0, 0.0, -4.712426602840424)
+[INFO] [1791278771.440910700] [mission_state_machine]: TAKEOFF: alt_error=2.48m stable=0 armed=True
+[INFO] [1791278771.490839852] [mission_state_machine]: TAKEOFF: alt_error=2.43m stable=0 armed=True
+[INFO] [1791278771.540879596] [mission_state_machine]: TAKEOFF: alt_error=2.37m stable=0 armed=True
+[INFO] [1791278771.590820428] [mission_state_machine]: TAKEOFF: alt_error=2.32m stable=0 armed=True
+[INFO] [1791278771.641399436] [mission_state_machine]: TAKEOFF: alt_error=2.26m stable=0 armed=True
+[INFO] [1791278771.691024556] [mission_state_machine]: TAKEOFF: alt_error=2.20m stable=0 armed=True
+[INFO] [1791278771.741037612] [mission_state_machine]: TAKEOFF: alt_error=2.14m stable=0 armed=True
+[INFO] [1791278771.790904588] [mission_state_machine]: TAKEOFF: alt_error=2.09m stable=0 armed=True
+[INFO] [1791278771.840992108] [mission_state_machine]: TAKEOFF: alt_error=2.03m stable=0 armed=True
+[INFO] [1791278771.891211756] [mission_state_machine]: TAKEOFF: alt_error=1.97m stable=0 armed=True
+[INFO] [1791278771.940751468] [mission_state_machine]: TAKEOFF: alt_error=1.91m stable=0 armed=True
+[INFO] [1791278771.991209548] [mission_state_machine]: TAKEOFF: alt_error=1.85m stable=0 armed=True
+[INFO] [1791278772.041034124] [mission_state_machine]: TAKEOFF: alt_error=1.80m stable=0 armed=True
+[INFO] [1791278772.091127372] [mission_state_machine]: TAKEOFF: alt_error=1.74m stable=0 armed=True
+[INFO] [1791278772.140919020] [mission_state_machine]: TAKEOFF: alt_error=1.68m stable=0 armed=True
+[INFO] [1791278772.190844812] [mission_state_machine]: TAKEOFF: alt_error=1.62m stable=0 armed=True
+[INFO] [1791278772.240873036] [mission_state_machine]: TAKEOFF: alt_error=1.56m stable=0 armed=True
+[INFO] [1791278772.291168844] [mission_state_machine]: TAKEOFF: alt_error=1.50m stable=0 armed=True
+[INFO] [1791278772.340878412] [mission_state_machine]: TAKEOFF: alt_error=1.44m stable=0 armed=True
+[INFO] [1791278772.390864428] [mission_state_machine]: TAKEOFF: alt_error=1.37m stable=0 armed=True
+[INFO] [1791278775.540963244] [mission_state_machine]: TAKEOFF: 到达巡航高度 5.0m
+[INFO] [1791278775.542397292] [mission_state_machine]: [EVENT #6] state_transition: {'from': 'TAKEOFF', 'to': 'TRANSIT_TO_DROP_ZONE', 'reason': '起飞完成'}
+[INFO] [1791278775.543797580] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: 飞向 World(26.9, -18.2, 5.0) → CYLINDER_SEARCH
+[INFO] [1791278775.544672812] [mission_state_machine]: [EVENT #7] state_transition: {'from': 'TRANSIT_TO_DROP_ZONE', 'to': 'TRANSIT_TO_DROP_ZONE', 'reason': '飞向 (26.9,-18.2)'}
+[INFO] [1791278775.545462092] [mission_state_machine]: [FSM] TAKEOFF → TRANSIT_TO_DROP_ZONE
+[INFO] [1791278780.590868364] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=18.58m tol=0.5m
+[INFO] [1791278780.640830060] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=18.41m tol=0.5m
+[INFO] [1791278780.690880396] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=18.24m tol=0.5m
+[INFO] [1791278780.741015884] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=18.07m tol=0.5m
+[INFO] [1791278785.590979020] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=3.43m tol=0.5m
+[INFO] [1791278785.641074764] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=3.26m tol=0.5m
+[INFO] [1791278785.690767116] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=3.09m tol=0.5m
+[INFO] [1791278785.741841548] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: dist=2.92m tol=0.5m
+[INFO] [1791278786.542800236] [mission_state_machine]: TRANSIT_TO_DROP_ZONE: 到达目标区域 → CYLINDER_SEARCH
+[INFO] [1791278786.545193996] [mission_state_machine]: [EVENT #8] state_transition: {'from': 'TRANSIT_TO_DROP_ZONE', 'to': 'CYLINDER_SEARCH', 'reason': '过渡完成'}
+[INFO] [1791278786.546889004] [mission_state_machine]: [EVENT #9] state_transition: {'from': 'TRANSIT_TO_DROP_ZONE', 'to': 'CYL_SEARCH', 'reason': '开始搜索圆筒'}
+[INFO] [1791278786.550768844] [mission_state_machine]: CYL_SEARCH: 投放区中心 NED(-18.2, 26.9, -5.3)
+[INFO] [1791278786.552201548] [mission_state_machine]: [FSM] TRANSIT_TO_DROP_ZONE → CYLINDER_SEARCH
+[INFO] [1791278796.592602316] [mission_state_machine]: CYL_SEARCH: 启动慢速扫描
+[ERROR] [1791278802.690986508] [mission_state_machine]: 任务等待人工接管: PX4 left Offboard
+[INFO] [1791278802.692404908] [mission_state_machine]: [EVENT #10] state_transition: {'from': 'CYL_SEARCH', 'to': 'SELECT_TARGET', 'reason': '搜索完成, 累计 7 个投放候选'}
+[INFO] [1791278802.693278380] [mission_state_machine]: [FSM] CYLINDER_SEARCH → HOLD_FOR_TAKEOVER
+[INFO] [1791278802.741868524] [mission_state_machine]: ============================================================
+[INFO] [1791278802.743344332] [mission_state_machine]:   任务失败
+[INFO] [1791278802.744486156] [mission_state_machine]:   投放: 0/0
+[INFO] [1791278802.745550412] [mission_state_machine]:   侦察覆盖: 0.0%
+[INFO] [1791278802.746290220] [mission_state_machine]: ============================================================
+[INFO] [1791278802.748056236] [mission_state_machine]: [EVENT #11] mission_end: {'success': False, 'layout_heading_deg': 124.0, 'strategy': 'quick', 'drops_completed': 0, 'drops_total': 0, 'coverage_ratio': 0.0, 'final_state': 'HOLD_FOR_TAKEOVER', 'mission_id': 2, 'total_duration_s': 219.15934085845947, 'event_count': 10, 'timestamp_iso': '2026-10-06T17:26:42.746372'}
+[INFO] [1791278802.749357772] [mission_state_machine]: [FSM] HOLD_FOR_TAKEOVER → COMPLETE
