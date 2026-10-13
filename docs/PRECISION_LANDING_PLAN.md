@@ -14,9 +14,9 @@
 | 分支 | `Optimization`（开发机工作分支；`jetson` 是真机权威分支，**禁改**） |
 | 调研底稿 | `docs/PRECISION_LANDING_AUTHORITY.md` —— 两批调研 + §5 逐条差距表 + §7 分阶段方案 |
 | 测试命令 | 见 §6（**四套分开跑**，合跑会因同名 `test_copyright.py` 收集冲突） |
-| 基线 | mission **273 通过 / 2 失败**，utils **104 / 2**，bringup **86 / 2**，vision **87 / 2** |
+| 基线 | mission **276 通过 / 2 失败**，utils **114 / 2**，bringup **86 / 2**，vision **87 / 2** |
 | 失败说明 | 四套的 2 条失败**全是既有 lint**（`install/`、`build/` 下 rosidl 生成代码），不是回归 |
-| 本次会话产出 | 19 个提交（18 已推送 + B2 待推送，见 §1） |
+| 本次会话产出 | 21 个提交（全部已推送，见 §1） |
 
 **开工前必读的三条项目约定**（都已写进各提交信息，此处是索引）：
 1. **不改 `build/`、`install/`**；`src/drone_mission/{build,install}` 是幽灵树。
@@ -47,6 +47,7 @@
 | 几何 | 机体几何独立成 `airframe_params_{real,sitl}.yaml`（与主任务无关的独立任务） | `75b2bb9` | L1 |
 | 几何-fix | 像素→米漏掉**相机安装高度**（近地放大 17%–57%） | `0cc243e` | L1 |
 | B1 | **full 任务接入** airframe 几何 | `1b4fe6c` | L1 |
+| **P0** | **时间对齐**：观测改用**采集时刻**的载机位姿（新增 `pose_history`，FSM 每 tick 采样 + `pose_at`） | `bc15985` | L1 |
 
 **量化收益（仿真，非真机）**：目标位置估计误差在 8px 抖动 / 2.5m / 12 帧下
 **单帧锁存 6.38cm（σ3.15）→ 滤波后 2.09cm（σ1.11）**。⚠️ 这是**锁存点**误差，不是落点精度。
@@ -57,7 +58,6 @@
 
 | 优先级 | 事项 | 为什么 | 前置条件 | 验证级别 |
 |---|---|---|---|---|
-| **P0** | **时间对齐**：观测用**采集时刻**的位姿，而不是处理时刻 | 3–5Hz 下 τ≈0.2–0.33s、横移 0.25m/s ⇒ **每帧 5–8cm**；姿态还在动时用当前姿态解析旧帧会引入随航向变化的固定方向偏差（8/5 那类）；B2 打开后观测偏差还会污染门判决 | 无（视觉侧已有 `capture_pose.interpolate_pose` 可参考；FSM 需一小段位姿历史） | L1 |
 | P1 | B2 门限标定 → 打开 `landing_servo_estimator_gate_enable` | 这是**唯一**直接堵 8/8 低空追误检的机制；机制已就位，只差标定 | 真机/SITL 实测探测器抖动（`meas_unc_tan2`）与丢帧分布（`acc_psd`） | L4 |
 | P1 | 剩余 5 个"YAML 里有、代码里没有"的参数定性 | 地勤改了不起作用是误导 | 逐个判"接线还是删除"；删除要同时改 4 个 profile 与 profile 契约测试 | L0/L1 |
 | P2 | `landing_blind_align_tolerance_px` 删除 | 已判定**不宜接线**（与死区职责重叠，死区>30px 时会阻止进盲降→近地悬停）；应删而非接 | 需同步 profile 契约测试的键集合 | L1 |
@@ -152,3 +152,10 @@ python3 -m pytest src/drone_vision/test/  -q     #  87 通过 / 2 失败
   但其它站点正常。推送失败时先 `git log origin/Optimization..HEAD` 看有没有欠账。
 - **时钟域**：全仓无 `use_sim_time`，ROS 时钟 == 系统时钟。这一巧合是当前一切时间戳比较
   成立的前提（一旦启用 sim time 或跨机器部署，现有的 `0 < stamp <= now` 会静默失效）。
+- **给状态加"每 tick 都要调"的方法时**：`test_operator_takeover_contract.py` 用
+  `object.__new__(MissionFSM)` 并直接调 `_control_loop_impl`，所以新增的每-tick 调用
+  要么加进那个 double，要么放在**外层** `_control_loop`（重入防护之后）——本次选了后者，
+  顺带也更正确（被跳过的 tick 不该采样）。
+- **逐轴判据的陷阱**：图像 u 方向跳变只影响估计器的 east 轴，用 north 的
+  `reject_streak` 判"本帧可否采信"会把误检放行。判据必须用**组合判决**
+  （`last_observation_usable` / `last_observation_accepted`）。
