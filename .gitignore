@@ -1,6 +1,7 @@
 # Build artifacts
 build/
 install/
+graphify-out/
 
 # Logs
 log/
@@ -29,6 +30,8 @@ cv_trainer/
 
 # Files
 docs/superpowers/
+# 本地个人材料
+docs/Growth/
 
 src/drone_servo/
 
