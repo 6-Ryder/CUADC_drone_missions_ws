@@ -16,7 +16,6 @@ quick_llogs/
 __pycache__/
 *.py[cod]
 *.egg-info/
-tools/
 cv_trainer/
 # Compiled extensions
 *.o
