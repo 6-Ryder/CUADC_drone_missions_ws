@@ -16,7 +16,7 @@
 
 | | |
 |---|---|
-| **规模** | 33,000 行 Python(其中 12,000 行测试)· 10 个 ROS 2 包 · 510 个测试函数 |
+| **规模** | 33,000 行 Python(其中 13,000 行测试)· 10 个 ROS 2 包 · 510 个测试函数 |
 | **技术栈** | ROS 2 Humble · PX4 1.17 Offboard · ONNX Runtime / TensorRT · Gazebo Harmonic |
 | **真机平台** | Jetson Orin Nano · CUAV 7-Nano · USB 相机 · PWM 舵机(MAIN5) |
 | **飞行经历** | 12 个飞行日的完整日志目录(2026-07-28 – 08-15)+ 9 / 10 月多次复飞;ULog 全程留档(未入库,按需提供) |
@@ -151,8 +151,16 @@ PX4 `landing_target_estimator` 与 VTE、PX4 `navigator/precland`、ArduPilot `A
 数月的前提数字"视觉 3–5 Hz / τ 0.2–0.33 s"在真机实测下是 **10.5 Hz / τ 95 ms**,
 且日志里的 `FPS` 字段其实是**单帧耗时的倒数**、不是帧率。已在 20 处注释与文档中修正。
 
-**CI**。GitHub Actions + `ros-tooling/action-ros-ci`,Ubuntu 22.04 / ROS 2 Humble,
-构建 8 个包并跑全部测试。
+**CI:一条从未通过过的流水线**。2026-07-15 接入 GitHub Actions +
+`ros-tooling/action-ros-ci`(Ubuntu 22.04 / ROS 2 Humble),10 次运行**全部失败**,
+2026-10-14 移除。调查结论是问题从不在构建:9 个包全部构建成功(含 `px4_msgs`),
+失败全在测试阶段 —— `test_flake8` 在 CI 中扫到了构建目录,报 1039 条违规,而手写
+源码实测仅 19 条;`test_pep257` 的 760 条中 369 条是"缺 docstring",属风格约定而非
+缺陷;另有 4 个包的收集错误在本地同款 `colcon test` 下无法复现。
+
+**一条永远红的门禁,和一条永远绿的门禁一样不传递信息** —— 这与上面"健康信号全绿"
+的三个案例互为镜像:那些是假阴性,这条是假阳性。若日后重建,应以"只跑真实测试"为
+最小集合,不含 ament 样板 lint。历史运行记录保留在 GitHub Actions 页。
 
 ---
 
@@ -197,6 +205,9 @@ python3 -m pytest -q src/drone_mission/test src/drone_vision/test src/px4_contro
 | `drone_servo2` | C++ 多位置投放控制(SITL Mock / 真机 PX4 执行器) |
 | `drone_utils` | 场地坐标系、位姿历史、降落估计器、看门狗、参数加载 |
 | `drone_bringup` | SITL / 真机 × 主任务 / 快速策略的启动组合 |
+| `drone_servo` | 投放控制器的 Python 参考实现(镜像自 C++,实际部署用 `drone_servo2`) |
+| `test_mission` | 分阶段真机实飞测试脚本 |
+| `px4_msgs` | PX4 uORB 消息的 ROS 2 定义(vendored 上游代码,非本项目) |
 
 **文档地图**(按阅读顺序建议):
 
@@ -212,11 +223,11 @@ python3 -m pytest -q src/drone_mission/test src/drone_vision/test src/px4_contro
   实时性是靠参数调稳的,不是靠架构保证的。
 - 场地坐标目前挂在 PX4 局部 NED 原点(= EKF 初始化点)上,而 EKF 原点在**上电**时锁存。
   飞机上电后才被搬上起飞点,会整体平移投放区且不报错 —— 这是一个已定位、待修的设计缺陷。
-- 未上 CI 的部分:没有自动化 SITL 回归。每次改动的验证成本目前仍是一次实飞。
+- **无自动化回归**:CI 已移除(见上),SITL 回归也未建立。每次改动的验证成本目前仍是一次实飞。
 
 ## 关于
 
-作者:单人开发(仓库 245 次提交中 241 次)。真机使用 `jetson` 分支作为部署基线,
+作者:单人开发(仓库 249 次提交中 245 次)。真机使用 `jetson` 分支作为部署基线,
 `Optimization` 为开发分支,`scripts/check_jetson_sync.sh` 防止两条线漂移。
 
 > 详细的失败模式分类、证据链与修复状态见 **[docs/FAILURE_MODES.md](docs/FAILURE_MODES.md)**。

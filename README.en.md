@@ -19,7 +19,7 @@ which says more about this project than this file does.
 
 | | |
 |---|---|
-| **Size** | 33,000 lines of Python (12,000 of them tests) · 10 ROS 2 packages · 510 test functions |
+| **Size** | 33,000 lines of Python (13,000 of them tests) · 10 ROS 2 packages · 510 test functions |
 | **Stack** | ROS 2 Humble · PX4 1.17 Offboard · ONNX Runtime / TensorRT · Gazebo Harmonic |
 | **Vehicle** | Jetson Orin Nano · CUAV 7-Nano · USB camera · PWM servo (MAIN5) |
 | **Flight record** | 12 full days of flight logs (2026-07-28 – 08-15) plus further sorties in Sep/Oct; every ULog archived (not committed — available on request) |
@@ -184,8 +184,19 @@ the same time, a premise that had been cited for months — "vision runs at 3–
 to be the *reciprocal of a single frame's duration*, not a frame rate. Corrected in 20 places
 across comments and docs.
 
-**CI.** GitHub Actions + `ros-tooling/action-ros-ci`, Ubuntu 22.04 / ROS 2 Humble, building
-8 packages and running the full test suite.
+**CI: a pipeline that never once passed.** GitHub Actions + `ros-tooling/action-ros-ci`
+(Ubuntu 22.04 / ROS 2 Humble) went in on 2026-07-15 and came out on 2026-10-14, with
+**all 10 runs failing**. The investigation's conclusion: the build was never the problem —
+all 9 packages built cleanly, `px4_msgs` included. Every failure was in the test phase:
+`test_flake8` scans the build directory under CI and reported 1039 violations where the
+handwritten source measures 19; 369 of `test_pep257`'s 760 are "missing docstring", a style
+convention rather than a defect; and a collection error in 4 packages would not reproduce
+under the same `colcon test` locally.
+
+**A gate that is always red carries exactly as much information as one that is always
+green** — the mirror image of the "all health signals green" cases above: those were false
+negatives, this was a false positive. If it is ever rebuilt, the minimal set should be real
+tests only, without the ament boilerplate lint. Run history remains on the Actions page.
 
 ---
 
@@ -232,6 +243,9 @@ branch commit and a rebuild. Two sorties failed to take off because of stale par
 | `drone_servo2` | C++ multi-position drop control (SITL mock / real PX4 actuator) |
 | `drone_utils` | Field coordinate frames, pose history, landing estimator, watchdog, config loading |
 | `drone_bringup` | SITL / real × main / quick launch combinations |
+| `drone_servo` | Python reference implementation of the drop controller (mirrored from the C++; `drone_servo2` is what deploys) |
+| `test_mission` | Staged real-flight test scripts |
+| `px4_msgs` | ROS 2 definitions of the PX4 uORB messages (vendored upstream, not this project's code) |
 
 **Documentation map** (suggested reading order):
 
@@ -252,12 +266,12 @@ branch commit and a rebuild. Two sorties failed to take off because of stale par
   initialisation point), and the EKF origin latches at **power-on**. Since the aircraft is
   powered up and then carried to the takeoff point, this shifts the entire drop zone — with no
   error reported. A located, unfixed design defect.
-- Not in CI: there is no automated SITL regression. The cost of validating a change is still
-  one real flight.
+- **No automated regression**: CI is gone (see above) and there is no SITL regression either.
+  The cost of validating a change is still one real flight.
 
 ## About
 
-Single-author project (241 of the repository's 245 commits). Real hardware uses the `jetson`
+Single-author project (245 of the repository's 249 commits). Real hardware uses the `jetson`
 branch as the deployment baseline and `Optimization` as the development branch, with
 `scripts/check_jetson_sync.sh` preventing the two from drifting.
 
