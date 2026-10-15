@@ -17,5 +17,6 @@
         "/home/ryder/drone_tasks_ws/src/drone_bringup"
     ],
     "github.copilot.chat.codeGeneration.useInstructionFiles": true,
-    "git.detectSubmodules": false
+    "git.detectSubmodules": false,
+    "cmake.sourceDirectory": "/home/ryder/drone_tasks_ws/src/drone_interfaces"
 }
