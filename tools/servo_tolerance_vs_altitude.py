@@ -351,9 +351,9 @@ def analyse(records: List[Dict], tol_px: float, fx: float,
 
 def plot(verdict: Dict, out_png: str, log_name: str) -> bool:
     try:
-        import matplotlib
+        import matplotlib  # pyright: ignore[reportMissingImports]
         matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt  # pyright: ignore[reportMissingImports]
     except Exception:
         return False
 

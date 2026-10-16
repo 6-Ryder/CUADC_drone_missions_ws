@@ -34,6 +34,7 @@ docs/superpowers/
 docs/Growth/
 
 src/drone_servo/
+tools/
 
 # TensorRT 引擎: 硬件/版本绑定, 仅 jetson 真机分支跟踪; 开发机用 .onnx
 *.engine
