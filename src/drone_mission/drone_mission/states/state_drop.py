@@ -976,6 +976,14 @@ class DropState:
         if self._precision_enabled():
             status = self._precision_aligner.last_status
             stable_frames = int(self._fsm.get_param("precision_align_stable_frames", 4))
+            # 诊断用高度. 像素判据的米制等效是 tol_px * Z / fx, 日志里没有 Z 就
+            # 无法离线判断"是判据在这个高度太紧, 还是像素误差本身下不去" ——
+            # tools/servo_tolerance_vs_altitude.py 依赖本字段.
+            # 用 bridge 的当前位姿而非 status.altitude_m: 后者在丢帧路径
+            # (precision_align_controller.py:291 的构造点) 未赋值, 会记成 0.0
+            # 并污染分析. get_current_position 是零拷贝缓存读, 无额外开销.
+            altitude = float(self._fsm.fc.ned_to_altitude(
+                self._fsm.bridge.get_current_position().down))
             centered = status.release_ready and status.stable_count >= stable_frames
             if centered:
                 # 对心一旦满足即锁存宽限窗口: 投放确认期短暂丢帧/像素超标
@@ -990,6 +998,7 @@ class DropState:
                 self._warn_descend_throttled(
                     "DESCEND: 对心宽限期内保持投放许可 "
                     f"raw={status.pixel_error:.1f}px "
+                    f"alt={altitude:.2f}m "
                     f"stable={status.stable_count}/{stable_frames} "
                     f"ready={status.release_ready}"
                 )
@@ -997,6 +1006,7 @@ class DropState:
             self._warn_descend_throttled(
                 "DESCEND: 精校投放许可失败 "
                 f"source={status.source} raw={status.pixel_error:.1f}px "
+                f"alt={altitude:.2f}m "
                 f"smooth_px={status.smooth_pixel_error:.1f}px "
                 f"smooth=({status.smooth_dx_norm:+.4f},{status.smooth_dy_norm:+.4f}) "
                 f"stable={status.stable_count}/{stable_frames} "
@@ -1007,9 +1017,12 @@ class DropState:
         centered = self._visual_aligner.is_centered()
         if not centered:
             status = self._visual_aligner.last_status
+            altitude = float(self._fsm.fc.ned_to_altitude(
+                self._fsm.bridge.get_current_position().down))
             self._warn_descend_throttled(
                 "DESCEND: 投放许可失败 "
                 f"source={status.source} pixel_error={status.pixel_error:.1f}px "
+                f"alt={altitude:.2f}m "
                 f"stable={status.stable_count}"
             )
         return centered
