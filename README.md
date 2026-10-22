@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="docs/assets/cuadc-2026-east-first-prize.jpg" alt="CUADC 2026 获奖证书" width="520">
+</p>
+
+<p align="center"><sub>中国大学生飞行器设计创新大赛 · 东部赛区 · 多旋翼无人机侦察与救援 · 一等奖</sub></p>
+
 # 无人机自主任务系统
 
 一个基于 **ROS 2 + PX4 Offboard** 的全自主多旋翼任务系统:单机完成两次精准投放、
